@@ -75,7 +75,13 @@ pnpm dev                     # http://localhost:3000
 
 ## Supabase Auth 配置清单
 
-登录方式为**邮箱认证**（Magic Link + 6 位验证码，同一封邮件里两种都给，点链接或填验证码都能进）。
+登录方式：
+
+- **已注册** → 邮箱 + 密码直接登录，不发邮件
+- **没注册过** → 注册时先收一封验证码验证邮箱，验完当场设密码，之后都用密码登录
+- **忘记密码** → 走同一条验证码通道重设
+
+也就是说**邮件只在注册和重设密码时发**，日常登录不依赖邮件送达。
 
 ### 1. 为什么必须配自建 SMTP
 
@@ -173,6 +179,7 @@ https://*.vercel.app/**
 | Email provider | 开启 |
 | Email OTP Expiration | `900`（15 分钟）|
 | OTP 长度 | `6` 位（与登录页「6 位数字」一致）|
+| 密码最小长度 | `8` 位（与登录页一致）|
 | 两封邮件最小间隔 | `60` 秒（与登录页 60 秒重发冷却一致）|
 | Custom SMTP | `smtp.resend.com:465`，发件人 `noreply@mail.proofly.top` |
 | 发信频率上限 | `30` 封 / 小时 |
@@ -222,7 +229,7 @@ Git push 到 `main` 会自动触发生产部署；其他分支为 Preview 部署
 ```
 src/
   app/
-    (auth)/login/          登录页（邮箱认证：发信态 / 验证码态）
+    (auth)/login/          登录页（登录 / 注册 / 重设密码）
     auth/callback/route.ts Magic Link code 交换
     (app)/                 应用外壳内的九个页面
     design-check/          设计令牌校验页（临时，Step 1 结束删除）
