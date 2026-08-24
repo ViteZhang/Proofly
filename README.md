@@ -127,15 +127,15 @@ Dashboard → **Authentication** → **Emails** → **SMTP Settings** → 打开
 接着两处也要改：
 
 - **Authentication → Rate Limits** → *Rate limit for sending emails*：接自建 SMTP 后 Supabase 仍会先卡在 **30 封 / 小时**，按需调高。
-- **Authentication → Email Templates** → 在 **Magic Link** 和 **Confirm signup** 两个模板里都加上 `{{ .Token }}`，验证码那条路径才有码可填。例如：
+- **Authentication → Email Templates** → 邮件正文用 `supabase/email-templates/magic-link.html`。
+  同一份内容要贴到 **Magic Link** 和 **Confirm signup** 两个模板里（老用户走前者，新邮箱首次登录走后者），
+  两个 Subject 都填 `登录 Proofly`。
 
-  ```html
-  <p><a href="{{ .ConfirmationURL }}">点这里登录 Proofly</a></p>
-  <p>或者填这个验证码：<strong>{{ .Token }}</strong></p>
-  <p>15 分钟内有效。</p>
-  ```
+  模板里用到两个变量：`{{ .ConfirmationURL }}`（登录链接）和 `{{ .Token }}`（6 位验证码），
+  一封邮件同时给出两条路径 —— 链接在别的设备打开、或被邮件安全扫描提前点掉时，验证码是兜底。
 
-  两个模板都要改的原因：老用户走 Magic Link 模板，新邮箱首次登录走 Confirm signup 模板。
+  > 邮件客户端普遍不支持 class / flex / grid，所以模板是 `table` 布局 + 全内联样式，且不引用任何外部图片
+  > （品牌头用文字加绿色对勾，避免客户端默认屏蔽图片时露出空白）。改样式时请保持这两条约束。
 
 | 项 | 位置 | 值 |
 |---|---|---|
@@ -162,9 +162,9 @@ https://*.vercel.app/**
 >   https://api.supabase.com/v1/projects/vsbwlxxrjwgkhsdxdxgl/config/auth
 > ```
 
-### 4. 当前已生效 / 仍待办
+### 4. 当前已生效的配置
 
-已通过 Management API 写入（无需再动）：
+以下均已写入项目（无需再动）：
 
 | 项 | 值 |
 |---|---|
@@ -174,16 +174,14 @@ https://*.vercel.app/**
 | Email OTP Expiration | `900`（15 分钟）|
 | OTP 长度 | `6` 位（与登录页「6 位数字」一致）|
 | 两封邮件最小间隔 | `60` 秒（与登录页 60 秒重发冷却一致）|
+| Custom SMTP | `smtp.resend.com:465`，发件人 `noreply@mail.proofly.top` |
+| 发信频率上限 | `30` 封 / 小时 |
+| 邮件模板 | Magic Link 与 Confirm signup 均已写入 `supabase/email-templates/magic-link.html` |
+| 邮件主题 | `登录 Proofly` |
 
-仍需你手动完成（都依赖 Resend 凭据，我这边没有）：
-
-1. Resend 验证域名 + 拿 API Key（第 2 节）
-2. Supabase 填 Custom SMTP（第 3 节）
-3. **配完 SMTP 之后**再改邮件模板加 `{{ .Token }}` —— 免费版在接自建 SMTP 之前**模板是锁死的**，
-   API 会直接报 `Email template modification is not available for free tier projects using the default email provider`。
-   所以顺序必须是：先 SMTP，后模板。
-
-> 模板没加 `{{ .Token }}` 之前，验证码那条路径不可用，但**点邮件里的链接登录照常可用**——两条路径互不影响。
+> **顺序有讲究**：免费版在接上自建 SMTP *之前*，邮件模板是锁死的，API 会直接报
+> `Email template modification is not available for free tier projects using the default email provider`。
+> 所以必须先配 SMTP，再改模板。本项目两步都已完成。
 
 > ⚠️ **Resend 免费版只能验证 1 个域名**（3,000 封/月、100 封/天）。如果你的 Resend 账号已经把这个名额给了别的项目，三选一：把 `proofly.top` 换上去、升级 Pro（10 个域名）、或者另开一个 Resend 账号。
 
@@ -238,7 +236,9 @@ src/
     nav.ts                 导航结构 + 全局/方向判定
   types/database.ts        Supabase 数据库类型
   proxy.ts                 session 刷新 + 登录重定向（Next 16 proxy 约定）
-supabase/                  01~04 SQL
+supabase/
+  01~04*.sql               建库脚本
+  email-templates/         登录邮件模板（贴到 Supabase Email Templates）
 ```
 
 > `src/app/design-check/` 是临时视觉校验页，**Step 1 结束时删除**。

@@ -1,0 +1,73 @@
+<!-- Proofly 登录邮件 · Supabase「Magic Link」与「Confirm signup」共用
+     邮件客户端只认内联样式 + table 布局，故不使用 class / flex / grid。
+     变量：{{ .ConfirmationURL }} 登录链接 · {{ .Token }} 6 位验证码 -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="background:#f6f7fa;padding:32px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="max-width:420px;background:#ffffff;border:1px solid #e6e8ee;border-radius:14px;">
+        <tr>
+          <td style="padding:32px 32px 0 32px;">
+
+            <!-- 品牌 -->
+            <div style="font-size:20px;font-weight:600;color:#0c0e14;letter-spacing:-0.01em;">
+              Proofly<span style="color:#0fc08a;">&nbsp;✓</span>
+            </div>
+            <div style="margin-top:4px;font-size:13px;color:#8a91a3;">
+              让你的经历真正产生价值
+            </div>
+
+            <!-- 主标题 -->
+            <div style="margin-top:28px;font-size:17px;font-weight:600;color:#0c0e14;">
+              登录 Proofly
+            </div>
+            <div style="margin-top:8px;font-size:14px;line-height:1.7;color:#5b6273;">
+              点下面的按钮直接登录。
+            </div>
+
+            <!-- 主按钮 -->
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;">
+              <tr>
+                <td style="background:#0c0e14;border-radius:10px;">
+                  <a href="{{ .ConfirmationURL }}"
+                     style="display:inline-block;padding:12px 28px;font-size:14px;font-weight:500;color:#ffffff;text-decoration:none;">
+                    登录 Proofly
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <!-- 分隔 -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;">
+              <tr>
+                <td style="border-top:1px solid #e6e8ee;font-size:0;line-height:0;">&nbsp;</td>
+              </tr>
+            </table>
+
+            <!-- 验证码 -->
+            <div style="margin-top:24px;font-size:14px;color:#5b6273;">
+              按钮打不开？回到登录页填这个验证码：
+            </div>
+            <div style="margin-top:12px;background:#e4f8f0;border:1px solid #6fdcb8;border-radius:10px;padding:14px 0;text-align:center;">
+              <span style="font-size:26px;font-weight:600;letter-spacing:8px;color:#0c0e14;">{{ .Token }}</span>
+            </div>
+
+            <div style="margin-top:20px;font-size:13px;line-height:1.7;color:#8a91a3;">
+              链接和验证码都是 15 分钟内有效，只能用一次。<br>
+              不是你本人操作的话，忽略这封邮件就好，账号不会有任何变化。
+            </div>
+
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 28px 32px;">
+            <div style="border-top:1px solid #f0f2f6;padding-top:16px;font-size:12px;color:#8a91a3;">
+              Proofly · 让你的经历真正产生价值
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
