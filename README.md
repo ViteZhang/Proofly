@@ -145,10 +145,10 @@ src/
     auth/callback/route.ts 邮箱确认链接 code 交换（开启 Confirm email 时用）
     (app)/                 应用外壳内的九个页面
     design-check/          设计令牌校验页（临时，Step 1 结束删除）
-    icon.svg               站点图标（P + 证明绿对勾）
+    icon.png               站点图标（从品牌字标裁出的 P 标记）
     globals.css            设计令牌（§5）+ Tailwind v4 @theme
   components/
-    layout/                Sidebar · Topbar · Logo
+    layout/                Sidebar · Topbar · Logo（字标两个色版）
     ui/Button.tsx          按钮四形态
   lib/
     supabase/              client · server · middleware(session)

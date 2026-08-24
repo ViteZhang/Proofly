@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { NAV_GROUPS } from "@/lib/nav";
-import { LogoMark } from "@/components/layout/Logo";
+import { LogoWordmark } from "@/components/layout/Logo";
 import { createClient } from "@/lib/supabase/client";
 
 export function Sidebar({ email }: { email: string }) {
@@ -31,10 +31,8 @@ export function Sidebar({ email }: { email: string }) {
     >
       {/* Logo + slogan */}
       <div className="px-4 pb-4 pt-5">
-        <div className="flex items-center gap-2 text-white">
-          <LogoMark size={22} />
-          <span className="font-display text-[18px] font-semibold">Proofly</span>
-        </div>
+        <LogoWordmark tone="white" height={22} priority />
+
         <div className="mt-1 text-[11.5px]" style={{ color: "rgba(255,255,255,0.5)" }}>
           让你的经历真正产生价值
         </div>

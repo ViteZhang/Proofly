@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
-import { LogoMark } from "@/components/layout/Logo";
+import { LogoWordmark } from "@/components/layout/Logo";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD = 6;
@@ -80,11 +80,8 @@ export function LoginForm() {
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6">
       {/* 左上角固定 Logo */}
-      <div className="absolute left-6 top-6 flex items-center gap-2">
-        <LogoMark size={20} />
-        <span className="font-display text-[17px] font-semibold tracking-tight">
-          Proofly
-        </span>
+      <div className="absolute left-6 top-6">
+        <LogoWordmark tone="ink" height={22} />
       </div>
 
       {/* 右下角装饰：四档证明度圆点 */}
@@ -92,14 +89,9 @@ export function LoginForm() {
 
       <div className="relative z-10 w-full max-w-[400px]">
         {/* 品牌区 */}
-        <div className="mb-8 text-center">
-          <div className="mb-2 flex justify-center">
-            <LogoMark size={44} />
-          </div>
-          <div className="font-display text-[34px] font-semibold tracking-tight">
-            Proofly
-          </div>
-          <p className="mt-1 text-[14px]" style={{ color: "var(--slate)" }}>
+        <div className="mb-8 flex flex-col items-center text-center">
+          <LogoWordmark tone="ink" height={46} priority />
+          <p className="mt-3 text-[14px]" style={{ color: "var(--slate)" }}>
             让你的经历真正产生价值
           </p>
         </div>

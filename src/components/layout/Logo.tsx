@@ -1,62 +1,32 @@
-// Proofly 品牌标记：P + 证明绿对勾。P 用 currentColor（随所在文字色，
-// 深色侧栏为白、浅色页面为 ink），对勾用 --proof → --proof-mid 渐变。
+import Image from "next/image";
 
-export function LogoMark({
-  size = 24,
+// Proofly 品牌字标（含「Proofly」字样与 P 内绿色对勾）。
+// 两个色版：ink（深色字，用于浅色背景）、white（白色字，用于深色侧栏）。
+// 资源在 public/：proofly-logo-dark.png（ink）/ proofly-logo.png（white）。
+const NATURAL_W = 1400;
+const NATURAL_H = 362;
+const RATIO = NATURAL_W / NATURAL_H;
+
+export function LogoWordmark({
+  height = 24,
+  tone = "ink",
+  priority = false,
   className,
 }: {
-  size?: number;
+  height?: number;
+  tone?: "ink" | "white";
+  priority?: boolean;
   className?: string;
 }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 64 64"
+    <Image
+      src={tone === "white" ? "/proofly-logo.png" : "/proofly-logo-dark.png"}
+      alt="Proofly"
+      width={NATURAL_W}
+      height={NATURAL_H}
+      priority={priority}
       className={className}
-      aria-hidden
-      focusable="false"
-    >
-      <defs>
-        <linearGradient id="proofly-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--proof)" />
-          <stop offset="1" stopColor="var(--proof-mid)" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M22 50 L22 15 L34 15 A10 10 0 0 1 34 35 L22 35"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={4.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M23 26 L29 33 L43 17"
-        fill="none"
-        stroke="url(#proofly-grad)"
-        strokeWidth={6.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-// 标记 + 文字组合。
-export function Logo({
-  markSize = 22,
-  textClassName = "text-[18px]",
-}: {
-  markSize?: number;
-  textClassName?: string;
-}) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <LogoMark size={markSize} />
-      <span className={`font-display font-semibold tracking-tight ${textClassName}`}>
-        Proofly
-      </span>
-    </span>
+      style={{ height, width: Math.round(height * RATIO), objectFit: "contain" }}
+    />
   );
 }
