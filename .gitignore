@@ -41,3 +41,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Next.js auto-generated agent docs (disabled via agentRules:false)
+AGENTS.md
+CLAUDE.md
