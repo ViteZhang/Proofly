@@ -90,13 +90,23 @@ Supabase **内置邮件服务限速 2 封 / 小时**，且只发给项目成员�
 
    | 记录类型 | 主机记录 | 记录值 | 说明 |
    |---|---|---|---|
-   | MX | `send.mail` | Resend 给的 `feedback-smtp.<region>.amazonses.com`（优先级 10）| 退信处理 |
+   | MX | `send.mail` | `feedback-smtp.us-east-1.amazonses.com`（优先级 10）| 退信处理 |
    | TXT | `send.mail` | `v=spf1 include:amazonses.com ~all` | SPF |
    | TXT | `resend._domainkey.mail` | Resend 给的 `p=...` 长串 | DKIM |
    | TXT | `_dmarc.mail` | `v=DMARC1; p=none;` | DMARC（可选但建议）|
 
-   > **阿里云的主机记录只填前缀，不带域名**。例如 Resend 显示 `send.mail.proofly.top`，阿里云里就填 `send.mail`。
-   > 区域串（`us-east-1` 等）和 DKIM 公钥**每个域名都不一样**，一律以 Resend 面板显示的为准，别抄上表的示例值。
+   **三个必踩的坑：**
+
+   1. **主机记录只填前缀，不带域名。** Resend 显示 `send.mail.proofly.top`，阿里云里只填 `send.mail`
+      —— 右边那个 `.proofly.top` 是阿里云自动补上的。
+   2. **MX 的区域串要用 Resend 面板上的真实值**，不能填 `<region>` 这种占位符（阿里云会报
+      「MX记录的记录值为域名形式」）。Resend 只有四个区域，取决于你添加域名时选的哪个：
+      `us-east-1`（默认）、`eu-west-1`、`ap-northeast-1`、`sa-east-1`。
+      区域填错 Resend 会报 region mismatch；同一域名的所有 MX 记录必须指向同一区域。
+   3. **DKIM 公钥每个域名都不一样**，必须从 Resend 面板复制那串 `p=...`，没有通用值。
+
+   > 若保存后 MX 值被拼成了 `feedback-smtp.us-east-1.amazonses.com.proofly.top`，
+   > 在记录值末尾补一个**英文句点**（`...amazonses.com.`），告诉 DNS 这是完整域名、不要再拼。
 
 3. 回 Resend 点 **Verify**（DNS 生效通常几分钟）。
 4. **API Keys** → **Create API Key**（权限选 Sending access）→ 复制 `re_...`，**只显示一次**。
