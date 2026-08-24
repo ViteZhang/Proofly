@@ -1,52 +1,80 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { LogoMark } from "@/components/layout/Logo";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD = 6;
 
-export function LoginForm({ expired }: { expired: boolean }) {
+type Mode = "signin" | "signup";
+
+export function LoginForm() {
+  const router = useRouter();
+  const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // 注册开启了邮箱确认时，signUp 不返回 session，需提示去邮箱点确认
+  const [confirmSent, setConfirmSent] = useState(false);
 
-  // 重发冷却倒计时
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [cooldown]);
-
-  async function send(target: string) {
-    setSending(true);
-    setSendError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email: target,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-    });
-    setSending(false);
-    if (error) {
-      setSendError("没发出去，再试一次");
-      return;
-    }
-    setSent(true);
-    setCooldown(60);
+  function switchMode(next: Mode) {
+    setMode(next);
+    setFieldError(null);
+    setFormError(null);
   }
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!EMAIL_RE.test(email)) {
-      setEmailError("这个邮箱看起来不太对"); // 格式错误：不发请求
+      setFieldError("这个邮箱看起来不太对");
       return;
     }
-    setEmailError(null);
-    void send(email);
+    if (password.length < MIN_PASSWORD) {
+      setFieldError(`密码至少 ${MIN_PASSWORD} 位`);
+      return;
+    }
+    setFieldError(null);
+    setFormError(null);
+    setBusy(true);
+    const supabase = createClient();
+
+    if (mode === "signin") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      setBusy(false);
+      if (error) {
+        setFormError(mapSignInError(error.message));
+        return;
+      }
+      router.push("/");
+      router.refresh();
+      return;
+    }
+
+    // 注册
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    });
+    setBusy(false);
+    if (error) {
+      setFormError(mapSignUpError(error.message));
+      return;
+    }
+    if (data.session) {
+      // Confirm email 关闭：注册即登录
+      router.push("/");
+      router.refresh();
+      return;
+    }
+    // Confirm email 开启：等用户去邮箱确认
+    setConfirmSent(true);
   }
 
   return (
@@ -59,7 +87,7 @@ export function LoginForm({ expired }: { expired: boolean }) {
         </span>
       </div>
 
-      {/* 右下角装饰：四档证明度圆点，整体透明度 6%，不拦截交互 */}
+      {/* 右下角装饰：四档证明度圆点 */}
       <ProofDecor />
 
       <div className="relative z-10 w-full max-w-[400px]">
@@ -76,95 +104,184 @@ export function LoginForm({ expired }: { expired: boolean }) {
           </p>
         </div>
 
-        {sent ? (
-          <SentCard
-            email={email}
-            cooldown={cooldown}
-            sending={sending}
-            onResend={() => void send(email)}
-          />
+        {confirmSent ? (
+          <ConfirmCard email={email} />
         ) : (
-          <form onSubmit={onSubmit} noValidate>
-            {expired && (
-              <div
-                className="mb-4 rounded-btn px-4 py-3 text-[13px]"
-                style={{ background: "var(--warn-soft)", color: "var(--ink)" }}
+          <>
+            {/* 登录 / 注册 切换 */}
+            <div
+              className="mb-5 flex rounded-btn p-1"
+              style={{ background: "var(--line-soft)" }}
+            >
+              <TabButton
+                active={mode === "signin"}
+                onClick={() => switchMode("signin")}
               >
-                链接过期了，重新发一封吧
+                登录
+              </TabButton>
+              <TabButton
+                active={mode === "signup"}
+                onClick={() => switchMode("signup")}
+              >
+                注册
+              </TabButton>
+            </div>
+
+            <form onSubmit={onSubmit} noValidate>
+              <label
+                htmlFor="email"
+                className="mb-1.5 block text-[13px]"
+                style={{ color: "var(--slate)" }}
+              >
+                邮箱
+              </label>
+              <input
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (fieldError) setFieldError(null);
+                  if (formError) setFormError(null);
+                }}
+                aria-invalid={fieldError ? true : undefined}
+                className="h-11 w-full rounded-btn px-3.5 text-[14px] outline-none focus:outline-2 focus:outline-offset-2 focus:outline-ink"
+                style={{
+                  background: "var(--card)",
+                  border: `1px solid ${fieldError ? "var(--danger)" : "var(--line)"}`,
+                  color: "var(--ink)",
+                }}
+              />
+
+              <label
+                htmlFor="password"
+                className="mb-1.5 mt-4 block text-[13px]"
+                style={{ color: "var(--slate)" }}
+              >
+                密码
+              </label>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                  placeholder={mode === "signup" ? `至少 ${MIN_PASSWORD} 位` : "输入密码"}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (fieldError) setFieldError(null);
+                    if (formError) setFormError(null);
+                  }}
+                  className="h-11 w-full rounded-btn pl-3.5 pr-16 text-[14px] outline-none focus:outline-2 focus:outline-offset-2 focus:outline-ink"
+                  style={{
+                    background: "var(--card)",
+                    border: `1px solid ${fieldError ? "var(--danger)" : "var(--line)"}`,
+                    color: "var(--ink)",
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[12.5px]"
+                  style={{ color: "var(--mute)" }}
+                >
+                  {showPassword ? "隐藏" : "显示"}
+                </button>
               </div>
-            )}
 
-            <label
-              htmlFor="email"
-              className="mb-1.5 block text-[13px]"
-              style={{ color: "var(--slate)" }}
-            >
-              邮箱
-            </label>
-            <input
-              id="email"
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                if (emailError) setEmailError(null);
-                if (sendError) setSendError(null);
-              }}
-              aria-invalid={emailError ? true : undefined}
-              className="h-11 w-full rounded-btn px-3.5 text-[14px] outline-none focus:outline-2 focus:outline-offset-2 focus:outline-ink"
-              style={{
-                background: "var(--card)",
-                border: `1px solid ${emailError ? "var(--danger)" : "var(--line)"}`,
-                color: "var(--ink)",
-              }}
-            />
-            {emailError && (
-              <p className="mt-1.5 text-[13px]" style={{ color: "var(--danger)" }}>
-                {emailError}
+              {fieldError && (
+                <p className="mt-1.5 text-[13px]" style={{ color: "var(--danger)" }}>
+                  {fieldError}
+                </p>
+              )}
+              {formError && (
+                <p className="mt-1.5 text-[13px]" style={{ color: "var(--danger)" }}>
+                  {formError}
+                </p>
+              )}
+
+              <Button
+                type="submit"
+                size="lg"
+                className="mt-5 w-full"
+                disabled={busy}
+              >
+                {busy
+                  ? mode === "signin"
+                    ? "登录中…"
+                    : "注册中…"
+                  : mode === "signin"
+                    ? "登录"
+                    : "注册"}
+              </Button>
+
+              <p
+                className="mt-4 text-center text-[13px]"
+                style={{ color: "var(--mute)" }}
+              >
+                {mode === "signin" ? (
+                  <>
+                    还没有账号？{" "}
+                    <button
+                      type="button"
+                      onClick={() => switchMode("signup")}
+                      className="underline underline-offset-2"
+                      style={{ color: "var(--ink)" }}
+                    >
+                      去注册
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    已有账号？{" "}
+                    <button
+                      type="button"
+                      onClick={() => switchMode("signin")}
+                      className="underline underline-offset-2"
+                      style={{ color: "var(--ink)" }}
+                    >
+                      去登录
+                    </button>
+                  </>
+                )}
               </p>
-            )}
-            {sendError && (
-              <p className="mt-1.5 text-[13px]" style={{ color: "var(--danger)" }}>
-                {sendError}
-              </p>
-            )}
-
-            <Button
-              type="submit"
-              size="lg"
-              className="mt-4 w-full"
-              disabled={sending}
-            >
-              {sending ? "发送中…" : "发送登录链接"}
-            </Button>
-
-            <p
-              className="mt-4 text-center text-[13px]"
-              style={{ color: "var(--mute)" }}
-            >
-              不用记密码。我们发一封带链接的邮件，点开就进。
-            </p>
-          </form>
+            </form>
+          </>
         )}
       </div>
     </main>
   );
 }
 
-function SentCard({
-  email,
-  cooldown,
-  sending,
-  onResend,
+function TabButton({
+  active,
+  onClick,
+  children,
 }: {
-  email: string;
-  cooldown: number;
-  sending: boolean;
-  onResend: () => void;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
 }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="h-8 flex-1 rounded-btn text-[13px] font-medium transition-colors"
+      style={{
+        background: active ? "var(--card)" : "transparent",
+        color: active ? "var(--ink)" : "var(--slate)",
+        boxShadow: active ? "var(--shadow-1)" : "none",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ConfirmCard({ email }: { email: string }) {
   return (
     <div
       className="rounded-card p-5"
@@ -182,29 +299,32 @@ function SentCard({
           ✓
         </span>
         <div className="text-[14px]" style={{ color: "var(--ink)" }}>
-          链接已发到 {email}
+          确认邮件已发到 {email}
         </div>
       </div>
       <p className="mt-2 text-[13px]" style={{ color: "var(--slate)" }}>
-        15 分钟内有效。没收到就看看垃圾箱，或者重发一次。
+        点开邮件里的链接完成注册，然后回来登录。没收到就看看垃圾箱。
       </p>
-      <div className="mt-4 flex items-center gap-3">
-        <Button
-          variant="secondary"
-          size="md"
-          onClick={onResend}
-          disabled={cooldown > 0 || sending}
-        >
-          重新发送
-        </Button>
-        {cooldown > 0 && (
-          <span className="text-[13px]" style={{ color: "var(--mute)" }}>
-            {cooldown} 秒后可用
-          </span>
-        )}
-      </div>
     </div>
   );
+}
+
+// Supabase 英文报错 → 中文文案
+function mapSignInError(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes("invalid login credentials")) return "邮箱或密码不对";
+  if (m.includes("email not confirmed")) return "邮箱还没确认，先去邮件里点确认链接";
+  if (m.includes("rate limit")) return "太频繁了，等一会儿再试";
+  return "登录没成功，再试一次";
+}
+
+function mapSignUpError(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes("already registered") || m.includes("already been registered"))
+    return "这个邮箱已经注册过了，直接登录吧";
+  if (m.includes("password")) return `密码至少 ${MIN_PASSWORD} 位`;
+  if (m.includes("rate limit")) return "太频繁了，等一会儿再试";
+  return "注册没成功，再试一次";
 }
 
 // 四档证明度：实心 / 实心半透 / 粗描边 / 虚线描边
@@ -217,11 +337,8 @@ function ProofDecor() {
       style={{ opacity: 0.06 }}
     >
       <svg width={base * 2.4} height={base * 2.4} viewBox="0 0 288 288">
-        {/* 实心 */}
         <circle cx="96" cy="96" r="52" fill="var(--proof)" />
-        {/* 实心半透 */}
         <circle cx="196" cy="120" r="44" fill="var(--proof)" fillOpacity="0.5" />
-        {/* 粗描边 */}
         <circle
           cx="110"
           cy="200"
@@ -230,7 +347,6 @@ function ProofDecor() {
           stroke="var(--proof)"
           strokeWidth="6"
         />
-        {/* 虚线描边 */}
         <circle
           cx="206"
           cy="212"

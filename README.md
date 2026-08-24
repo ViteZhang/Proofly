@@ -75,14 +75,16 @@ pnpm dev                     # http://localhost:3000
 
 ## Supabase Auth 配置清单
 
-Dashboard → **Authentication**。以下为本项目所需值：
+登录方式为**邮箱 + 密码**（登录 / 注册双态）。Dashboard → **Authentication**，以下为本项目所需值：
 
 | 项 | 位置 | 值 |
 |---|---|---|
 | Email provider | Providers → Email | **开启**（已默认开启）|
-| Confirm email | Providers → Email | **关闭**（Magic Link 不需要；已默认关闭）|
+| Confirm email | Providers → Email | **关闭**（关闭后「注册即登录」，不依赖邮件到达；已默认关闭）|
 | Site URL | URL Configuration | `https://proofly.top` |
 | Redirect URLs | URL Configuration | 见下 |
+
+> 若把 Confirm email 改为**开启**：注册后不会立即登录，而是发一封确认邮件，用户点链接落到 `/auth/callback` 完成注册再登录。此时务必确保邮件能送达（默认 Supabase SMTP 到达率有限，建议自配 SMTP）。
 
 Redirect URLs（逐条加入，允许通配）：
 
@@ -98,11 +100,9 @@ https://*.vercel.app/**
 > ```bash
 > curl -X PATCH \
 >   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
->   -d '{"site_url":"https://proofly.top","uri_allow_list":"http://localhost:3000/**,https://proofly.top/**,https://*.vercel.app/**","mailer_otp_exp":900}' \
+>   -d '{"site_url":"https://proofly.top","uri_allow_list":"http://localhost:3000/**,https://proofly.top/**,https://*.vercel.app/**"}' \
 >   https://api.supabase.com/v1/projects/vsbwlxxrjwgkhsdxdxgl/config/auth
 > ```
->
-> `mailer_otp_exp=900` 让 Magic Link 有效期为 15 分钟，与登录页文案「15 分钟内有效」一致。
 
 ---
 
@@ -141,8 +141,8 @@ Git push 到 `main` 会自动触发生产部署；其他分支为 Preview 部署
 ```
 src/
   app/
-    (auth)/login/          登录页（表单态 / 已发送态）
-    auth/callback/route.ts Magic Link code 交换
+    (auth)/login/          登录页（登录 / 注册 双态，邮箱 + 密码）
+    auth/callback/route.ts 邮箱确认链接 code 交换（开启 Confirm email 时用）
     (app)/                 应用外壳内的九个页面
     design-check/          设计令牌校验页（临时，Step 1 结束删除）
     icon.svg               站点图标（P + 证明绿对勾）
