@@ -75,16 +75,65 @@ pnpm dev                     # http://localhost:3000
 
 ## Supabase Auth 配置清单
 
-登录方式为**邮箱 + 密码**（登录 / 注册双态）。Dashboard → **Authentication**，以下为本项目所需值：
+登录方式为**邮箱认证**（Magic Link + 6 位验证码，同一封邮件里两种都给，点链接或填验证码都能进）。
+
+### 1. 为什么必须配自建 SMTP
+
+Supabase **内置邮件服务限速 2 封 / 小时**，且只发给项目成员，仅供开发试用——这正是之前登录邮件收不到的原因。
+生产必须接自己的 SMTP。本项目用 **Resend**。
+
+### 2. Resend 侧
+
+1. [resend.com](https://resend.com) → **Domains** → **Add Domain**。
+   建议用子域 `mail.proofly.top` 而不是根域，把发信信誉与主域隔离（Resend 官方推荐）。
+2. Resend 会列出要加的 DNS 记录。到**阿里云云解析 DNS** → `proofly.top` → 解析设置，逐条添加：
+
+   | 记录类型 | 主机记录 | 记录值 | 说明 |
+   |---|---|---|---|
+   | MX | `send.mail` | Resend 给的 `feedback-smtp.<region>.amazonses.com`（优先级 10）| 退信处理 |
+   | TXT | `send.mail` | `v=spf1 include:amazonses.com ~all` | SPF |
+   | TXT | `resend._domainkey.mail` | Resend 给的 `p=...` 长串 | DKIM |
+   | TXT | `_dmarc.mail` | `v=DMARC1; p=none;` | DMARC（可选但建议）|
+
+   > **阿里云的主机记录只填前缀，不带域名**。例如 Resend 显示 `send.mail.proofly.top`，阿里云里就填 `send.mail`。
+   > 区域串（`us-east-1` 等）和 DKIM 公钥**每个域名都不一样**，一律以 Resend 面板显示的为准，别抄上表的示例值。
+
+3. 回 Resend 点 **Verify**（DNS 生效通常几分钟）。
+4. **API Keys** → **Create API Key**（权限选 Sending access）→ 复制 `re_...`，**只显示一次**。
+
+### 3. Supabase 侧
+
+Dashboard → **Authentication** → **Emails** → **SMTP Settings** → 打开 *Enable Custom SMTP*：
+
+| 字段 | 值 |
+|---|---|
+| Sender email | `noreply@mail.proofly.top`（必须在已验证的域名下）|
+| Sender name | `Proofly` |
+| Host | `smtp.resend.com` |
+| Port | `465`（隐式 SSL；也可用 `587` STARTTLS）|
+| Username | `resend`（**字面量，不是邮箱**）|
+| Password | 上一步的 `re_...` API Key |
+
+接着两处也要改：
+
+- **Authentication → Rate Limits** → *Rate limit for sending emails*：接自建 SMTP 后 Supabase 仍会先卡在 **30 封 / 小时**，按需调高。
+- **Authentication → Email Templates** → 在 **Magic Link** 和 **Confirm signup** 两个模板里都加上 `{{ .Token }}`，验证码那条路径才有码可填。例如：
+
+  ```html
+  <p><a href="{{ .ConfirmationURL }}">点这里登录 Proofly</a></p>
+  <p>或者填这个验证码：<strong>{{ .Token }}</strong></p>
+  <p>15 分钟内有效。</p>
+  ```
+
+  两个模板都要改的原因：老用户走 Magic Link 模板，新邮箱首次登录走 Confirm signup 模板。
 
 | 项 | 位置 | 值 |
 |---|---|---|
-| Email provider | Providers → Email | **开启**（已默认开启）|
-| Confirm email | Providers → Email | **关闭**（关闭后「注册即登录」，不依赖邮件到达；已默认关闭）|
+| Email provider | Providers → Email | **开启** |
+| Confirm email | Providers → Email | 邮箱认证下此项不影响登录 |
+| Email OTP Expiration | Providers → Email | `900`（15 分钟，与登录页文案一致）|
 | Site URL | URL Configuration | `https://proofly.top` |
 | Redirect URLs | URL Configuration | 见下 |
-
-> 若把 Confirm email 改为**开启**：注册后不会立即登录，而是发一封确认邮件，用户点链接落到 `/auth/callback` 完成注册再登录。此时务必确保邮件能送达（默认 Supabase SMTP 到达率有限，建议自配 SMTP）。
 
 Redirect URLs（逐条加入，允许通配）：
 
@@ -94,15 +143,39 @@ https://proofly.top/**
 https://*.vercel.app/**
 ```
 
-> 当前项目 Site URL 仍是 `http://localhost:3000`、Redirect URLs 为空——**需你手动补上上面两项**（Email provider 与 Confirm email 已是正确状态）。
-> 也可用 Management API 一次写入（把 `$TOKEN` 换成你的 access token）：
+> Site URL 与 Redirect URLs **已配置完成**（下表值即当前生效值）。如需重写，可用 Management API（把 `$TOKEN` 换成你的 access token）：
 >
 > ```bash
 > curl -X PATCH \
 >   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
->   -d '{"site_url":"https://proofly.top","uri_allow_list":"http://localhost:3000/**,https://proofly.top/**,https://*.vercel.app/**"}' \
+>   -d '{"site_url":"https://proofly.top","uri_allow_list":"http://localhost:3000/**,https://proofly.top/**,https://*.vercel.app/**","mailer_otp_exp":900}' \
 >   https://api.supabase.com/v1/projects/vsbwlxxrjwgkhsdxdxgl/config/auth
 > ```
+
+### 4. 当前已生效 / 仍待办
+
+已通过 Management API 写入（无需再动）：
+
+| 项 | 值 |
+|---|---|
+| Site URL | `https://proofly.top` |
+| Redirect URLs | 上面三条 |
+| Email provider | 开启 |
+| Email OTP Expiration | `900`（15 分钟）|
+| OTP 长度 | `6` 位（与登录页「6 位数字」一致）|
+| 两封邮件最小间隔 | `60` 秒（与登录页 60 秒重发冷却一致）|
+
+仍需你手动完成（都依赖 Resend 凭据，我这边没有）：
+
+1. Resend 验证域名 + 拿 API Key（第 2 节）
+2. Supabase 填 Custom SMTP（第 3 节）
+3. **配完 SMTP 之后**再改邮件模板加 `{{ .Token }}` —— 免费版在接自建 SMTP 之前**模板是锁死的**，
+   API 会直接报 `Email template modification is not available for free tier projects using the default email provider`。
+   所以顺序必须是：先 SMTP，后模板。
+
+> 模板没加 `{{ .Token }}` 之前，验证码那条路径不可用，但**点邮件里的链接登录照常可用**——两条路径互不影响。
+
+> ⚠️ **Resend 免费版只能验证 1 个域名**（3,000 封/月、100 封/天）。如果你的 Resend 账号已经把这个名额给了别的项目，三选一：把 `proofly.top` 换上去、升级 Pro（10 个域名）、或者另开一个 Resend 账号。
 
 ---
 
@@ -141,8 +214,8 @@ Git push 到 `main` 会自动触发生产部署；其他分支为 Preview 部署
 ```
 src/
   app/
-    (auth)/login/          登录页（登录 / 注册 双态，邮箱 + 密码）
-    auth/callback/route.ts 邮箱确认链接 code 交换（开启 Confirm email 时用）
+    (auth)/login/          登录页（邮箱认证：发信态 / 验证码态）
+    auth/callback/route.ts Magic Link code 交换
     (app)/                 应用外壳内的九个页面
     design-check/          设计令牌校验页（临时，Step 1 结束删除）
     icon.png               站点图标（从品牌字标裁出的 P 标记）

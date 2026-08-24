@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-// 邮箱确认链接落地（注册开启 Confirm email 时使用）：交换 code 换 session，
-// 成功后回首页；失败/过期回登录页。
+// Magic Link 落地：交换 code 换 session，成功后回首页；失败/过期回登录页给提示。
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
