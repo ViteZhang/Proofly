@@ -1,36 +1,161 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Proofly
 
-## Getting Started
+> 让你的经历真正产生价值
 
-First, run the development server:
+把散落在多份文档里的职业经历，收敛为**唯一、可溯源的事实库**；在此之上为每个求职方向、每一份 JD 生成可信的投递材料。
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+本仓库当前为 **Step 0** 交付物：可登录、可部署、数据库结构完整的空壳应用（不含任何业务功能与 AI）。
+
+---
+
+## 技术栈与依赖版本
+
+安装时已固定精确版本（不用 `^` / `latest`）。
+
+| 项 | 选择 | 版本 |
+|---|---|---|
+| 运行时 | Node.js | 22 |
+| 包管理 | pnpm | 10.33.0 |
+| 框架 | Next.js（App Router） | 16.3.2 |
+| UI 库 | React / React DOM | 19.2.8 |
+| 语言 | TypeScript（`strict`） | 5.9.3 |
+| 样式 | Tailwind CSS（v4，`@theme`） | 4.3.3 |
+| PostCSS 插件 | @tailwindcss/postcss | 4.3.3 |
+| 后端 SDK | @supabase/supabase-js | 2.112.3 |
+| SSR/Cookie | @supabase/ssr | 0.12.4 |
+| Lint | eslint / eslint-config-next | 9.39.5 / 16.3.2 |
+| 类型 | @types/node · @types/react · @types/react-dom | 20.19.43 · 19.2.18 · 19.2.5 |
+
+> Next 16 已把中间件约定 `middleware.ts` 更名为 **`proxy`**，本项目的 session 刷新与登录重定向在 `src/proxy.ts`。
+> `next.config.ts` 设 `agentRules:false`，关闭 Next 自动生成 `AGENTS.md` / `CLAUDE.md`。
+
+---
+
+## 环境变量
+
+客户端零密钥，只用 Supabase 的 publishable/anon key（受 RLS 保护，可公开）。
+**Service Role Key 不要放进本项目。**
+
+`.env.local`（本地，已 gitignore）与 Vercel 环境变量都需要：
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://vsbwlxxrjwgkhsdxdxgl.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_6nhOPw1nEWeMc0xJtdI2bA_-DJnhKwX
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+模板见 `.env.example`。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 本地启动
 
-## Learn More
+```bash
+pnpm install
+cp .env.example .env.local   # 填入上面的两个值
+pnpm dev                     # http://localhost:3000
+```
 
-To learn more about Next.js, take a look at the following resources:
+其他脚本：`pnpm build`（生产构建）、`pnpm start`（生产启动）、`pnpm lint`。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 数据库：SQL 执行顺序
 
-## Deploy on Vercel
+在 Supabase 控制台 **SQL Editor** 中，按顺序执行 `supabase/` 下四个文件：
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. `01_extensions_and_helpers.sql` — 扩展（pgcrypto、vector）+ 通用/触发器函数
+2. `02_tables.sql` — 全部 23 张表 + `task_priority` 视图 + 索引
+3. `03_triggers.sql` — `updated_at` 与派生字段（证明度 / 技能证据强度）触发器
+4. `04_rls.sql` — 23 张表 RLS + 每表 4 条策略 + 视图 `security_invoker`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+> 执行 02 时出现 `NOTICE: ivfflat index created with little data` 属正常（空表建向量索引），可忽略。
+> 类型定义在 `src/types/database.ts`（手工按 DDL 写出，Step 2 可用 `supabase gen types typescript` 重生成）。
+
+---
+
+## Supabase Auth 配置清单
+
+Dashboard → **Authentication**。以下为本项目所需值：
+
+| 项 | 位置 | 值 |
+|---|---|---|
+| Email provider | Providers → Email | **开启**（已默认开启）|
+| Confirm email | Providers → Email | **关闭**（Magic Link 不需要；已默认关闭）|
+| Site URL | URL Configuration | `https://proofly.top` |
+| Redirect URLs | URL Configuration | 见下 |
+
+Redirect URLs（逐条加入，允许通配）：
+
+```
+http://localhost:3000/**
+https://proofly.top/**
+https://*.vercel.app/**
+```
+
+> 当前项目 Site URL 仍是 `http://localhost:3000`、Redirect URLs 为空——**需你手动补上上面两项**（Email provider 与 Confirm email 已是正确状态）。
+> 也可用 Management API 一次写入（把 `$TOKEN` 换成你的 access token）：
+>
+> ```bash
+> curl -X PATCH \
+>   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+>   -d '{"site_url":"https://proofly.top","uri_allow_list":"http://localhost:3000/**,https://proofly.top/**,https://*.vercel.app/**","mailer_otp_exp":900}' \
+>   https://api.supabase.com/v1/projects/vsbwlxxrjwgkhsdxdxgl/config/auth
+> ```
+>
+> `mailer_otp_exp=900` 让 Magic Link 有效期为 15 分钟，与登录页文案「15 分钟内有效」一致。
+
+---
+
+## 部署（Vercel）
+
+1. Vercel → New Project → 导入 GitHub 仓库 `ViteZhang/Proofly`。
+2. Framework 自动识别 Next.js；Build/Install 用默认（pnpm）。
+3. **Settings → Environment Variables** 添加上面两个 `NEXT_PUBLIC_*`（Production + Preview 都加）。
+4. Deploy。首个生产域名形如 `https://proofly-xxxx.vercel.app`。
+5. 回到 Supabase，确认 Redirect URLs 已含 `https://*.vercel.app/**`（上面清单已覆盖）。
+
+Git push 到 `main` 会自动触发生产部署；其他分支为 Preview 部署。
+
+---
+
+## 绑定自有域名 proofly.top（阿里云注册）
+
+1. **Vercel** → 项目 → Settings → Domains → 添加 `proofly.top`（可再加 `www.proofly.top`）。Vercel 会给出需要配置的 DNS 记录。
+2. **阿里云** → 域名控制台 → `proofly.top` → 解析设置（云解析 DNS），添加：
+
+   | 记录类型 | 主机记录 | 记录值 |
+   |---|---|---|
+   | A | `@` | `76.76.21.21`（Vercel 的 apex IP，以 Vercel 面板显示为准）|
+   | CNAME | `www` | `cname.vercel-dns.com`（以 Vercel 面板显示为准）|
+
+3. 等待 DNS 生效（通常几分钟到几十分钟），Vercel 自动签发 SSL 证书。
+4. 域名生效后，把 Supabase 的 **Site URL** 设为 `https://proofly.top`（Redirect URLs 已含 `https://proofly.top/**`）。
+
+> 提示：Vercel 面板会显示当前该用哪条记录/IP，**以面板实际值为准**；上表为常见默认值。
+> 阿里云注册的域名解析到海外 Vercel 无需 ICP 备案即可解析；但中国大陆访问 Vercel 稳定性一般，如需大陆优化可后续再议（Step 0 不处理）。
+
+---
+
+## 目录结构（要点）
+
+```
+src/
+  app/
+    (auth)/login/          登录页（表单态 / 已发送态）
+    auth/callback/route.ts Magic Link code 交换
+    (app)/                 应用外壳内的九个页面
+    design-check/          设计令牌校验页（临时，Step 1 结束删除）
+    icon.svg               站点图标（P + 证明绿对勾）
+    globals.css            设计令牌（§5）+ Tailwind v4 @theme
+  components/
+    layout/                Sidebar · Topbar · Logo
+    ui/Button.tsx          按钮四形态
+  lib/
+    supabase/              client · server · middleware(session)
+    nav.ts                 导航结构 + 全局/方向判定
+  types/database.ts        Supabase 数据库类型
+  proxy.ts                 session 刷新 + 登录重定向（Next 16 proxy 约定）
+supabase/                  01~04 SQL
+```
+
+> `src/app/design-check/` 是临时视觉校验页，**Step 1 结束时删除**。

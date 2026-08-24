@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
+import { LogoMark } from "@/components/layout/Logo";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -51,8 +52,11 @@ export function LoginForm({ expired }: { expired: boolean }) {
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6">
       {/* 左上角固定 Logo */}
-      <div className="font-display absolute left-6 top-6 text-[17px] font-semibold tracking-tight">
-        Proofly
+      <div className="absolute left-6 top-6 flex items-center gap-2">
+        <LogoMark size={20} />
+        <span className="font-display text-[17px] font-semibold tracking-tight">
+          Proofly
+        </span>
       </div>
 
       {/* 右下角装饰：四档证明度圆点，整体透明度 6%，不拦截交互 */}
@@ -61,6 +65,9 @@ export function LoginForm({ expired }: { expired: boolean }) {
       <div className="relative z-10 w-full max-w-[400px]">
         {/* 品牌区 */}
         <div className="mb-8 text-center">
+          <div className="mb-2 flex justify-center">
+            <LogoMark size={44} />
+          </div>
           <div className="font-display text-[34px] font-semibold tracking-tight">
             Proofly
           </div>
