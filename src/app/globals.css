@@ -1,26 +1,107 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Proofly design tokens — source of truth (Step 0 · §5)
+   Raw CSS variables use the spec's verbatim names so any
+   stylesheet can `var(--ink)`, `var(--proof)`, etc.
+   ============================================================ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* 中性 */
+  --ink: #0c0e14;
+  --ink-2: #1a1d26;
+  --slate: #5b6273;
+  --mute: #8a91a3;
+  --line: #e6e8ee;
+  --line-soft: #f0f2f6;
+  --bg: #f6f7fa;
+  --card: #ffffff;
+
+  /* 证明度 —— 单一色相四档，界面唯一的语义色 */
+  --proof: #0fc08a;
+  --proof-mid: #6fdcb8;
+  --proof-soft: #e4f8f0;
+  --ghost: #c7ccd8;
+
+  /* AI 标记 */
+  --ai: #6b5bff;
+  --ai-soft: #efedff;
+
+  /* 状态 */
+  --warn: #ff9500;
+  --warn-soft: #fff4e5;
+  --danger: #ff4a4a;
+  --danger-soft: #ffecec;
+
+  /* 形状 */
+  --r-card: 14px;
+  --r-btn: 10px;
+  --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(12, 14, 20, 0.04);
+  --shadow-2: 0 2px 8px rgba(12, 14, 20, 0.06), 0 1px 2px rgba(12, 14, 20, 0.04);
+  --shadow-3: 0 8px 28px rgba(12, 14, 20, 0.1);
+
+  /* 字体栈。--font-space-grotesk 由 next/font 注入到 <html> */
+  --font-display: var(--font-space-grotesk), "Space Grotesk", -apple-system,
+    BlinkMacSystemFont, sans-serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
 }
 
+/* ============================================================
+   Tailwind v4 theme — inline mapping so utilities reference the
+   raw vars above (bg-ink, text-proof, rounded-card, shadow-2,
+   font-display, …). `inline` keeps a single source of truth and
+   avoids emitting duplicate --color-* variables.
+   ============================================================ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-slate: var(--slate);
+  --color-mute: var(--mute);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+
+  --color-proof: var(--proof);
+  --color-proof-mid: var(--proof-mid);
+  --color-proof-soft: var(--proof-soft);
+  --color-ghost: var(--ghost);
+
+  --color-ai: var(--ai);
+  --color-ai-soft: var(--ai-soft);
+
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --radius-card: var(--r-card);
+  --radius-btn: var(--r-btn);
+  --radius-pill: var(--r-pill);
+
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+
+  --font-display: var(--font-display);
+  --font-ui: var(--font-ui);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ============================================================
+   Base — 正文用系统字体栈；数字/标题/Logo 走 .font-display
+   ============================================================ */
+html {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
