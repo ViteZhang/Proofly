@@ -232,7 +232,9 @@ src/
     (auth)/login/          登录页（登录 / 注册 / 重设密码）
     auth/callback/route.ts Magic Link code 交换
     (app)/                 应用外壳内的九个页面
+    (app)/library/actions.ts 经历库全部写操作（Server Action + zod）
     design-check/          设计令牌校验页（临时，Step 1 结束删除）
+    dev/query-check/       数据层核对页（临时，Step 1 结束删除）
     icon.png               站点图标（从品牌字标裁出的 P 标记）
     globals.css            设计令牌（§5）+ Tailwind v4 @theme
   components/
@@ -240,6 +242,8 @@ src/
     ui/Button.tsx          按钮四形态
   lib/
     supabase/              client · server · middleware(session)
+    queries/               读取层：atoms（树/详情/证明度）· facts（事实层）
+    domain.ts              证明度词汇 + jsonb 形状解析 + ActionResult
     nav.ts                 导航结构 + 全局/方向判定
   types/database.ts        Supabase 数据库类型
   proxy.ts                 session 刷新 + 登录重定向（Next 16 proxy 约定）
@@ -248,4 +252,23 @@ supabase/
   email-templates/         登录邮件模板（贴到 Supabase Email Templates）
 ```
 
-> `src/app/design-check/` 是临时视觉校验页，**Step 1 结束时删除**。
+> `src/app/design-check/` 与 `src/app/dev/query-check/` 都是临时页，**Step 1 结束时删除**。
+
+---
+
+## 数据访问约定（Step 1 起）
+
+**读**：Server Component 直接查库，不经 API Route。查询函数放 `src/lib/queries/`，
+RLS 已按 `user_id` 隔离，查询里不再手工拼 user 条件。
+
+**写**：全部走 Server Action，放在对应路由的 `actions.ts`。统一约定：
+
+- 入参过 **zod**；校验失败返回 `{ ok: false, error }`，**不抛异常**
+- 成功后 `revalidatePath('/library')` 与 `revalidatePath('/')`（首页共用同一份证明度）
+- 返回类型统一为 `ActionResult<T> = { ok: true; data: T } | { ok: false; error: string }`
+- 数据库原始报错不外泄，`dbError()` 统一翻成中文
+- 不引入表单库：字段少、以就地编辑为主，受控组件 + Server Action 足够
+
+**派生字段不写**。`atoms.evidence_level` 与 `skills.evidence_strength` 由
+`01_extensions_and_helpers.sql` 里的触发器维护，应用层任何地方都不给它们赋值，
+UI 上也不提供修改入口。
