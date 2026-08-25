@@ -120,11 +120,17 @@ async function complete(
     attempts++;
     const t0 = Date.now();
     let raw: string;
+    const cap = opts.maxTokens ?? MAX_OUTPUT_TOKENS[opts.tier];
     try {
+      // 已知问题：抽一条带三个能力点的经历时，输出能到几千 token，
+      // 中转站偶尔会在生成完成前回 504 网关超时。流式本该能绕开
+      // （连接一直有数据），但这个沙箱的出网代理会把 SSE 连接重置，
+      // 没法在这里验证，所以不上没验证过的改动。
+      // 当前的兜底是每条可以单独重试，见 ingest/pipeline.ts。
       const res = await client.chat.completions.create({
         model,
         messages,
-        max_completion_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS[opts.tier],
+        max_completion_tokens: cap,
       });
       const ms = Date.now() - t0;
       promptTokens += res.usage?.prompt_tokens ?? 0;
@@ -140,7 +146,7 @@ async function complete(
       if (res.choices[0]?.finish_reason === "length") {
         return {
           ok: false,
-          error: `模型输出被 ${opts.maxTokens ?? MAX_OUTPUT_TOKENS[opts.tier]} token 上限截断，这条没抽完`,
+          error: `模型输出被 ${cap} token 上限截断，这条没抽完`,
         };
       }
       raw = res.choices[0]?.message?.content ?? "";
