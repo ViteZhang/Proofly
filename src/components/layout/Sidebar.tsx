@@ -81,6 +81,14 @@ export function Sidebar({ email }: { email: string }) {
             className="absolute bottom-[calc(100%-4px)] left-2.5 right-2.5 overflow-hidden rounded-btn"
             style={{ background: "var(--card)", boxShadow: "var(--shadow-3)" }}
           >
+            <Link
+              href="/facts"
+              onClick={() => setMenuOpen(false)}
+              className="block px-3.5 py-2.5 text-left text-[13px] transition-colors hover:bg-[var(--line-soft)]"
+              style={{ color: "var(--ink)" }}
+            >
+              事实层
+            </Link>
             <button
               type="button"
               onClick={signOut}

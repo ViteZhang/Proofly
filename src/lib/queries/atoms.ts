@@ -358,3 +358,38 @@ export async function getProofSummary(): Promise<ProofSummary> {
     score: total === 0 ? 0 : Math.round((weighted / total) * 100),
   };
 }
+
+// ---- 首页数据概览 ----
+
+export type OverviewStats = {
+  atoms: number;
+  projects: number;
+  slices: number;
+  skills: number;
+  skillsWithoutEvidence: number; // 没有任何经历能证明的技能，不会进简历技能栏
+  pendingMetrics: number;
+};
+
+export async function getOverviewStats(): Promise<OverviewStats> {
+  const supabase = await createClient();
+
+  const [atomsRes, skillsRes] = await Promise.all([
+    supabase.from("atoms").select("level,pending_metrics"),
+    supabase.from("skills").select("evidence_strength"),
+  ]);
+
+  if (atomsRes.error) throw new Error(`读取概览失败：${atomsRes.error.message}`);
+  if (skillsRes.error) throw new Error(`读取概览失败：${skillsRes.error.message}`);
+
+  const atoms = atomsRes.data ?? [];
+  const skills = skillsRes.data ?? [];
+
+  return {
+    atoms: atoms.length,
+    projects: atoms.filter((a) => a.level === "project").length,
+    slices: atoms.filter((a) => a.level === "capability_slice").length,
+    skills: skills.length,
+    skillsWithoutEvidence: skills.filter((s) => s.evidence_strength === "none").length,
+    pendingMetrics: atoms.reduce((n, a) => n + parsePendingMetrics(a.pending_metrics).length, 0),
+  };
+}

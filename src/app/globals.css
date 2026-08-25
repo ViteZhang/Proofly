@@ -137,3 +137,17 @@ body {
   .proof-flash { animation: none; }
   .proof-notice { animation: none; }
 }
+
+/* 证明环首次进入时从 0 描到目标值。终值写在元素的 stroke-dashoffset 上，
+   这里只给一个起点，所以不加动画类也能正确渲染成终态。 */
+@keyframes ring-draw {
+  from { stroke-dashoffset: var(--ring-c); }
+}
+
+.ring-draw {
+  animation: ring-draw 900ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring-draw { animation: none; }
+}

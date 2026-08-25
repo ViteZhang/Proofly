@@ -233,11 +233,12 @@ src/
     auth/callback/route.ts Magic Link code 交换
     (app)/                 应用外壳内的九个页面
     (app)/library/actions.ts 经历库全部写操作（Server Action + zod）
-    design-check/          设计令牌校验页（临时，Step 1 结束删除）
-    dev/query-check/       数据层核对页（临时，Step 1 结束删除）
+    (app)/facts/           事实层：全局唯一口径 + 冲突解决
     icon.png               站点图标（从品牌字标裁出的 P 标记）
     globals.css            设计令牌（§5）+ Tailwind v4 @theme
   components/
+    home/                  证明环
+    facts/                 事实层行编辑 + 冲突解决
     layout/                Sidebar · Topbar · Logo（字标两个色版）
     library/               经历树 · 详情只读/编辑态 · 结果指标 · 待补数据
                            · 叙事护栏 · 技能 combobox · 删除确认
@@ -255,8 +256,6 @@ supabase/
   01~04*.sql               建库脚本
   email-templates/         登录邮件模板（贴到 Supabase Email Templates）
 ```
-
-> `src/app/design-check/` 与 `src/app/dev/query-check/` 都是临时页，**Step 1 结束时删除**。
 
 ---
 

@@ -5,10 +5,8 @@ import type { Database } from "@/types/database";
 // 公开路由：无需登录即可访问。其余一律要求登录。
 // - /login          登录页（(auth) 组）
 // - /auth/callback  Magic Link 落地，必须可达以交换 session
-// - /design-check   临时令牌校验页（Step 1 结束删除）
 function isPublicPath(pathname: string): boolean {
   if (pathname === "/login") return true;
-  if (pathname === "/design-check") return true;
   if (pathname === "/auth" || pathname.startsWith("/auth/")) return true;
   return false;
 }

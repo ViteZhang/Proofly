@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { isGlobalPath } from "@/lib/nav";
 
-export function Topbar() {
+export function Topbar({ blockingCount }: { blockingCount: number }) {
   const pathname = usePathname();
   const global = isGlobalPath(pathname);
 
@@ -49,18 +50,23 @@ export function Topbar() {
         </select>
       )}
 
-      {/* 体检状态芯片：本步固定绿色「一切正常」 */}
-      <span
-        className="inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-[11.5px] font-medium"
-        style={{ background: "var(--proof-soft)", color: "var(--proof)" }}
+      {/* 体检状态芯片：事实层里 BLOCKING 的条数。点进去就能处理。 */}
+      <Link
+        href="/facts"
+        className="inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-[11.5px] font-medium transition-opacity hover:opacity-80"
+        style={
+          blockingCount > 0
+            ? { background: "var(--danger-soft)", color: "var(--danger)" }
+            : { background: "var(--proof-soft)", color: "var(--proof)" }
+        }
       >
         <span
           aria-hidden
           className="h-1.5 w-1.5 rounded-pill"
-          style={{ background: "var(--proof)" }}
+          style={{ background: blockingCount > 0 ? "var(--danger)" : "var(--proof)" }}
         />
-        一切正常
-      </span>
+        {blockingCount > 0 ? `${blockingCount} 处待解决` : "一切正常"}
+      </Link>
 
       {/* 全局搜索占位：显示 ⌘K，本步不实现 */}
       <div
