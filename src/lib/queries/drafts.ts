@@ -32,6 +32,8 @@ export type ReviewDraft = {
   locateFuzzy: boolean;
   /** 向量召回不可用，Pass 3 是在退化模式下判的 */
   recallDegraded: boolean;
+  /** 能力点超过 8 个 —— 切得太细，值得人工看一眼 */
+  tooManyChildren: boolean;
 };
 
 export type ProjectOption = { id: string; title: string; org: string | null };
@@ -147,6 +149,7 @@ function toDraft(r: Row): ReviewDraft | null {
     options: z.array(optionEntry).safeParse(payload.options).data ?? [],
     locateFuzzy: payload.locate_fuzzy === true,
     recallDegraded: payload.recall_degraded === true,
+    tooManyChildren: payload.too_many_children === true,
   };
 }
 

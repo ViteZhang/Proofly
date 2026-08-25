@@ -277,6 +277,9 @@ async function handleOne(
       candidate_index: c.index,
       locate_fuzzy: at.fuzzy,
       recall_degraded: degraded,
+      // 提示词写死了单个项目下的能力点不超过 8 个。超了就是切得太细，
+      // 不拦下来，但要在卡片上说一句，让人扫一眼再收。
+      too_many_children: atom.children.length > 8,
     } as unknown as Json,
     diff: { entries: v.diff } as unknown as Json,
     confidence: v.confidence,

@@ -276,6 +276,12 @@ function Preview({ atom }: { atom: ExtractedAtom }) {
           <span style={{ color: "var(--slate)" }}>
             {atom.children.map((c) => c.title).join("、")}
           </span>
+          {atom.children.length > 8 && (
+            <span className="mt-1 block text-[12px]" style={{ color: "var(--warn)" }}>
+              一个项目下拆出 {atom.children.length} 个能力点，超过 8 个了，多半切得太细。
+              收之前扫一眼，两三句话就能讲完的合并进行动里。
+            </span>
+          )}
         </Row>
       )}
     </div>
