@@ -1196,6 +1196,22 @@ export type Database = {
       };
     };
     Functions: {
+      match_atoms: {
+        Args: { query_embedding: string; match_count?: number };
+        Returns: {
+          id: string;
+          title: string;
+          org: string | null;
+          role: string | null;
+          level: AtomLevel;
+          status: AtomStatus;
+          period_start: string | null;
+          period_end: string | null;
+          situation: string | null;
+          pending_metrics: Json;
+          similarity: number;
+        }[];
+      };
       recompute_atom_evidence: {
         Args: { p_atom: string };
         Returns: undefined;

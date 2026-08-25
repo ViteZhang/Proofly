@@ -1,11 +1,16 @@
-// 占位页 —— 真实数据接入是 Step 1 的事。
+import { UploadZone } from "@/components/import/UploadZone";
+
 export default function ImportPage() {
   return (
-    <div>
+    <div className="max-w-[720px]">
       <h1 className="font-display text-[26px] font-semibold tracking-tight">导入</h1>
       <p className="mt-1.5 text-[14px]" style={{ color: "var(--slate)" }}>
-        上传文档 → AI 抽取 → 你确认
+        传一份旧简历、项目复盘或者工作总结，我先读一遍，抽出来的每一条都由你确认。
       </p>
+
+      <div className="mt-5">
+        <UploadZone />
+      </div>
     </div>
   );
 }
