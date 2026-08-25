@@ -64,37 +64,48 @@ export async function seedDemoAtoms(): Promise<ActionResult<{ created: number }>
     .single();
   if (eb) return fail(`灌样例失败：${eb.message}`);
 
-  const { error: ec } = await supabase.from("atoms").insert([
-    {
-      title: `${PREFIX}打招呼智能体`,
-      parent_id: b.id,
-      level: "capability_slice",
-      context: "employment",
-      org: "样例科技",
-      status: "in_dev",
-      sort_order: 0,
-    },
-    {
-      title: `${PREFIX}Multi-Agent 意图路由`,
-      parent_id: b.id,
-      level: "capability_slice",
-      context: "employment",
-      org: "样例科技",
-      status: "in_dev",
-      sort_order: 1,
-    },
-  ]);
+  const { data: slices, error: ec } = await supabase
+    .from("atoms")
+    .insert([
+      {
+        title: `${PREFIX}打招呼智能体`,
+        parent_id: b.id,
+        level: "capability_slice",
+        context: "employment",
+        org: "样例科技",
+        status: "in_dev",
+        sort_order: 0,
+      },
+      {
+        title: `${PREFIX}Multi-Agent 意图路由`,
+        parent_id: b.id,
+        level: "capability_slice",
+        context: "employment",
+        org: "样例科技",
+        status: "in_dev",
+        sort_order: 1,
+      },
+    ])
+    .select("id,title");
   if (ec) return fail(`灌样例失败：${ec.message}`);
 
-  // 个人项目
-  const { error: ed } = await supabase.from("atoms").insert({
-    title: `${PREFIX}知识宇宙`,
-    context: "side_project",
-    status: "in_dev",
-    period_start: "2025-05-01",
-    pending_metrics: [{ id: "seed-p3", name: "月活", note: null }],
-    sort_order: 0,
-  });
+  // 让其中一个能力点升到实测，而父项仍是仅设计——
+  // 筛「实测」时才有「父不匹配、子匹配」这种要灰化父项的情况可验。
+  const greeter = slices.find((s) => s.title.includes("打招呼"));
+
+  // 个人项目。带一条估算结果指标，四档里的「估算」也就有样本了。
+  const { data: d, error: ed } = await supabase
+    .from("atoms")
+    .insert({
+      title: `${PREFIX}知识宇宙`,
+      context: "side_project",
+      status: "in_dev",
+      period_start: "2025-05-01",
+      pending_metrics: [{ id: "seed-p3", name: "次日留存", note: null }],
+      sort_order: 0,
+    })
+    .select("id")
+    .single();
   if (ed) return fail(`灌样例失败：${ed.message}`);
 
   // 已结束的任职 → 过往经历分组，无任何指标 → absent
@@ -137,6 +148,22 @@ export async function seedDemoAtoms(): Promise<ActionResult<{ created: number }>
       delta: "4 份",
       evidence_level: "measured",
       method: "含阶段模型、对话护栏、路由规则、评测方案。",
+    },
+    {
+      atom_id: greeter!.id,
+      name: "首轮回复接受率",
+      kind: "outcome",
+      delta: "68%",
+      evidence_level: "measured",
+      method: "灰度期间首轮回复未被用户重问的比例。",
+    },
+    {
+      atom_id: d.id,
+      name: "月活",
+      kind: "outcome",
+      delta: "约 2000",
+      evidence_level: "estimated",
+      method: "按公众号阅读量与跳转率倒推，没有埋点。",
     },
   ]);
   if (em) return fail(`灌样例失败：${em.message}`);
