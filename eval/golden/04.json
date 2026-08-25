@@ -1,0 +1,22 @@
+{
+  "title": "风控策略后台",
+  "level": "project",
+  "context": "employment",
+  "org": "趣店集团",
+  "role": "高级产品经理",
+  "period_start": "2018-06",
+  "period_end": "2019-03",
+  "status": "shipped",
+  "task": "参与风控策略讨论，负责把策略配置从代码搬到后台界面",
+  "actions": [
+    "把策略配置从代码搬到后台界面",
+    "补埋点方案，覆盖 12 个关键事件",
+    "做数据看板页面",
+    "建立周报机制"
+  ],
+  "metrics": [
+    {"name": "关键埋点事件", "kind": "output", "to_value": "12 个", "evidence_level": "measured"}
+  ],
+  "pending_metrics": [],
+  "children": []
+}

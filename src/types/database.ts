@@ -24,6 +24,7 @@ export type SkillDepth = "familiar" | "proficient" | "expert";
 export type EvidenceStrength = "strong" | "weak" | "none";
 export type IngestInputType = "upload" | "chat";
 export type IngestStatus = "extracting" | "awaiting_review" | "committed" | "discarded";
+export type IngestStage = "segmenting" | "extracting" | "finishing";
 export type DraftIntent = "CREATE" | "UPDATE" | "ASK";
 export type DraftReviewStatus = "pending" | "accepted" | "edited" | "rejected";
 export type LlmTier = "light" | "strong" | "vision" | "embedding";
@@ -450,6 +451,12 @@ export type Database = {
           raw_input: string | null;
           source_doc_id: string | null;
           status: IngestStatus;
+          progress_stage: IngestStage | null;
+          progress_current: number | null;
+          progress_total: number | null;
+          error_message: string | null;
+          candidates: Json;
+          heartbeat_at: string | null;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -460,6 +467,12 @@ export type Database = {
           raw_input?: string | null;
           source_doc_id?: string | null;
           status?: IngestStatus;
+          progress_stage?: IngestStage | null;
+          progress_current?: number | null;
+          progress_total?: number | null;
+          error_message?: string | null;
+          candidates?: Json;
+          heartbeat_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -470,6 +483,12 @@ export type Database = {
           raw_input?: string | null;
           source_doc_id?: string | null;
           status?: IngestStatus;
+          progress_stage?: IngestStage | null;
+          progress_current?: number | null;
+          progress_total?: number | null;
+          error_message?: string | null;
+          candidates?: Json;
+          heartbeat_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -1196,6 +1215,19 @@ export type Database = {
       };
     };
     Functions: {
+      commit_draft: {
+        Args: {
+          p_draft_id: string;
+          p_atom: Json;
+          p_intent: string;
+          p_target: string | null;
+          p_parent: string | null;
+          p_source_doc_id: string | null;
+          p_diff?: Json;
+          p_edited?: boolean;
+        };
+        Returns: string;
+      };
       match_atoms: {
         Args: { query_embedding: string; match_count?: number };
         Returns: {

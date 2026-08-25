@@ -1,0 +1,23 @@
+{
+  "title": "智能客服分流",
+  "level": "project",
+  "context": "employment",
+  "org": "润泽园教育科技",
+  "role": "产品负责人",
+  "period_start": "2025-03",
+  "period_end": null,
+  "status": "design_done",
+  "actions": [
+    "梳理工单分类",
+    "设计按意图分流到自助答案的方案",
+    "设计话术库结构"
+  ],
+  "metrics": [
+    {"name": "每日来电量", "kind": "outcome", "to_value": "600 通", "evidence_level": "measured"},
+    {"name": "客服人工工作量", "kind": "outcome", "delta": "-30%", "evidence_level": "estimated", "method": "原文为预计值"},
+    {"name": "方案文档", "kind": "output", "to_value": "1 份", "evidence_level": "measured"},
+    {"name": "话术库结构表", "kind": "output", "to_value": "1 份", "evidence_level": "measured"}
+  ],
+  "pending_metrics": [],
+  "children": []
+}

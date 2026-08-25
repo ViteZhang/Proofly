@@ -1,6 +1,10 @@
-import { UploadZone } from "@/components/import/UploadZone";
+import { ImportFlow } from "@/components/import/ImportFlow";
+import { findOpenJob } from "./job-actions";
 
-export default function ImportPage() {
+export default async function ImportPage() {
+  // 上次没处理完的作业接着显示——页面关掉不代表活停了。
+  const open = await findOpenJob();
+
   return (
     <div className="max-w-[720px]">
       <h1 className="font-display text-[26px] font-semibold tracking-tight">导入</h1>
@@ -9,7 +13,7 @@ export default function ImportPage() {
       </p>
 
       <div className="mt-5">
-        <UploadZone />
+        <ImportFlow resumeJobId={open.ok ? open.data : null} />
       </div>
     </div>
   );

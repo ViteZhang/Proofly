@@ -1,0 +1,37 @@
+{
+  "title": "测评系统升级",
+  "level": "project",
+  "context": "employment",
+  "org": "趣店集团",
+  "role": "高级产品经理",
+  "period_start": "2019-04",
+  "period_end": "2021-08",
+  "status": "shipped",
+  "actions": ["牵头老测评系统的架构重构"],
+  "metrics": [],
+  "pending_metrics": ["运营效率"],
+  "children": [
+    {
+      "title": "题型插件化",
+      "level": "capability_slice",
+      "metrics": [],
+      "actions": ["抽象题型接口，判分器按题型注册，主流程只认接口"]
+    },
+    {
+      "title": "判分一致性",
+      "level": "capability_slice",
+      "metrics": [
+        {"name": "判分差异", "kind": "outcome", "from_value": "每万份 7 例", "to_value": "0 例", "evidence_level": "measured"}
+      ],
+      "actions": ["把判分改成定点数并固定累加顺序"]
+    },
+    {
+      "title": "大规模并发下的排队",
+      "level": "capability_slice",
+      "metrics": [
+        {"name": "开考瞬间流量倍数", "kind": "output", "to_value": "200 倍", "evidence_level": "measured"}
+      ],
+      "actions": ["提交改为异步入队", "前端展示排队位次"]
+    }
+  ]
+}

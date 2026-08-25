@@ -1,0 +1,25 @@
+{
+  "title": "AI 作业点评 + 回应",
+  "level": "project",
+  "context": "employment",
+  "org": "润泽园教育科技",
+  "role": "产品负责人",
+  "period_start": "2024-03",
+  "period_end": "2025-02",
+  "status": "shipped",
+  "actions": [
+    "定义点评的三段结构：题目类型、具体错处、鼓励性下一步建议",
+    "设计图片预处理链路，倾斜矫正加去背景",
+    "与算法团队共同制定回应语气护栏，禁止评价孩子本人"
+  ],
+  "metrics": [
+    {"name": "平均点评耗时", "kind": "outcome", "from_value": "128 分钟", "to_value": "41 分钟", "evidence_level": "measured"},
+    {"name": "识别失败率", "kind": "outcome", "from_value": "12%", "to_value": "3.4%", "evidence_level": "estimated"},
+    {"name": "家长周活跃", "kind": "outcome", "from_value": "31%", "to_value": "44%", "evidence_level": "measured"},
+    {"name": "设计文档", "kind": "output", "to_value": "4 份", "evidence_level": "measured"},
+    {"name": "测试用例", "kind": "output", "to_value": "20 条", "evidence_level": "measured"},
+    {"name": "护栏词表", "kind": "output", "to_value": "1 套", "evidence_level": "measured"}
+  ],
+  "pending_metrics": ["点评被家长采纳的比例"],
+  "children": []
+}

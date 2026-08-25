@@ -17,6 +17,8 @@ type Filtered = { key: string; title: string; tense: AtomGroup["tense"]; period:
 // 拖拽只在同一组同一父级之间成立。setKey 就是「同级」的身份。
 type Drag = { id: string; setKey: string };
 
+const EMPTY: ReadonlySet<string> = new Set();
+
 export function LibraryTree({
   tree,
   summary,
@@ -30,6 +32,16 @@ export function LibraryTree({
   // 选中要立刻有反馈。URL 是唯一真相，但换 URL 要走一次服务端往返（详情是服务端渲染的），
   // 中间这半秒先用本地值顶上；URL 追上来之后就地丢弃，交回给 URL。
   const fromUrl = searchParams.get("atom");
+
+  // 入库后带着 ?flash=<id列表> 回到经历库，证明度变了的节点绿闪一次。
+  // 闪过就把参数从 URL 里抹掉，刷新页面不会再闪。
+  const flashParam = searchParams.get("flash") ?? "";
+  const [flashed, setFlashed] = useState<string>("");
+  const flashing = flashParam !== "" && flashed !== flashParam
+    ? new Set(flashParam.split(","))
+    : EMPTY;
+  if (flashParam !== "" && flashed !== flashParam) setFlashed(flashParam);
+
   const [optimistic, setOptimistic] = useState<string | null>(null);
   if (optimistic !== null && fromUrl === optimistic) setOptimistic(null);
   const selected = optimistic ?? fromUrl;
@@ -250,6 +262,7 @@ export function LibraryTree({
                       q={keyword}
                       dimmed={!row.self}
                       active={selected === row.node.id}
+                      flash={flashing.has(row.node.id)}
                       dropping={over === row.node.id}
                       onPick={select}
                       {...dragProps(`group:${group.key}`, row.node.id)}
@@ -261,6 +274,7 @@ export function LibraryTree({
                         q={keyword}
                         indented
                         active={selected === child.id}
+                        flash={flashing.has(child.id)}
                         dropping={over === child.id}
                         onPick={select}
                         {...dragProps(`parent:${row.node.id}`, child.id)}
@@ -298,6 +312,7 @@ function TreeRow({
   dimmed = false,
   indented = false,
   dropping = false,
+  flash = false,
   onPick,
   ...drag
 }: {
@@ -307,6 +322,7 @@ function TreeRow({
   dimmed?: boolean;
   indented?: boolean;
   dropping?: boolean;
+  flash?: boolean;
   onPick: (id: string) => void;
 } & React.HTMLAttributes<HTMLButtonElement>) {
   return (
@@ -314,7 +330,7 @@ function TreeRow({
       type="button"
       onClick={() => onPick(node.id)}
       aria-current={active ? "true" : undefined}
-      className="flex h-8 w-full items-center gap-2 rounded-btn pr-2 text-left transition-colors hover:bg-[var(--line-soft)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink"
+      className={`flex h-8 w-full items-center gap-2 rounded-btn pr-2 text-left transition-colors hover:bg-[var(--line-soft)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink${flash ? " proof-flash" : ""}`}
       style={{
         paddingLeft: indented ? 22 : 8,
         background: active ? "var(--line-soft)" : "transparent",

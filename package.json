@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "eval:extract": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/eval-extract.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",
