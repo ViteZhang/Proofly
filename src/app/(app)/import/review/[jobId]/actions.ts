@@ -59,6 +59,15 @@ export async function acceptDraft(
   if (!atomParsed.success) return fail("内容结构不对，改一下再存");
 
   const intent = asCreate || draft.intent === "CREATE" ? "CREATE" : "UPDATE";
+
+  // 选了父级就是能力点。留成 project 会在树里变成「项目套项目」。
+  const parent =
+    parentAtomId ??
+    (typeof payload.parent_atom_id === "string" ? payload.parent_atom_id : null);
+  const atomToWrite =
+    intent === "CREATE" && parent !== null && atomParsed.data.level === "project"
+      ? { ...atomParsed.data, level: "capability_slice" as const, children: [] }
+      : atomParsed.data;
   if (intent === "UPDATE" && !draft.target_atom_id) {
     return fail("这条没有明确要更新哪一条，选「这是新经历」或者自己指一条");
   }
@@ -73,10 +82,10 @@ export async function acceptDraft(
 
   const { data: atomId, error } = await supabase.rpc("commit_draft", {
     p_draft_id: draftId,
-    p_atom: atomParsed.data as unknown as Json,
+    p_atom: atomToWrite as unknown as Json,
     p_intent: intent,
     p_target: intent === "UPDATE" ? draft.target_atom_id : null,
-    p_parent: parentAtomId ?? (typeof payload.parent_atom_id === "string" ? payload.parent_atom_id : null),
+    p_parent: intent === "CREATE" ? parent : null,
     p_source_doc_id: sourceDocId?.source_doc_id ?? null,
     p_diff: (z.array(diffEntry).safeParse(obj(draft.diff).entries).data ?? []) as unknown as Json,
     p_edited: edited !== null,

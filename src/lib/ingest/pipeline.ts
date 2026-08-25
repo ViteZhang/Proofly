@@ -265,13 +265,21 @@ async function handleOne(
   const target = v.target_atom_id && known.has(v.target_atom_id) ? v.target_atom_id : null;
   const parent = v.parent_atom_id && known.has(v.parent_atom_id) ? v.parent_atom_id : null;
 
+  // Pass 3 判定这条挂在某个项目下时，它就是一个能力点。
+  // Pass 2 看到的是孤立片段，只会说 project——不在这里改过来，
+  // 入库时会变成「项目套项目」，树的层级就乱了。
+  const payloadAtom =
+    parent !== null && atom.level === "project"
+      ? { ...atom, level: "capability_slice" as const, children: [] }
+      : atom;
+
   const supabase = await createClient();
   const { error } = await supabase.from("drafts").insert({
     ingest_job_id: jobId,
     intent: intent === "UPDATE" && target === null ? "ASK" : intent,
     target_atom_id: target,
     payload: {
-      atom,
+      atom: payloadAtom,
       parent_atom_id: parent,
       options: v.options,
       candidate_index: c.index,
@@ -279,7 +287,7 @@ async function handleOne(
       recall_degraded: degraded,
       // 提示词写死了单个项目下的能力点不超过 8 个。超了就是切得太细，
       // 不拦下来，但要在卡片上说一句，让人扫一眼再收。
-      too_many_children: atom.children.length > 8,
+      too_many_children: payloadAtom.children.length > 8,
     } as unknown as Json,
     diff: { entries: v.diff } as unknown as Json,
     confidence: v.confidence,
