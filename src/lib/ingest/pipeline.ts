@@ -109,11 +109,13 @@ export async function runJob(jobId: string): Promise<void> {
       })
       .eq("id", jobId);
 
-    // 一条经历都没有也是正常结果，不硬凑
+    // 一条经历都没有也是正常结果，不硬凑。
+    // 直接标 discarded：没有草稿可校对，留在 awaiting_review 会让导入页
+    // 每次打开都把这个空作业顶出来，挡住上传区。
     if (candidates.length === 0) {
       await supabase
         .from("ingest_jobs")
-        .update({ status: "awaiting_review", progress_stage: "finishing" })
+        .update({ status: "discarded", progress_stage: "finishing" })
         .eq("id", jobId);
       return;
     }
@@ -370,10 +372,20 @@ async function finishIfDone(jobId: string, all: Candidate[]): Promise<void> {
   if (all.some((c) => c.state === "pending")) return;
   const supabase = await createClient();
   const failed = all.filter((c) => c.state === "failed");
+
+  // 一条草稿都没产出（全失败，或候选全被判定为不可用）→ 没什么可校对的。
+  // 但如果是「有失败可重试」，就还得留在 awaiting_review，否则重试按钮没了。
+  const { count } = await supabase
+    .from("drafts")
+    .select("id", { count: "exact", head: true })
+    .eq("ingest_job_id", jobId)
+    .eq("review_status", "pending");
+  const barren = (count ?? 0) === 0 && failed.length === 0;
+
   await supabase
     .from("ingest_jobs")
     .update({
-      status: "awaiting_review",
+      status: barren ? "discarded" : "awaiting_review",
       progress_stage: "finishing",
       error_message:
         failed.length === 0

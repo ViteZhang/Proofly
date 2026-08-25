@@ -13,7 +13,7 @@
     "设计话术库结构"
   ],
   "metrics": [
-    {"name": "每日来电量", "kind": "outcome", "to_value": "600 通", "evidence_level": "measured"},
+    {"name": "每日客服电话量", "kind": "output", "to_value": "600 通", "evidence_level": "measured"},
     {"name": "客服人工工作量", "kind": "outcome", "delta": "-30%", "evidence_level": "estimated", "method": "原文为预计值"},
     {"name": "方案文档", "kind": "output", "to_value": "1 份", "evidence_level": "measured"},
     {"name": "话术库结构表", "kind": "output", "to_value": "1 份", "evidence_level": "measured"}

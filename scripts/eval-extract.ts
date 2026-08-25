@@ -42,6 +42,8 @@ type CaseResult = {
   extractedTitle: string;
   childTitles: string[];
   goldenChildTitles: string[];
+  gotMetricNames: string[];
+  goldenMetricNames: string[];
 };
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -108,6 +110,8 @@ async function runCase(id: string): Promise<CaseResult> {
     extractedTitle: "",
     childTitles: [],
     goldenChildTitles: (golden.children ?? []).map((c) => c.title ?? ""),
+    gotMetricNames: [],
+    goldenMetricNames: [],
   };
 
   const r = await callLLM({
@@ -190,6 +194,8 @@ async function runCase(id: string): Promise<CaseResult> {
     levelTotal,
     extractedTitle: got.title,
     childTitles: got.children.map((c) => c.title),
+    gotMetricNames: gotMetrics.map((m) => `${m.name}[${m.kind}]`),
+    goldenMetricNames: goldMetrics.map((g) => `${g.name}${g.kind ? `[${g.kind}]` : ""}`),
   };
 }
 
@@ -270,7 +276,14 @@ function render(rs: CaseResult[]): string {
         ` · 对照集 ${r.goldenChildTitles.length} 个${r.goldenChildTitles.length ? `（${r.goldenChildTitles.join("、")}）` : ""}`,
     );
     L.push(`- 指标：抽出 ${r.metricTotal} 条 · kind 判对 ${r.kindRight}/${r.kindTotal}`);
-    if (r.missedMetrics.length > 0) L.push(`- 漏掉的指标：${r.missedMetrics.join("、")}`);
+    L.push(`  - 抽出的：${r.gotMetricNames.join("、") || "（无）"}`);
+    L.push(`  - 对照集：${r.goldenMetricNames.join("、") || "（无）"}`);
+    if (r.missedMetrics.length > 0) {
+      L.push(`- 漏掉的指标：${r.missedMetrics.join("、")}`);
+      L.push(
+        "  - 对照一下上面两行：名字不同但说的是同一件事，那是对照集的叫法要改，不是模型漏抽。",
+      );
+    }
     if (r.missedActions > 0) L.push(`- 漏掉的行动：${r.missedActions} 条`);
     if (r.hallucinated.length > 0) {
       L.push(`- **幻觉 ${r.hallucinated.length} 条**：${r.hallucinated.map((h) => h.metric).join("、")}`);

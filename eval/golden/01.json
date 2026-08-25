@@ -15,7 +15,7 @@
   "metrics": [
     {"name": "平均点评耗时", "kind": "outcome", "from_value": "128 分钟", "to_value": "41 分钟", "evidence_level": "measured"},
     {"name": "识别失败率", "kind": "outcome", "from_value": "12%", "to_value": "3.4%", "evidence_level": "estimated"},
-    {"name": "家长周活跃", "kind": "outcome", "from_value": "31%", "to_value": "44%", "evidence_level": "measured"},
+    {"name": "家长侧周活跃", "kind": "outcome", "from_value": "31%", "to_value": "44%", "evidence_level": "measured"},
     {"name": "设计文档", "kind": "output", "to_value": "4 份", "evidence_level": "measured"},
     {"name": "测试用例", "kind": "output", "to_value": "20 条", "evidence_level": "measured"},
     {"name": "护栏词表", "kind": "output", "to_value": "1 套", "evidence_level": "measured"}

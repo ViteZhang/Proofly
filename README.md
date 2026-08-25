@@ -43,6 +43,23 @@ NEXT_PUBLIC_SUPABASE_URL=https://vsbwlxxrjwgkhsdxdxgl.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_6nhOPw1nEWeMc0xJtdI2bA_-DJnhKwX
 ```
 
+Step 2 起还需要模型接入。这两个不带 `NEXT_PUBLIC_` 前缀，只在服务端可见：
+
+```
+OPENAI_BASE_URL=https://itokens.fun/v1
+OPENAI_API_KEY=sk-...
+```
+
+向量档可以走另一个接入点——中转站通常只转发对话模型，向量得回原厂：
+
+```
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_API_KEY=sk-...
+```
+
+不填 `EMBEDDING_*` 就回落到 `OPENAI_*`。**接入点换了先 `GET /v1/models` 看清单**，
+型号写死在 `src/lib/llm/config.ts`，别处不许出现模型字符串。
+
 模板见 `.env.example`。
 
 ---
@@ -67,6 +84,14 @@ pnpm dev                     # http://localhost:3000
 2. `02_tables.sql` — 全部 23 张表 + `task_priority` 视图 + 索引
 3. `03_triggers.sql` — `updated_at` 与派生字段（证明度 / 技能证据强度）触发器
 4. `04_rls.sql` — 23 张表 RLS + 每表 4 条策略 + 视图 `security_invoker`
+
+Step 2 追加，接着往下执行：
+
+5. `05_llm_calls.sql` — 模型调用日志 + RLS。没有它就不知道钱花在哪
+6. `06_storage.sql` — 私有桶 `source-docs`，路径首段必须等于 `auth.uid()`
+7. `07_ingest_progress.sql` — `ingest_jobs` 的进度字段与候选清单
+8. `08_similarity.sql` — HNSW 向量索引 + `match_atoms()` 召回函数
+9. `09_commit_draft.sql` — 草稿入库，单事务写五张表
 
 > 执行 02 时出现 `NOTICE: ivfflat index created with little data` 属正常（空表建向量索引），可忽略。
 > 类型定义在 `src/types/database.ts`（手工按 DDL 写出，Step 2 可用 `supabase gen types typescript` 重生成）。
@@ -288,3 +313,54 @@ RLS 已按 `user_id` 隔离，查询里不再手工拼 user 条件。
 **派生字段不写**。`atoms.evidence_level` 与 `skills.evidence_strength` 由
 `01_extensions_and_helpers.sql` 里的触发器维护，应用层任何地方都不给它们赋值，
 UI 上也不提供修改入口。
+
+---
+
+## 抽取链路怎么走（Step 2 起）
+
+```
+上传 → 解析成纯文本 → Pass 1 切分 → Pass 2 结构化（并发 3）→ Pass 3 意图判定 → 草稿 → 你确认 → 入库
+```
+
+### 三段提示词是资产，不要顺手改
+
+全文在 `src/lib/llm/prompts.ts`，逐字照抄施工文档第五节。实测效果不好，
+先跑 `pnpm eval:extract` 出报告，拿新旧报告对比着谈，不要单方面调。
+
+适配层给 `jsonSchema` 时会在系统提示词末尾追加一句输出约束（见
+`src/lib/llm/core.ts` 的 `JSON_SUFFIX`），那是机制，不动提示词本身。
+
+### 所有模型调用走 `callLLM()`
+
+业务代码里不许出现 OpenAI SDK。四个档位：
+
+| 档 | 用途 |
+|---|---|
+| `light` | Pass 1 切分定位。输入长、任务简单，用最便宜的 |
+| `strong` | Pass 2 抽取、Pass 3 意图判定。判错代价高，不省这个钱 |
+| `vision` | 扫描件与图片识别 |
+| `embedding` | 向量召回。必须 1536 维，与 `atoms.embedding` 的列宽一致 |
+
+每次实际发出的请求落一行 `llm_calls`，**失败和重试也记**——失败也烧钱，
+漏记会让「哪个环节贵」这个问题答错。
+
+`src/lib/llm/core.ts` 不依赖 Next，所以评估脚本能脱离服务器直接跑；
+`src/lib/llm/index.ts` 只是给它接上 Supabase 记账。
+
+### 作业为什么能在页面关掉后继续
+
+抽取跑在 `after()` 里，响应先回给页面，活在后台接着做。Pass 1 的候选清单
+落在 `ingest_jobs.candidates`，带每条的状态，所以：
+
+- 页面关掉再打开，轮询按候选状态把进度捡回来
+- 某条 Pass 2 失败，只重试那一条，其他条不动
+
+进度文案必须是真实数字（「已抽出 12 / 18 条」），不许转圈。
+
+### 抽取质量怎么看
+
+```bash
+pnpm eval:extract
+```
+
+四项指标里**幻觉率必须为 0**，不为 0 脚本以退出码 1 结束。详见 `eval/README.md`。

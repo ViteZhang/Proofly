@@ -15,7 +15,7 @@
     "建立周报机制"
   ],
   "metrics": [
-    {"name": "关键埋点事件", "kind": "output", "to_value": "12 个", "evidence_level": "measured"}
+    {"name": "关键事件", "kind": "output", "to_value": "12 个", "evidence_level": "measured"}
   ],
   "pending_metrics": [],
   "children": []

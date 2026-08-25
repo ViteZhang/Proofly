@@ -125,6 +125,9 @@ async function parseScannedPdf(
 
   const pageTexts = new Array<string>(count).fill("");
   const failed: number[] = [];
+  // 每一页失败的原因都留着——连不上接口和「这页本来就是白纸」是两回事，
+  // 只说「没认出来」会让人去查错的地方。
+  let firstError: string | null = null;
 
   await inBatches(count, PAGE_CONCURRENCY, async (i) => {
     const pageNo = i + 1;
@@ -134,16 +137,25 @@ async function parseScannedPdf(
         canvasImport: () => import("@napi-rs/canvas"),
       });
       const r = await ocrImage(Buffer.from(png).toString("base64"), pageNo);
-      if (r === null) failed.push(pageNo);
-      else pageTexts[i] = r;
-    } catch {
+      if (r.ok) pageTexts[i] = r.text;
+      else {
+        failed.push(pageNo);
+        firstError ??= r.error;
+      }
+    } catch (e) {
       failed.push(pageNo);
+      firstError ??= message(e);
     }
   });
 
   const text = pageTexts.filter((t) => t !== "").join("\n\n").trim();
   if (text === "") {
-    return { ok: false, error: "这个 PDF 逐页识别下来一个字也没认出来" };
+    return {
+      ok: false,
+      error: firstError
+        ? `这个 PDF 一页都没认出来：${firstError}`
+        : "这个 PDF 逐页识别下来一个字也没认出来",
+    };
   }
 
   const notes = [`这个 PDF 是扫描件，走图像识别，会慢一点。已认 ${count} 页。`];
@@ -161,13 +173,12 @@ async function parseScannedPdf(
 async function parseImage(bytes: Uint8Array, ext: string): Promise<ParseOutcome> {
   const mime = ext === "jpg" ? "jpeg" : ext;
   const b64 = `data:image/${mime};base64,${Buffer.from(bytes).toString("base64")}`;
-  const text = await ocrImage(b64, null);
-  if (text === null || text.trim() === "") {
-    return { ok: false, error: "这张图里没认出文字" };
-  }
+  const r = await ocrImage(b64, null);
+  if (!r.ok) return { ok: false, error: `这张图没认出来：${r.error}` };
+  if (r.text.trim() === "") return { ok: false, error: "这张图里没有文字" };
   return {
     ok: true,
-    text: text.trim(),
+    text: r.text.trim(),
     kind: "image",
     pages: 1,
     note: "图片走的是图像识别，认错字比读文本文件多，抽完记得对一眼原文。",
@@ -184,10 +195,9 @@ const OCR_SYSTEM = `你是一个文字转写器。把图片里的文字逐字打
 图片里没有文字就输出空字符串。
 只输出转写结果本身，不要任何前后说明。`;
 
-async function ocrImage(
-  base64OrDataUrl: string,
-  pageNo: number | null,
-): Promise<string | null> {
+type Ocr = { ok: true; text: string } | { ok: false; error: string };
+
+async function ocrImage(base64OrDataUrl: string, pageNo: number | null): Promise<Ocr> {
   const r = await callLLM({
     tier: "vision",
     purpose: pageNo === null ? "parse_image" : "parse_pdf_page",
@@ -195,7 +205,7 @@ async function ocrImage(
     user: pageNo === null ? "转写这张图里的文字。" : `转写这一页（第 ${pageNo} 页）里的文字。`,
     images: [base64OrDataUrl],
   });
-  return r.ok ? r.data : null;
+  return r.ok ? { ok: true, text: r.data } : { ok: false, error: r.error };
 }
 
 // ---- 小工具 ----
