@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createAtom } from "@/app/(app)/library/actions";
+import { useSettle } from "@/lib/useSettle";
 import type { AtomDetail as Detail } from "@/lib/queries/atoms";
 import { AtomEditForm } from "./AtomEditForm";
 import { AtomReadView } from "./AtomReadView";
@@ -23,13 +24,8 @@ export function AtomPane({
   const [editing, setEditing] = useState(searchParams.get("edit") === "1");
 
   // 保存成功到服务端把新数据发回来，中间隔着一次往返。这期间不能退回只读态，
-  // 否则会闪半秒旧值，看着像没保存上。detail 换了新对象就说明数据到了。
-  const [seen, setSeen] = useState(detail);
-  const [settling, setSettling] = useState(false);
-  if (seen !== detail) {
-    setSeen(detail);
-    if (settling) setSettling(false);
-  }
+  // 否则会闪半秒旧值，看着像没保存上。
+  const { settling, hold } = useSettle(detail);
   const [adding, startAdd] = useTransition();
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -41,9 +37,7 @@ export function AtomPane({
   }
 
   function afterSave() {
-    setSettling(true);
-    // 兜底：万一那次刷新没回来，也不能把人锁在编辑态里
-    setTimeout(() => setSettling(false), 5000);
+    hold();
     leaveEdit();
   }
 
@@ -78,10 +72,7 @@ export function AtomPane({
         projects={projects}
         settling={settling}
         onSaved={afterSave}
-        onCancel={() => {
-          setSettling(false);
-          leaveEdit();
-        }}
+        onCancel={leaveEdit}
         onDeleted={() => router.replace("/library", { scroll: false })}
       />
     );

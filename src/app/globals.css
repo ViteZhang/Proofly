@@ -105,3 +105,35 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ============================================================
+   证明度变化的两个反馈（§S3 · 切片 1.5）
+   指标存下去之后证明度可能跳档。不给反馈的话，用户不知道刚才
+   那一下有没有用；跳了档更要让他看见是哪一档变成哪一档。
+   两个动画都在 prefers-reduced-motion 下停掉，但状态本身照常变。
+   ============================================================ */
+
+@keyframes proof-flash {
+  0% { background: var(--proof-soft); }
+  45% { background: var(--proof); color: #fff; }
+  100% { background: var(--proof-soft); }
+}
+
+.proof-flash {
+  animation: proof-flash 400ms ease-out 1;
+}
+
+@keyframes proof-notice {
+  0% { opacity: 0; transform: translateY(-2px); }
+  8%, 80% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: none; }
+}
+
+.proof-notice {
+  animation: proof-notice 3s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proof-flash { animation: none; }
+  .proof-notice { animation: none; }
+}

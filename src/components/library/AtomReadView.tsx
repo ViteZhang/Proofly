@@ -1,15 +1,18 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
+import type { EvidenceChange } from "@/app/(app)/library/actions";
 import {
   CONTEXT_LABEL,
   EVIDENCE_LABEL,
-  METRIC_KIND_LABEL,
   STATUS_LABEL,
   STRENGTH_LABEL,
 } from "@/lib/domain";
 import { explainEvidence, STRENGTH_EXPLAIN } from "@/lib/evidence";
-import type { AtomDetail as Detail, AtomMetric } from "@/lib/queries/atoms";
+import type { AtomDetail as Detail } from "@/lib/queries/atoms";
+import { MetricsBlock } from "./MetricsBlock";
+import { PendingBlock } from "./PendingBlock";
 import { ProofDot } from "./ProofDot";
 import { WhyTip } from "./WhyTip";
 
@@ -27,6 +30,26 @@ export function AtomReadView({
   addingSlice: boolean;
 }) {
   const range = period(atom.period_start, atom.period_end);
+
+  // 指标一存，证明度可能跳档。跳了就在指标区顶上说一句，
+  // 同时让上面那个证明度标记闪一下——不然用户不知道刚才那一下起没起作用。
+  // seq 只为让提示重新播一遍淡入淡出；连着改两次时，
+  // 第一次的定时器也要清掉，不然第二条提示会被提前收走。
+  const [notice, setNotice] = useState<{ change: EvidenceChange; seq: number } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const change = notice?.change ?? null;
+
+  function noteChange(next: EvidenceChange) {
+    if (!next.changed) return;
+    if (timer.current) clearTimeout(timer.current);
+    setNotice((prev) => ({ change: next, seq: (prev?.seq ?? 0) + 1 }));
+    timer.current = setTimeout(() => setNotice(null), 3000);
+  }
+
+  // 提示说「仅设计 → 实测」的那一刻，atom 还是上一轮的数据。
+  // 标记先按新档位显示，等真数据回来两边就一致了。
+  const shownLevel =
+    change?.changed && atom.evidence_level !== change.after ? change.after : atom.evidence_level;
 
   return (
     <article
@@ -59,12 +82,15 @@ export function AtomReadView({
 
         {/* 证明度只读。旁边的 ? 解释当前这一档是怎么推出来的。 */}
         <span
-          className="inline-flex items-center gap-1.5 rounded-pill px-2.5 py-[3px] text-[12px]"
+          key={shownLevel}
+          className={`inline-flex items-center gap-1.5 rounded-pill px-2.5 py-[3px] text-[12px] ${
+            change?.changed ? "proof-flash" : ""
+          }`}
           style={{ background: "var(--proof-soft)", color: "var(--ink)" }}
         >
-          <ProofDot level={atom.evidence_level} size={9} />
-          {EVIDENCE_LABEL[atom.evidence_level]}
-          <WhyTip explain={explainEvidence(atom.evidence_level, atom.status, atom.metrics)} />
+          <ProofDot level={shownLevel} size={9} />
+          {EVIDENCE_LABEL[shownLevel]}
+          <WhyTip explain={explainEvidence(shownLevel, atom.status, atom.metrics)} />
         </span>
       </div>
 
@@ -99,34 +125,22 @@ export function AtomReadView({
 
       {/* 5 结果 */}
       <Block title="结果">
-        {atom.metrics.length > 0 ? (
-          <ul className="-mx-1">
-            {atom.metrics.map((m) => (
-              <MetricRow key={m.id} metric={m} />
-            ))}
-          </ul>
-        ) : (
-          <Todo>还没有结果指标。补一条，证明度会跟着变。</Todo>
-        )}
+        <MetricsBlock
+          atomId={atom.id}
+          metrics={atom.metrics}
+          notice={change}
+          noticeKey={notice?.seq ?? 0}
+          onSaved={noteChange}
+        />
       </Block>
 
       {/* 6 待补数据 */}
       <Block title="待补数据">
-        {atom.pending_metrics.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {atom.pending_metrics.map((p) => (
-              <span
-                key={p.id}
-                className="rounded-pill px-2.5 py-[3px] text-[12.5px]"
-                style={{ border: "1px dashed var(--line)", color: "var(--slate)" }}
-              >
-                {p.name}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <Todo>想到还缺哪个数，记在这里，回头补上就能提证明度。</Todo>
-        )}
+        <PendingBlock
+          atomId={atom.id}
+          items={atom.pending_metrics}
+          onSaved={noteChange}
+        />
       </Block>
 
       {/* 7 叙事护栏 */}
@@ -234,7 +248,11 @@ function Block({
   children: React.ReactNode;
 }) {
   return (
-    <section className="border-t px-6 py-5" style={{ borderColor: "var(--line-soft)" }}>
+    <section
+      data-block={title}
+      className="border-t px-6 py-5"
+      style={{ borderColor: "var(--line-soft)" }}
+    >
       <h3
         className="flex items-center gap-1.5 text-[11.5px] font-medium"
         style={{ letterSpacing: "0.06em", color: "var(--mute)" }}
@@ -295,31 +313,6 @@ function GuardList({ items, tone }: { items: string[]; tone: "proof" | "danger" 
   );
 }
 
-function MetricRow({ metric }: { metric: AtomMetric }) {
-  return (
-    <li className="flex items-baseline gap-2.5 rounded-btn px-1 py-1.5">
-      <ProofDot level={metric.evidence_level} className="translate-y-[1px]" />
-      <span className="text-[13.5px] font-medium">{metric.name}</span>
-      <span className="font-display text-[13.5px]" style={{ color: "var(--ink)" }}>
-        {value(metric)}
-      </span>
-      <span
-        className="rounded-pill px-1.5 py-[1px] text-[11px]"
-        style={{
-          background: metric.kind === "outcome" ? "var(--proof-soft)" : "var(--line-soft)",
-          color: metric.kind === "outcome" ? "var(--ink)" : "var(--slate)",
-        }}
-      >
-        {METRIC_KIND_LABEL[metric.kind]}
-      </span>
-      {metric.method && (
-        <span className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--mute)" }}>
-          {metric.method}
-        </span>
-      )}
-    </li>
-  );
-}
 
 function StrengthDot({ strength }: { strength: "strong" | "weak" | "none" }) {
   const color = strength === "none" ? "var(--ghost)" : "var(--proof)";
@@ -342,10 +335,3 @@ function period(start: string | null, end: string | null): string | null {
   return `${fmt(start)} – ${end ? fmt(end) : "至今"}`;
 }
 
-function value(metric: AtomMetric): string {
-  if (metric.from_value && metric.to_value) {
-    const base = `${metric.from_value} → ${metric.to_value}`;
-    return metric.delta ? `${base}（${metric.delta}）` : base;
-  }
-  return metric.delta ?? metric.to_value ?? metric.from_value ?? "";
-}
