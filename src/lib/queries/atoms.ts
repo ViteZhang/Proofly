@@ -28,6 +28,8 @@ import type {
 type AtomRow = Database["public"]["Tables"]["atoms"]["Row"];
 
 // 树里每个节点只带展示需要的列，正文（situation/task/actions）留给详情查询。
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const TREE_COLUMNS =
   "id,parent_id,level,context,org,role,title,period_start,period_end,status,evidence_level,sort_order";
 
@@ -213,6 +215,9 @@ export type AtomDetail = {
  * id 不存在或不属于当前用户时返回 null，交由页面走优雅降级（验收 27）。
  */
 export async function getAtomDetail(id: string): Promise<AtomDetail | null> {
+  // ?atom= 是用户可以随手改的。不是 uuid 就当没这条，别让 Postgres 抛 22P02。
+  if (!UUID_RE.test(id)) return null;
+
   const supabase = await createClient();
 
   const { data: atom, error } = await supabase

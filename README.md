@@ -239,12 +239,13 @@ src/
     globals.css            设计令牌（§5）+ Tailwind v4 @theme
   components/
     layout/                Sidebar · Topbar · Logo（字标两个色版）
-    library/               经历树 · 证明度标记 · 空状态
+    library/               经历树 · 经历详情 · 证明度标记 · 空状态
     ui/Button.tsx          按钮四形态
   lib/
     supabase/              client · server · middleware(session)
     queries/               读取层：atoms（树/详情/证明度）· facts（事实层）
     domain.ts              证明度词汇 + jsonb 形状解析 + ActionResult
+    evidence.ts            证明度为什么是这一档（与 SQL 触发器逐条对应）
     nav.ts                 导航结构 + 全局/方向判定
   types/database.ts        Supabase 数据库类型
   proxy.ts                 session 刷新 + 登录重定向（Next 16 proxy 约定）
