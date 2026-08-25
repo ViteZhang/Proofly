@@ -1,11 +1,12 @@
-import { MODEL, llmEndpoint } from "@/lib/llm/config";
+import { MODEL, TIERS, llmEndpoint } from "@/lib/llm/config";
 import { CheckPanel } from "./CheckPanel";
 import { recentCalls } from "./actions";
 
 // 临时页面：确认四个档位都通、成本记录正常写入。
 // 交付物清单要求 Step 2 结束前删掉它。
 export default async function LlmCheckPage() {
-  const endpoint = llmEndpoint();
+  const chat = llmEndpoint("light");
+  const vec = llmEndpoint("embedding");
   const calls = await recentCalls();
 
   return (
@@ -19,16 +20,25 @@ export default async function LlmCheckPage() {
         className="mt-4 rounded-card p-4 font-mono text-[12.5px]"
         style={{ background: "var(--card)", border: "1px solid var(--line)" }}
       >
-        {endpoint ? (
+        {chat ? (
           <>
-            <div>接入点 {endpoint.baseURL}</div>
-            <div style={{ color: "var(--mute)" }}>
-              key ····{endpoint.apiKey.slice(-4)}
+            <div>
+              对话 {chat.baseURL} · key ····{chat.apiKey.slice(-4)}
+            </div>
+            <div>
+              向量{" "}
+              {vec ? (
+                <>
+                  {vec.baseURL} · key ····{vec.apiKey.slice(-4)}
+                </>
+              ) : (
+                <span style={{ color: "var(--danger)" }}>没配</span>
+              )}
             </div>
             <div className="mt-2">
-              {Object.entries(MODEL).map(([tier, model]) => (
+              {TIERS.map((tier) => (
                 <div key={tier}>
-                  {tier.padEnd(10, " ")} {model}
+                  {tier.padEnd(10, "\u00a0")} {MODEL[tier]}
                 </div>
               ))}
             </div>

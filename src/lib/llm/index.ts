@@ -72,7 +72,7 @@ export async function callLLM(opts: TextOptions): Promise<LLMResult<string>>;
 export async function callLLM(
   opts: (TextOptions & { jsonSchema?: ZodType }) | EmbeddingOptions,
 ): Promise<LLMResult<unknown>> {
-  const endpoint = llmEndpoint();
+  const endpoint = llmEndpoint(opts.tier);
   if (!endpoint) {
     return { ok: false, error: "没有配置模型接入，先在 .env.local 里填 OPENAI_API_KEY" };
   }
