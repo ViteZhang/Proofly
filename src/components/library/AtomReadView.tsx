@@ -7,13 +7,14 @@ import {
   CONTEXT_LABEL,
   EVIDENCE_LABEL,
   STATUS_LABEL,
-  STRENGTH_LABEL,
 } from "@/lib/domain";
 import { explainEvidence, STRENGTH_EXPLAIN } from "@/lib/evidence";
 import type { AtomDetail as Detail } from "@/lib/queries/atoms";
+import { GuardsBlock } from "./GuardsBlock";
 import { MetricsBlock } from "./MetricsBlock";
 import { PendingBlock } from "./PendingBlock";
 import { ProofDot } from "./ProofDot";
+import { SkillsBlock } from "./SkillsBlock";
 import { WhyTip } from "./WhyTip";
 
 // 区块顺序固定（S3）：标题 → 元信息 → 背景 → 我做了什么 → 结果 →
@@ -145,76 +146,12 @@ export function AtomReadView({
 
       {/* 7 叙事护栏 */}
       <Block title="叙事护栏">
-        {atom.guards ? (
-          <div className="space-y-3">
-            {atom.guards.role_framing && (
-              <div>
-                <SubTitle>角色定位</SubTitle>
-                <Paragraph>{atom.guards.role_framing}</Paragraph>
-              </div>
-            )}
-            {atom.guards.must_say.length > 0 && (
-              <div>
-                <SubTitle>必须说</SubTitle>
-                <GuardList items={atom.guards.must_say} tone="proof" />
-              </div>
-            )}
-            {atom.guards.never_say.length > 0 && (
-              <div>
-                <SubTitle>不能说</SubTitle>
-                <GuardList items={atom.guards.never_say} tone="danger" />
-              </div>
-            )}
-            {atom.guards.probes.length > 0 && (
-              <div>
-                <SubTitle>被追问时</SubTitle>
-                {atom.guards.probes.map((probe, i) => (
-                  <div key={`${i}-${probe.q}`} className="py-1">
-                    <div className="text-[13.5px] font-medium">{probe.q}</div>
-                    {probe.a_outline && (
-                      <div className="text-[13px]" style={{ color: "var(--slate)" }}>
-                        {probe.a_outline}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center gap-2.5">
-            <span className="text-[13px]" style={{ color: "var(--mute)" }}>
-              还没设置叙事护栏。
-            </span>
-            <Button variant="secondary" size="sm" disabled title="切片 1.6 接上">
-              添加
-            </Button>
-          </div>
-        )}
+        <GuardsBlock atomId={atom.id} guards={atom.guards} />
       </Block>
 
       {/* 8 技能证据 */}
-      <Block
-        title="技能证据"
-        aside={<WhyTip explain={STRENGTH_EXPLAIN} />}
-      >
-        {atom.skills.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {atom.skills.map((s) => (
-              <span
-                key={s.linkId}
-                className="inline-flex items-center gap-1.5 rounded-pill px-2.5 py-[3px] text-[12.5px]"
-                style={{ border: "1px solid var(--line)", color: "var(--ink)" }}
-              >
-                <StrengthDot strength={s.evidence_strength} />
-                {s.label}
-                <span style={{ color: "var(--mute)" }}>{STRENGTH_LABEL[s.evidence_strength]}</span>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <Todo>还没关联技能。没有经历支撑的技能不会出现在简历技能栏里。</Todo>
-        )}
+      <Block title="技能证据" aside={<WhyTip explain={STRENGTH_EXPLAIN} />}>
+        <SkillsBlock atomId={atom.id} skills={atom.skills} />
       </Block>
 
       {/* 9 各方向策略 —— targets 表要到 Step 4 才有数据，这里先占位 */}
@@ -265,13 +202,6 @@ function Block({
   );
 }
 
-function SubTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="text-[12px] font-medium" style={{ color: "var(--slate)" }}>
-      {children}
-    </div>
-  );
-}
 
 function Paragraph({ children }: { children: React.ReactNode }) {
   return <p className="whitespace-pre-wrap text-[13.5px] leading-[1.75]">{children}</p>;
@@ -297,35 +227,8 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
-function GuardList({ items, tone }: { items: string[]; tone: "proof" | "danger" }) {
-  const color = tone === "proof" ? "var(--proof)" : "var(--danger)";
-  return (
-    <ul>
-      {items.map((item, i) => (
-        <li key={`${i}-${item}`} className="flex gap-2 py-[3px] text-[13.5px]">
-          <span aria-hidden style={{ color }}>
-            {tone === "proof" ? "✓" : "✕"}
-          </span>
-          <span className="min-w-0 flex-1">{item}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 
-function StrengthDot({ strength }: { strength: "strong" | "weak" | "none" }) {
-  const color = strength === "none" ? "var(--ghost)" : "var(--proof)";
-  return (
-    <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden className="shrink-0">
-      {strength === "strong" ? (
-        <circle cx="5" cy="5" r="4.25" fill={color} />
-      ) : (
-        <circle cx="5" cy="5" r="3.6" fill="none" stroke={color} strokeWidth="1.4" />
-      )}
-    </svg>
-  );
-}
 
 // period_end 为 null 显示「至今」
 function period(start: string | null, end: string | null): string | null {

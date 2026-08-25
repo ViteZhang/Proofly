@@ -239,7 +239,8 @@ src/
     globals.css            设计令牌（§5）+ Tailwind v4 @theme
   components/
     layout/                Sidebar · Topbar · Logo（字标两个色版）
-    library/               经历树 · 详情只读/编辑态 · 结果指标 · 待补数据 · 删除确认
+    library/               经历树 · 详情只读/编辑态 · 结果指标 · 待补数据
+                           · 叙事护栏 · 技能 combobox · 删除确认
     ui/Button.tsx          按钮四形态
   lib/
     supabase/              client · server · middleware(session)

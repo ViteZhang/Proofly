@@ -594,32 +594,6 @@ export async function linkSkill(
   return ok({ skillId, linkId: link.id });
 }
 
-export type UnlinkImpact = { label: string; becomesOrphan: boolean };
-
-/** 解除前先看看：解完这个技能会不会一条经历都不剩（那样它就不会出现在简历里了）。 */
-export async function getUnlinkImpact(linkId: string): Promise<ActionResult<UnlinkImpact>> {
-  if (!z.uuid().safeParse(linkId).success) return fail("这个关联不存在");
-  const supabase = await createClient();
-
-  const { data: link } = await supabase
-    .from("atom_skills")
-    .select("skill_id,skill:skills(label)")
-    .eq("id", linkId)
-    .maybeSingle();
-  if (!link) return fail("这个关联已经不在了");
-
-  const skill = Array.isArray(link.skill) ? link.skill[0] : link.skill;
-  const { data: siblings } = await supabase
-    .from("atom_skills")
-    .select("id")
-    .eq("skill_id", link.skill_id);
-
-  return ok({
-    label: skill?.label ?? "这个技能",
-    becomesOrphan: (siblings?.length ?? 0) <= 1,
-  });
-}
-
 export async function unlinkSkill(linkId: string): Promise<ActionResult> {
   if (!z.uuid().safeParse(linkId).success) return fail("这个关联不存在");
   const supabase = await createClient();

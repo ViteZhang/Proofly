@@ -184,6 +184,9 @@ export type AtomSkill = {
   category: string | null;
   depth: SkillDepth | null;
   evidence_strength: EvidenceStrength;
+  // 这个技能一共被几条经历关联着。解除时要立刻说清楚会不会解成孤儿，
+  // 所以顺手带出来，别让界面为了一句提示再跑一趟服务端。
+  linkCount: number;
 };
 
 export type AtomDetail = {
@@ -264,12 +267,26 @@ export async function getAtomDetail(id: string): Promise<AtomDetail | null> {
       }
     : null;
 
-  const skills: AtomSkill[] = (skillsRes.data ?? [])
-    .flatMap((row) => {
-      // PostgREST 的嵌套关系在类型上可能是对象或数组，统一摊平。
-      const s = Array.isArray(row.skill) ? row.skill[0] : row.skill;
-      return s ? [{ linkId: row.id, ...s }] : [];
-    })
+  const linked = (skillsRes.data ?? []).flatMap((row) => {
+    // PostgREST 的嵌套关系在类型上可能是对象或数组，统一摊平。
+    const s = Array.isArray(row.skill) ? row.skill[0] : row.skill;
+    return s ? [{ linkId: row.id, ...s }] : [];
+  });
+
+  const counts = new Map<string, number>();
+  if (linked.length > 0) {
+    const { data: allLinks } = await supabase
+      .from("atom_skills")
+      .select("skill_id")
+      .in(
+        "skill_id",
+        linked.map((s) => s.id),
+      );
+    for (const l of allLinks ?? []) counts.set(l.skill_id, (counts.get(l.skill_id) ?? 0) + 1);
+  }
+
+  const skills: AtomSkill[] = linked
+    .map((s) => ({ ...s, linkCount: counts.get(s.id) ?? 1 }))
     .sort((a, b) => a.label.localeCompare(b.label, "zh-Hans-CN"));
 
   return {
