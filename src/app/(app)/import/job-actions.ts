@@ -148,6 +148,18 @@ export async function restartJob(jobId: string): Promise<ActionResult<null>> {
   return ok(null);
 }
 
+/** 放弃这个作业，回到上传区。Pass 1 就挂掉时，重试之外总得有条退路。 */
+export async function discardJob(jobId: string): Promise<ActionResult<null>> {
+  if (!uuid.safeParse(jobId).success) return fail("作业标识不对");
+  const supabase = await createClient();
+  await supabase.from("drafts").delete().eq("ingest_job_id", jobId);
+  const { error } = await supabase
+    .from("ingest_jobs")
+    .update({ status: "discarded" })
+    .eq("id", jobId);
+  return error ? fail(`没能放弃这个作业：${error.message}`) : ok(null);
+}
+
 /** 打开导入页时找回上一个没处理完的作业。 */
 export async function findOpenJob(): Promise<ActionResult<string | null>> {
   const supabase = await createClient();

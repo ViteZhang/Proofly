@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import {
+  discardJob,
   getJobProgress,
   restartJob,
   retryOne,
@@ -15,9 +16,11 @@ const POLL_MS = 2000;
 export function JobProgressPanel({
   jobId,
   onSettled,
+  onDiscard,
 }: {
   jobId: string;
   onSettled?: (p: JobProgress) => void;
+  onDiscard?: () => void;
 }) {
   const [p, setP] = useState<JobProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -111,14 +114,24 @@ export function JobProgressPanel({
           <p className="text-[13.5px]" style={{ color: "var(--danger)" }}>
             {p.errorMessage}
           </p>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="mt-2"
-            onClick={() => void again(() => restartJob(jobId))}
-          >
-            重新抽一次
-          </Button>
+          <div className="mt-2 flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void again(() => restartJob(jobId))}
+            >
+              重新抽一次
+            </Button>
+            <Button
+              variant="text"
+              size="sm"
+              onClick={() =>
+                void discardJob(jobId).then(() => onDiscard?.())
+              }
+            >
+              放弃这份，换一份传
+            </Button>
+          </div>
         </div>
       ) : (
         failed.length > 0 && (

@@ -29,7 +29,14 @@ export function ImportFlow({ resumeJobId }: { resumeJobId: string | null }) {
   if (jobId) {
     return (
       <div>
-        <JobProgressPanel jobId={jobId} onSettled={onSettled} />
+        <JobProgressPanel
+          jobId={jobId}
+          onSettled={onSettled}
+          onDiscard={() => {
+            setJobId(null);
+            setDone(null);
+          }}
+        />
         {done && (
           <div className="mt-4 flex items-center gap-2">
             {done.draftCount > 0 ? (
