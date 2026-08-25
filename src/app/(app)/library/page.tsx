@@ -1,5 +1,5 @@
 import { getAtomDetail, getAtomTree, getProofSummary } from "@/lib/queries/atoms";
-import { AtomDetail } from "@/components/library/AtomDetail";
+import { AtomPane } from "@/components/library/AtomPane";
 import { EmptyLibrary } from "@/components/library/EmptyLibrary";
 import { LibraryTree } from "@/components/library/LibraryTree";
 
@@ -20,6 +20,12 @@ export default async function LibraryPage({
   // id 不存在 / 不是本人的 / 压根不是 uuid，都返回 null，走下面的降级。
   const detail = atom ? await getAtomDetail(atom) : null;
 
+  // 父级下拉只列经历，且不能选自己。
+  const projects = tree.groups
+    .flatMap((g) => g.atoms)
+    .filter((a) => a.level === "project" && a.id !== detail?.id)
+    .map((a) => ({ id: a.id, title: a.title }));
+
   return (
     <div>
       <h1 className="font-display text-[26px] font-semibold tracking-tight">经历库</h1>
@@ -32,7 +38,7 @@ export default async function LibraryPage({
 
         <section className="min-w-0 flex-1">
           {detail ? (
-            <AtomDetail atom={detail} />
+            <AtomPane key={detail.id} detail={detail} projects={projects} />
           ) : (
             <div
               className="rounded-card px-6 py-7 text-[13.5px]"

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/Button";
+import { NewAtomButton } from "./NewAtomButton";
 
 // 一条经历都没有时，整个页面替换成这个引导——不是只把左栏做空。
 export function EmptyLibrary() {
@@ -12,9 +12,9 @@ export function EmptyLibrary() {
         <p className="mx-auto mt-2 max-w-[320px] text-[13.5px]" style={{ color: "var(--slate)" }}>
           先手动加一条试试，或者等下一步做完，直接传一份旧简历自动拆。
         </p>
-        <Button className="mt-5" disabled title="切片 1.4 接上">
-          手动添加第一条
-        </Button>
+        <div className="mt-5">
+          <NewAtomButton label="手动添加第一条" variant="primary" />
+        </div>
       </div>
     </div>
   );

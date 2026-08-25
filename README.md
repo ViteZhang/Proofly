@@ -239,7 +239,7 @@ src/
     globals.css            设计令牌（§5）+ Tailwind v4 @theme
   components/
     layout/                Sidebar · Topbar · Logo（字标两个色版）
-    library/               经历树 · 经历详情 · 证明度标记 · 空状态
+    library/               经历树 · 详情只读态与编辑态 · 删除确认 · 证明度标记
     ui/Button.tsx          按钮四形态
   lib/
     supabase/              client · server · middleware(session)

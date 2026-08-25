@@ -1,3 +1,5 @@
+"use client";
+
 import { Button } from "@/components/ui/Button";
 import {
   CONTEXT_LABEL,
@@ -12,8 +14,18 @@ import { ProofDot } from "./ProofDot";
 import { WhyTip } from "./WhyTip";
 
 // 区块顺序固定（S3）：标题 → 元信息 → 背景 → 我做了什么 → 结果 →
-// 待补数据 → 叙事护栏 → 技能证据 → 各方向策略。本片只读。
-export function AtomDetail({ atom }: { atom: Detail }) {
+// 待补数据 → 叙事护栏 → 技能证据 → 各方向策略。
+export function AtomReadView({
+  atom,
+  onEdit,
+  onAddSlice,
+  addingSlice,
+}: {
+  atom: Detail;
+  onEdit: () => void;
+  onAddSlice: () => void;
+  addingSlice: boolean;
+}) {
   const range = period(atom.period_start, atom.period_end);
 
   return (
@@ -29,7 +41,7 @@ export function AtomDetail({ atom }: { atom: Detail }) {
             {atom.id}
           </div>
         </div>
-        <Button variant="secondary" size="sm" disabled title="切片 1.4 接上">
+        <Button variant="secondary" size="sm" onClick={onEdit}>
           编辑
         </Button>
       </header>
@@ -197,6 +209,15 @@ export function AtomDetail({ atom }: { atom: Detail }) {
           还没有求职方向。建了方向之后，可以在这里配置这条经历在各方向下的展开程度。
         </Todo>
       </Block>
+
+      {/* 只有两层：能力点下面不能再挂能力点，所以这个按钮只对经历出现 */}
+      {atom.level === "project" && (
+        <div className="border-t px-6 py-4" style={{ borderColor: "var(--line-soft)" }}>
+          <Button variant="text" size="sm" onClick={onAddSlice} disabled={addingSlice}>
+            {addingSlice ? "正在新建…" : "＋ 添加能力点"}
+          </Button>
+        </div>
+      )}
     </article>
   );
 }

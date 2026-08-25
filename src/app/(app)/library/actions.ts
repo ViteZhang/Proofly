@@ -151,6 +151,30 @@ export async function updateAtom(
   // 自己不能当自己的父级
   if (parsed.data.parent_id === id) return fail("不能把一条经历挂到它自己下面");
 
+  // 层级切换的三种坏组合，数据库拦不住，得在这里挡：
+  //   1. 有能力点的经历改成能力点 —— check_atom_depth 只在子级改 parent_id 时触发，
+  //      父级自己降级它管不到，会留下三层嵌套。
+  //   2. 改成能力点却没有父级 —— 变成一条挂空的能力点。
+  //   3. 改回经历却还留着父级。
+  const level = parsed.data.level;
+  if (level === "capability_slice") {
+    const supabase = await createClient();
+    const { data: kids } = await supabase.from("atoms").select("id").eq("parent_id", id).limit(1);
+    if (kids && kids.length > 0) {
+      return fail("这条下面还挂着能力点，不能改成能力点。先把它们挪到别处。");
+    }
+    const { data: current } = await supabase
+      .from("atoms")
+      .select("parent_id")
+      .eq("id", id)
+      .maybeSingle();
+    const parent = parsed.data.parent_id ?? current?.parent_id ?? null;
+    if (!parent) return fail("能力点必须挂在一条经历下面，先选一个");
+    parsed.data.parent_id = parent;
+  } else if (level === "project") {
+    parsed.data.parent_id = null;
+  }
+
   // 补一次跨字段校验：只改了其中一个日期时，要拿库里的另一个来比。
   if (parsed.data.period_start !== undefined || parsed.data.period_end !== undefined) {
     const supabase = await createClient();

@@ -1,17 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button } from "@/components/ui/Button";
+import { reorderAtoms } from "@/app/(app)/library/actions";
 import { EVIDENCE_LABEL, EVIDENCE_ORDER } from "@/lib/domain";
-import type { AtomNode, AtomTree, ProofSummary } from "@/lib/queries/atoms";
+import type { AtomGroup, AtomNode, AtomTree, ProofSummary } from "@/lib/queries/atoms";
 import type { EvidenceLevel } from "@/types/database";
+import { NewAtomButton } from "./NewAtomButton";
 import { ProofDot } from "./ProofDot";
 
 // 过滤后的一条：self 表示这条自己命中；父没命中但子命中时父仍要显示（灰化），
 // 否则层级会断掉，看不出这个能力点属于谁。
 type Row = { node: AtomNode; self: boolean; children: AtomNode[] };
-type Group = { key: string; title: string; rows: Row[] };
+type Filtered = { key: string; title: string; rows: Row[] };
+
+// 拖拽只在同一组同一父级之间成立。setKey 就是「同级」的身份。
+type Drag = { id: string; setKey: string };
 
 export function LibraryTree({
   tree,
@@ -32,20 +36,30 @@ export function LibraryTree({
 
   const [levels, setLevels] = useState<Set<EvidenceLevel>>(new Set());
   const [q, setQ] = useState("");
+  const [, startReorder] = useTransition();
+
+  // 拖完先本地排好，等服务端把新顺序发回来再丢掉本地这份。
+  const serverSig = useMemo(() => signature(tree.groups), [tree.groups]);
+  const [moved, setMoved] = useState<{ sig: string; groups: AtomGroup[] } | null>(null);
+  if (moved && moved.sig !== serverSig) setMoved(null);
+  const source = moved?.groups ?? tree.groups;
+
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const [over, setOver] = useState<string | null>(null);
 
   const keyword = q.trim().toLowerCase();
+  const filtering = levels.size > 0 || keyword.length > 0;
 
-  const groups = useMemo<Group[]>(() => {
+  const groups = useMemo<Filtered[]>(() => {
     const hit = (a: AtomNode) => {
-      const levelOk = levels.size === 0 || levels.has(a.evidence_level);
-      if (!levelOk) return false;
+      if (levels.size > 0 && !levels.has(a.evidence_level)) return false;
       if (!keyword) return true;
       return [a.title, a.org, a.role]
         .filter(Boolean)
         .some((t) => t!.toLowerCase().includes(keyword));
     };
 
-    return tree.groups
+    return source
       .map((g) => ({
         key: g.key,
         title: g.title,
@@ -54,7 +68,7 @@ export function LibraryTree({
           .filter((r) => r.self || r.children.length > 0),
       }))
       .filter((g) => g.rows.length > 0);
-  }, [tree, levels, keyword]);
+  }, [source, levels, keyword]);
 
   function toggleLevel(level: EvidenceLevel) {
     setLevels((prev) => {
@@ -70,10 +84,52 @@ export function LibraryTree({
     setOptimistic(id);
     const params = new URLSearchParams(searchParams.toString());
     params.set("atom", id);
+    params.delete("edit");
     router.replace(`/library?${params.toString()}`, { scroll: false });
   }
 
-  const filtering = levels.size > 0 || keyword.length > 0;
+  function drop(setKey: string, targetId: string) {
+    const from = drag?.id;
+    setDrag(null);
+    setOver(null);
+    if (!from || from === targetId || drag?.setKey !== setKey) return;
+
+    const siblings = siblingIds(source, setKey);
+    const at = siblings.indexOf(targetId);
+    const cur = siblings.indexOf(from);
+    if (at < 0 || cur < 0) return;
+
+    const next = [...siblings];
+    next.splice(cur, 1);
+    next.splice(at, 0, from);
+
+    setMoved({ sig: serverSig, groups: applyOrder(source, setKey, next) });
+    startReorder(async () => {
+      await reorderAtoms(next);
+    });
+  }
+
+  const dragProps = (setKey: string, id: string) =>
+    filtering
+      ? {}
+      : {
+          draggable: true,
+          onDragStart: () => setDrag({ id, setKey }),
+          onDragEnd: () => {
+            setDrag(null);
+            setOver(null);
+          },
+          onDragOver: (e: React.DragEvent) => {
+            if (drag?.setKey !== setKey || drag.id === id) return;
+            e.preventDefault();
+            setOver(id);
+          },
+          onDragLeave: () => setOver((v) => (v === id ? null : v)),
+          onDrop: (e: React.DragEvent) => {
+            e.preventDefault();
+            drop(setKey, id);
+          },
+        };
 
   return (
     <aside className="w-[268px] shrink-0">
@@ -81,9 +137,7 @@ export function LibraryTree({
         className="sticky top-[84px] flex max-h-[calc(100vh-112px)] flex-col rounded-card p-3"
         style={{ background: "var(--card)", border: "1px solid var(--line)" }}
       >
-        <Button variant="secondary" size="sm" className="w-full" disabled title="切片 1.4 接上">
-          ＋ 新增经历
-        </Button>
+        <NewAtomButton label="＋ 新增经历" className="w-full" sortOrder={tree.total} />
 
         {/* 证明度筛选：多选，再点一次取消 */}
         <div className="mt-2.5 flex flex-wrap gap-1">
@@ -173,7 +227,9 @@ export function LibraryTree({
                       q={keyword}
                       dimmed={!row.self}
                       active={selected === row.node.id}
-                      onSelect={select}
+                      dropping={over === row.node.id}
+                      onPick={select}
+                      {...dragProps(`group:${group.key}`, row.node.id)}
                     />
                     {row.children.map((child) => (
                       <TreeRow
@@ -182,7 +238,9 @@ export function LibraryTree({
                         q={keyword}
                         indented
                         active={selected === child.id}
-                        onSelect={select}
+                        dropping={over === child.id}
+                        onPick={select}
+                        {...dragProps(`parent:${row.node.id}`, child.id)}
                       />
                     ))}
                   </div>
@@ -216,26 +274,31 @@ function TreeRow({
   active,
   dimmed = false,
   indented = false,
-  onSelect,
+  dropping = false,
+  onPick,
+  ...drag
 }: {
   node: AtomNode;
   q: string;
   active: boolean;
   dimmed?: boolean;
   indented?: boolean;
-  onSelect: (id: string) => void;
-}) {
+  dropping?: boolean;
+  onPick: (id: string) => void;
+} & React.HTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="button"
-      onClick={() => onSelect(node.id)}
+      onClick={() => onPick(node.id)}
       aria-current={active ? "true" : undefined}
       className="flex h-8 w-full items-center gap-2 rounded-btn pr-2 text-left transition-colors hover:bg-[var(--line-soft)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink"
       style={{
         paddingLeft: indented ? 22 : 8,
         background: active ? "var(--line-soft)" : "transparent",
         opacity: dimmed ? 0.55 : 1,
+        boxShadow: dropping ? "inset 0 2px 0 0 var(--ink)" : undefined,
       }}
+      {...drag}
     >
       <ProofDot level={node.evidence_level} />
       <span
@@ -280,4 +343,38 @@ function Mark({ text, q }: { text: string; q: string }) {
   if (at === 0) return <>{text}</>;
   if (at < text.length) parts.push(text.slice(at));
   return <>{parts}</>;
+}
+
+// ---- 排序辅助 ----
+
+function signature(groups: AtomGroup[]): string {
+  return groups
+    .map((g) => `${g.key}:${g.atoms.map((a) => `${a.id}[${a.children.map((c) => c.id)}]`)}`)
+    .join("|");
+}
+
+function siblingIds(groups: AtomGroup[], setKey: string): string[] {
+  for (const g of groups) {
+    if (setKey === `group:${g.key}`) return g.atoms.map((a) => a.id);
+    for (const a of g.atoms) {
+      if (setKey === `parent:${a.id}`) return a.children.map((c) => c.id);
+    }
+  }
+  return [];
+}
+
+function applyOrder(groups: AtomGroup[], setKey: string, ids: string[]): AtomGroup[] {
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  const by = (a: { id: string }, b: { id: string }) =>
+    (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0);
+
+  return groups.map((g) => {
+    if (setKey === `group:${g.key}`) return { ...g, atoms: [...g.atoms].sort(by) };
+    return {
+      ...g,
+      atoms: g.atoms.map((a) =>
+        setKey === `parent:${a.id}` ? { ...a, children: [...a.children].sort(by) } : a,
+      ),
+    };
+  });
 }
