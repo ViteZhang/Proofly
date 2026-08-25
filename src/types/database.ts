@@ -26,6 +26,7 @@ export type IngestInputType = "upload" | "chat";
 export type IngestStatus = "extracting" | "awaiting_review" | "committed" | "discarded";
 export type DraftIntent = "CREATE" | "UPDATE" | "ASK";
 export type DraftReviewStatus = "pending" | "accepted" | "edited" | "rejected";
+export type LlmTier = "light" | "strong" | "vision" | "embedding";
 export type RenderWeight = "expand" | "brief" | "one_line" | "omit";
 export type RequirementKind = "hard" | "implicit" | "nice_to_have";
 export type GapType = "no_capability" | "no_evidence" | "weak_evidence" | "structural";
@@ -407,6 +408,39 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      llm_calls: {
+        Row: {
+          id: string;
+          user_id: string;
+          tier: LlmTier;
+          purpose: string;
+          prompt_tokens: number | null;
+          completion_tokens: number | null;
+          duration_ms: number | null;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          tier: LlmTier;
+          purpose: string;
+          prompt_tokens?: number | null;
+          completion_tokens?: number | null;
+          duration_ms?: number | null;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          tier?: LlmTier;
+          purpose?: string;
+          prompt_tokens?: number | null;
+          completion_tokens?: number | null;
+          duration_ms?: number | null;
+          created_at?: string | null;
+        };
+        Relationships: [];
       };
       ingest_jobs: {
         Row: {
