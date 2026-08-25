@@ -12,7 +12,7 @@ import { ProofDot } from "./ProofDot";
 // 过滤后的一条：self 表示这条自己命中；父没命中但子命中时父仍要显示（灰化），
 // 否则层级会断掉，看不出这个能力点属于谁。
 type Row = { node: AtomNode; self: boolean; children: AtomNode[] };
-type Filtered = { key: string; title: string; rows: Row[] };
+type Filtered = { key: string; title: string; tense: AtomGroup["tense"]; period: string | null; rows: Row[] };
 
 // 拖拽只在同一组同一父级之间成立。setKey 就是「同级」的身份。
 type Drag = { id: string; setKey: string };
@@ -63,6 +63,8 @@ export function LibraryTree({
       .map((g) => ({
         key: g.key,
         title: g.title,
+        tense: g.tense,
+        period: g.period,
         rows: g.atoms
           .map((node) => ({ node, self: hit(node), children: node.children.filter(hit) }))
           .filter((r) => r.self || r.children.length > 0),
@@ -212,13 +214,34 @@ export function LibraryTree({
               没有对得上的经历。换个词，或者把筛选去掉。
             </p>
           ) : (
-            groups.map((group) => (
+            groups.map((group, gi) => (
               <div key={group.key} className="mb-2">
+                {/* 过往经历不是一个分组，是一条分节线：下面这些是过去的雇主。
+                    做成分组的话，左栏就得多一层缩进，而数据本身只有两层。 */}
+                {group.tense === "past" && groups[gi - 1]?.tense !== "past" && (
+                  <div className="flex items-center gap-2 px-1.5 pb-1.5 pt-1.5">
+                    <span className="h-px flex-1" style={{ background: "var(--line)" }} />
+                    <span
+                      className="text-[10.5px] font-medium"
+                      style={{ letterSpacing: "0.06em", color: "var(--mute)" }}
+                    >
+                      过往经历
+                    </span>
+                    <span className="h-px flex-1" style={{ background: "var(--line)" }} />
+                  </div>
+                )}
                 <div
-                  className="px-1.5 pb-1 text-[11px] font-medium"
+                  className="flex items-baseline gap-2 px-1.5 pb-1 text-[11px] font-medium"
                   style={{ letterSpacing: "0.04em", color: "var(--mute)" }}
                 >
-                  <Mark text={group.title} q={keyword} />
+                  <span className="min-w-0 truncate">
+                    <Mark text={group.title} q={keyword} />
+                  </span>
+                  {group.period && (
+                    <span className="font-display ml-auto shrink-0 font-normal">
+                      {group.period}
+                    </span>
+                  )}
                 </div>
                 {group.rows.map((row) => (
                   <div key={row.node.id}>

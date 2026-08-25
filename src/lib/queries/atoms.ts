@@ -50,12 +50,16 @@ export type AtomNode = {
   children: AtomNode[];
 };
 
-export type AtomGroupKind = "employment" | "side_project" | "past";
+// 分组管归属（哪家公司 / 个人 / 志愿），分节管时态（还在做 / 已结束）。
+// 把两者混成一个维度的话，一家公司结束的那一刻 org 这层信息就没了，
+// 只能把公司名塞进每条经历的标题里当前缀。
+export type AtomGroupTense = "current" | "past" | "timeless";
 
 export type AtomGroup = {
   key: string;
   title: string;
-  kind: AtomGroupKind;
+  tense: AtomGroupTense;
+  period: string | null; // 组标题右侧：「2023.05 – 至今」/「2019.04 – 2021.08」
   atoms: AtomNode[];
 };
 
@@ -64,20 +68,51 @@ export type AtomTree = {
   total: number; // 含能力点，与筛选胶囊「全部 N」一致
 };
 
-// 分组归属。
-// 《Step 1》第 1.2 节写的是「employment 按 org 二级分组、side_project 归个人项目、
-// 其余归过往经历」，但同节的示例树把已结束的「大连华信 · Java 研发」放在了「过往经历」。
-// 按字面规则它会自成一个 org 分组，与示例对不上。这里取能同时满足两者的读法：
-// 在职的 employment 按 org 分组，已结束的（period_end 非空）归「过往经历」。
-function groupOf(atom: AtomNode): { key: string; title: string; kind: AtomGroupKind } {
-  if (atom.context === "employment" && atom.period_end === null) {
+// 归属：任职按 org 分，其余按 context 各成一组。
+// 注意这里不看 period —— 时态是整个 org 的属性，在下面按组算。
+function belongsTo(atom: AtomNode): { key: string; title: string } {
+  if (atom.context === "employment") {
     const org = atom.org?.trim();
-    return { key: `org:${org || "__none__"}`, title: org || "未填组织", kind: "employment" };
+    return { key: `org:${org || "__none__"}`, title: org || "未填组织" };
   }
-  if (atom.context === "side_project") {
-    return { key: "side_project", title: "个人项目", kind: "side_project" };
+  return { key: `context:${atom.context}`, title: CONTEXT_GROUP[atom.context] };
+}
+
+// 非任职的三种归属。个人项目做完了也还留在这里——它是类别，不是时态。
+const CONTEXT_GROUP: Record<AtomContext, string> = {
+  employment: "任职",
+  side_project: "个人项目",
+  volunteer: "志愿",
+  community: "社区",
+};
+
+// timeless 组固定排在在职之后、过往之前，组间按这个顺序
+const CONTEXT_RANK: Record<string, number> = {
+  "context:side_project": 0,
+  "context:volunteer": 1,
+  "context:community": 2,
+};
+
+const month = (d: string) => `${d.slice(0, 4)}.${d.slice(5, 7)}`;
+
+/**
+ * 一个 org 组的时态与周期。
+ * 只看顶层经历：能力点通常不填周期，把它们算进来会让每家公司都显示成在职。
+ * 组里还有任何一条没填结束时间，这家公司就还在职——同司的其他项目结束了
+ * 也不该被拆到「过往经历」里去。
+ */
+function tenseOf(atoms: AtomNode[]): { tense: "current" | "past"; period: string | null } {
+  const running = atoms.some((a) => a.period_end === null);
+  const starts = atoms.map((a) => a.period_start).filter((d): d is string => !!d);
+  const ends = atoms.map((a) => a.period_end).filter((d): d is string => !!d);
+  const from = starts.length > 0 ? month(starts.reduce((a, b) => (a < b ? a : b))) : null;
+
+  if (running) {
+    return { tense: "current", period: from ? `${from} – 至今` : null };
   }
-  return { key: "past", title: "过往经历", kind: "past" };
+  const to = ends.length > 0 ? month(ends.reduce((a, b) => (a > b ? a : b))) : null;
+  if (!from && !to) return { tense: "past", period: null };
+  return { tense: "past", period: from ? `${from} – ${to}` : `至 ${to}` };
 }
 
 function toNode(row: Pick<AtomRow, keyof AtomRow & string>): AtomNode {
@@ -136,22 +171,39 @@ export async function getAtomTree(): Promise<AtomTree> {
   }
   roots.sort(bySort);
 
-  const groups: AtomGroup[] = [];
   const index = new Map<string, AtomGroup>();
+  const groups: AtomGroup[] = [];
   for (const root of roots) {
-    const g = groupOf(root);
+    const g = belongsTo(root);
     let group = index.get(g.key);
     if (!group) {
-      group = { key: g.key, title: g.title, kind: g.kind, atoms: [] };
+      group = { key: g.key, title: g.title, tense: "timeless", period: null, atoms: [] };
       index.set(g.key, group);
       groups.push(group);
     }
     group.atoms.push(root);
   }
 
-  // 组序：在职任职 → 个人项目 → 过往经历
-  const rank: Record<AtomGroupKind, number> = { employment: 0, side_project: 1, past: 2 };
-  groups.sort((a, b) => rank[a.kind] - rank[b.kind]);
+  // 任职组的时态按整组算完，才能决定它排在分节线的哪一边
+  for (const group of groups) {
+    if (!group.key.startsWith("org:")) continue;
+    const { tense, period } = tenseOf(group.atoms);
+    group.tense = tense;
+    group.period = period;
+  }
+
+  // 在职任职（近的在前）→ 个人项目 / 志愿 / 社区 →「过往经历」分节线 → 过往任职（近的在前）
+  const tenseRank = { current: 0, timeless: 1, past: 2 } as const;
+  const latest = (g: AtomGroup, field: "period_start" | "period_end") =>
+    g.atoms.map((a) => a[field]).filter(Boolean).sort().at(-1) ?? "";
+  groups.sort((a, b) => {
+    if (tenseRank[a.tense] !== tenseRank[b.tense]) return tenseRank[a.tense] - tenseRank[b.tense];
+    if (a.tense === "timeless") {
+      return (CONTEXT_RANK[a.key] ?? 9) - (CONTEXT_RANK[b.key] ?? 9);
+    }
+    const field = a.tense === "past" ? "period_end" : "period_start";
+    return latest(b, field).localeCompare(latest(a, field));
+  });
 
   return { groups, total: nodes.size };
 }
