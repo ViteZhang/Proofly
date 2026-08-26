@@ -6,10 +6,9 @@
 // =============================================================
 
 import { createClient } from "@/lib/supabase/server";
-import type { DraftIntent, Json } from "@/types/database";
 import { z } from "zod";
 
-import { toDraft, type DraftRow, type ReviewDraft } from "./draft-shape";
+import { toDraft, type ReviewDraft } from "./draft-shape";
 
 export type { ReviewDraft };
 
