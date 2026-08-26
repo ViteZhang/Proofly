@@ -119,6 +119,23 @@ export function ConfirmCard({
               向量召回没跑起来，这次是按字面比对判的，多看一眼。
             </p>
           )}
+          {draft.servedBy && (
+            <p
+              className="mt-1.5 text-[12px]"
+              style={{ color: draft.servedBy.isHead ? "var(--mute)" : "var(--warn)" }}
+            >
+              {draft.servedBy.isHead ? (
+                <>由 {draft.servedBy.extract} 抽取</>
+              ) : draft.servedBy.extract === draft.servedBy.verdict ? (
+                <>主用没通，这条由备用的 {draft.servedBy.extract} 抽取和判定，多看一眼。</>
+              ) : (
+                <>
+                  主用没通过一次：{draft.servedBy.extract} 抽取 · {draft.servedBy.verdict} 判定，
+                  多看一眼。
+                </>
+              )}
+            </p>
+          )}
         </div>
 
         {/* 原文依据 */}

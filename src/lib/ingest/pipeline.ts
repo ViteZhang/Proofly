@@ -323,6 +323,9 @@ async function handleOne(
       candidate_index: c.index,
       locate_fuzzy: at.fuzzy,
       recall_degraded: degraded,
+      // 记下这两步各是哪家做的。链上换了家，卡片要说出来——
+      // 上一次兜底整晚没生效，界面上一点痕迹都没有，只能翻数据库才发现。
+      served_by: { extract: extract.usage.provider, verdict: verdict.usage.provider },
       // 提示词写死了单个项目下的能力点不超过 8 个。超了就是切得太细，
       // 不拦下来，但要在卡片上说一句，让人扫一眼再收。
       too_many_children: payloadAtom.children.length > 8,

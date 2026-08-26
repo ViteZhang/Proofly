@@ -7,34 +7,11 @@
 
 import { createClient } from "@/lib/supabase/server";
 import type { DraftIntent, Json } from "@/types/database";
-import {
-  diffEntry,
-  optionEntry,
-  pass2Schema,
-  type DiffEntry,
-  type ExtractedAtom,
-  type OptionEntry,
-} from "@/lib/ingest/schema";
 import { z } from "zod";
 
-export type ReviewDraft = {
-  id: string;
-  intent: DraftIntent;
-  confidence: number | null;
-  aiNote: string;
-  atom: ExtractedAtom;
-  parentAtomId: string | null;
-  targetAtomId: string | null;
-  targetTitle: string | null;
-  diff: DiffEntry[];
-  options: OptionEntry[];
-  /** Pass 1 的标记没对上，片段是粗切的——值得让人多看一眼原文 */
-  locateFuzzy: boolean;
-  /** 向量召回不可用，Pass 3 是在退化模式下判的 */
-  recallDegraded: boolean;
-  /** 能力点超过 8 个 —— 切得太细，值得人工看一眼 */
-  tooManyChildren: boolean;
-};
+import { toDraft, type DraftRow, type ReviewDraft } from "./draft-shape";
+
+export type { ReviewDraft };
 
 export type ProjectOption = { id: string; title: string; org: string | null };
 
@@ -121,40 +98,3 @@ export async function getReviewQueue(jobId: string): Promise<ReviewQueue | null>
   };
 }
 
-type Row = {
-  id: string;
-  intent: DraftIntent;
-  confidence: number | null;
-  ai_note: string | null;
-  payload: Json;
-  diff: Json;
-  target_atom_id: string | null;
-};
-
-function toDraft(r: Row): ReviewDraft | null {
-  const payload = obj(r.payload);
-  const parsed = pass2Schema.safeParse(payload.atom);
-  if (!parsed.success) return null; // 结构坏掉的草稿不显示，也不让页面白屏
-
-  return {
-    id: r.id,
-    intent: r.intent,
-    confidence: r.confidence,
-    aiNote: r.ai_note ?? "",
-    atom: parsed.data,
-    parentAtomId: typeof payload.parent_atom_id === "string" ? payload.parent_atom_id : null,
-    targetAtomId: r.target_atom_id,
-    targetTitle: null,
-    diff: z.array(diffEntry).safeParse(obj(r.diff).entries).data ?? [],
-    options: z.array(optionEntry).safeParse(payload.options).data ?? [],
-    locateFuzzy: payload.locate_fuzzy === true,
-    recallDegraded: payload.recall_degraded === true,
-    tooManyChildren: payload.too_many_children === true,
-  };
-}
-
-function obj(v: Json): Record<string, Json | undefined> {
-  return v && typeof v === "object" && !Array.isArray(v)
-    ? (v as Record<string, Json | undefined>)
-    : {};
-}

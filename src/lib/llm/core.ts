@@ -26,6 +26,8 @@ export type { CallLog };
 // 与 Server Action 一样：不抛异常，失败以 { ok:false, error } 返回可读中文。
 export type LLMUsage = {
   tier: Tier;
+  /** 实际服务这次调用的那一家：itokens / bailian / deepseek */
+  provider: string;
   model: string;
   promptTokens: number | null;
   completionTokens: number | null;
@@ -244,6 +246,7 @@ async function complete(
 
     const usage: LLMUsage = {
       tier: opts.tier,
+      provider: provider.name,
       model,
       promptTokens,
       completionTokens,
@@ -378,6 +381,7 @@ async function embed(
       data: vector,
       usage: {
         tier: "embedding",
+        provider: provider.name,
         model,
         promptTokens: res.usage?.prompt_tokens ?? null,
         completionTokens: null,
