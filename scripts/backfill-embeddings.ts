@@ -14,7 +14,7 @@
 // =============================================================
 
 import { createClient } from "@supabase/supabase-js";
-import { callLLM } from "../src/lib/llm/core";
+import { callLLM, setCallLogger } from "../src/lib/llm/core";
 import { EMBEDDING_DIM, MODEL } from "../src/lib/llm/config";
 import { embeddingSource } from "../src/lib/ingest/embedding-source";
 
@@ -46,6 +46,18 @@ async function main() {
     console.error(`登录失败：${authError.message}`);
     process.exit(1);
   }
+
+  // core.ts 的记账是注入式的，应用里由 llm/index.ts 接上 Supabase。
+  // 这个脚本不经过 Next，得自己接一次，否则回填的花销不进账。
+  setCallLogger(async (e) => {
+    await supabase.from("llm_calls").insert({
+      tier: e.tier,
+      purpose: e.purpose,
+      prompt_tokens: e.promptTokens,
+      completion_tokens: e.completionTokens,
+      duration_ms: e.durationMs,
+    });
+  });
 
   let q = supabase.from("atoms").select("id, title, org, role, situation, actions");
   if (!all) q = q.is("embedding", null);
