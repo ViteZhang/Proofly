@@ -274,6 +274,17 @@ async function handleOne(
       : atom;
 
   const supabase = await createClient();
+
+  // 续跑 / 重试同一条时，把上一轮留下的待校对草稿先清掉。
+  // 「写完草稿」和「标记这条完成」是两次写，中间断电就会留下一份孤儿草稿，
+  // 不清就会在校对队列里出现两条一样的。只删 pending——已经确认过的不能碰。
+  await supabase
+    .from("drafts")
+    .delete()
+    .eq("ingest_job_id", jobId)
+    .eq("review_status", "pending")
+    .eq("payload->>candidate_index", String(c.index));
+
   const { error } = await supabase.from("drafts").insert({
     ingest_job_id: jobId,
     intent: intent === "UPDATE" && target === null ? "ASK" : intent,
