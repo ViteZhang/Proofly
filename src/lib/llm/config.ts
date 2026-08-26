@@ -13,20 +13,22 @@ export type Tier = "light" | "strong" | "vision" | "embedding";
 export const TIERS: Tier[] = ["light", "strong", "vision", "embedding"];
 
 // ---- 型号 ----
-// 型号取自 itokens 中转在 2026-08 实际提供的清单（GET /v1/models），
-// 不是照抄训练数据。换中转站前先重新拉一次清单。
+// 型号取自两个接入点在 2026-08 实际提供的清单（GET /v1/models），
+// 不是照抄训练数据。换接入点前先重新拉一次清单。
 //
-// GPT-5.6 一代分三档：Sol 旗舰 / Terra 均衡 / Luna 轻量。
+// 对话三档走 itokens 中转。GPT-5.6 一代分三档：Sol 旗舰 / Terra 均衡 / Luna 轻量。
 // light   : Pass 1 切分定位。输入长、任务简单，用最便宜的 Luna。
 // strong  : Pass 2 抽取、Pass 3 意图判定。判错代价高，用旗舰 Sol，不省这个钱。
 // vision  : 扫描件与图片识别。认字不是硬推理，Terra 够用且比 Sol 便宜一半。
-// embedding: 向量召回。必须输出 1536 维，与 atoms.embedding 的列宽一致。
-//            ⚠ itokens 中转不提供任何向量模型，这一档需要另配接入点，见下方 embedding_* 变量。
+//
+// 向量档走阿里云百炼（itokens 不提供任何向量模型）。
+// qwen3.7-text-embedding 的默认输出是 1024 维，但支持 dimensions 参数，
+// 传 1536 就正好对上 atoms.embedding 的列宽——不用改 Step 0 的表结构。
 export const MODEL: Record<Tier, string> = {
   light: "gpt-5.6-luna",
   strong: "gpt-5.6-sol",
   vision: "gpt-5.6-terra",
-  embedding: "text-embedding-3-small",
+  embedding: "qwen3.7-text-embedding",
 };
 
 // atoms.embedding 是 vector(1536)。维度对不上会在写库时报错，

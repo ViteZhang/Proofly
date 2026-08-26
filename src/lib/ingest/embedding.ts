@@ -9,27 +9,11 @@
 // =============================================================
 
 import { callLLM } from "@/lib/llm";
-import { parseStringList } from "@/lib/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
+import { embeddingSource } from "./embedding-source";
 
-// 拼进向量的文本。前 500 字足够表达一条经历是什么，
-// 再长就是 actions 的细节在稀释主题。
-export function embeddingSource(a: {
-  title: string;
-  org?: string | null;
-  role?: string | null;
-  situation?: string | null;
-  actions?: Json | string[] | null;
-}): string {
-  const actions = Array.isArray(a.actions)
-    ? (a.actions as string[])
-    : parseStringList(a.actions as Json);
-  return [a.title, a.org ?? "", a.role ?? "", a.situation ?? "", actions.join(" ")]
-    .filter((s) => s.trim() !== "")
-    .join(" ")
-    .slice(0, 500);
-}
+export { embeddingSource };
 
 /** 生成并写回一条经历的向量。失败不抛，返回 false，调用方自己决定要不要在意。 */
 export async function refreshAtomEmbedding(atomId: string): Promise<boolean> {

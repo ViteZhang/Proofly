@@ -50,15 +50,27 @@ OPENAI_BASE_URL=https://itokens.fun/v1
 OPENAI_API_KEY=sk-...
 ```
 
-向量档可以走另一个接入点——中转站通常只转发对话模型，向量得回原厂：
+向量档走另一个接入点——中转站通常只转发对话模型，向量得单独接：
 
 ```
-EMBEDDING_BASE_URL=https://api.openai.com/v1
-EMBEDDING_API_KEY=sk-...
+EMBEDDING_BASE_URL=https://<百炼实例>/compatible-mode/v1
+EMBEDDING_API_KEY=sk-ws-...
 ```
 
 不填 `EMBEDDING_*` 就回落到 `OPENAI_*`。**接入点换了先 `GET /v1/models` 看清单**，
 型号写死在 `src/lib/llm/config.ts`，别处不许出现模型字符串。
+
+当前向量档是阿里云百炼的 `qwen3.7-text-embedding`。它默认输出 1024 维，
+但支持 `dimensions` 参数，适配层传 1536，正好对上 `atoms.embedding` 的列宽。
+**换向量模型时先确认它能出 1536 维**，出不了就得改 Step 0 的列并重建索引，
+而且旧向量的语义空间对不上，必须全量重算：
+
+```bash
+PROOFLY_EMAIL=你的邮箱 PROOFLY_PASSWORD=你的密码 pnpm embed:backfill --all
+```
+
+不带 `--all` 就只补还没有向量的那些。平时不用跑——新增和编辑经历时
+Server Action 会自己补。
 
 模板见 `.env.example`。
 
