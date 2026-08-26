@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { callLLM } from "../src/lib/llm/core";
+import { callLLM, setCallLogger } from "../src/lib/llm/core";
 import { MODEL } from "../src/lib/llm/config";
 import { PASS2_SYSTEM, pass2User } from "../src/lib/llm/prompts";
 import { pass2Schema } from "../src/lib/ingest/schema";
@@ -47,6 +47,14 @@ type CaseResult = {
 };
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+
+// provider → 实际发出的请求数。主用挂过就会有两家的数。
+const served = new Map<string, number>();
+
+function servedLine(): string {
+  if (served.size === 0) return "（没记到调用）";
+  return [...served.entries()].map(([k, n]) => `${k} ${n} 次`).join(" · ");
+}
 const GOLDEN = path.join(ROOT, "eval", "golden");
 
 async function main() {
@@ -61,7 +69,13 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`对照集 ${ids.length} 份 · Pass 2 用 ${MODEL.strong}\n`);
+  // 配了兜底之后，「用哪个型号」不能再从 config 里读——主用挂了会自动换家，
+  // 报告上却还印着主用型号，那是在骗自己。数实际服务的那家。
+  setCallLogger(async (e) => {
+    served.set(e.provider, (served.get(e.provider) ?? 0) + 1);
+  });
+
+  console.log(`对照集 ${ids.length} 份 · Pass 2 主用 ${MODEL.strong}\n`);
 
   const results: CaseResult[] = [];
   for (const id of ids) {
@@ -85,7 +99,8 @@ async function main() {
   console.log(`漏抽率 ${pct(s.miss)}（门槛 < 20%）`);
   console.log(`kind 准确率 ${pct(s.kind)}（门槛 > 90%）`);
   console.log(`切分一致性 ${pct(s.level)}（门槛 > 80%）`);
-  console.log(`\n报告：${path.relative(process.cwd(), out)}`);
+  console.log(`\n实际由谁服务：${servedLine()}`);
+  console.log(`报告：${path.relative(process.cwd(), out)}`);
 
   // 幻觉率不为 0 就让 CI 红
   process.exit(s.hallucination > 0 ? 1 : 0);
@@ -234,7 +249,8 @@ function render(rs: CaseResult[]): string {
 
   L.push(`# 抽取质量评估 · ${new Date().toISOString().slice(0, 19).replace("T", " ")}`);
   L.push("");
-  L.push(`Pass 2 模型：\`${MODEL.strong}\` · 对照集 ${rs.length} 份`);
+  L.push(`Pass 2 主用型号：\`${MODEL.strong}\` · 对照集 ${rs.length} 份`);
+  L.push(`实际由谁服务：${servedLine()}`);
   L.push("");
   L.push("## 四项指标");
   L.push("");
