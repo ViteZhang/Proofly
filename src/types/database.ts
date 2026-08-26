@@ -415,6 +415,7 @@ export type Database = {
           id: string;
           user_id: string;
           tier: LlmTier;
+          provider: string | null;
           purpose: string;
           prompt_tokens: number | null;
           completion_tokens: number | null;
@@ -425,6 +426,7 @@ export type Database = {
           id?: string;
           user_id?: string;
           tier: LlmTier;
+          provider?: string | null;
           purpose: string;
           prompt_tokens?: number | null;
           completion_tokens?: number | null;
@@ -435,6 +437,7 @@ export type Database = {
           id?: string;
           user_id?: string;
           tier?: LlmTier;
+          provider?: string | null;
           purpose?: string;
           prompt_tokens?: number | null;
           completion_tokens?: number | null;

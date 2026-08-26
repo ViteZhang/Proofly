@@ -14,8 +14,8 @@ import type { ZodType } from "zod";
 import {
   EMBEDDING_DIM,
   MAX_OUTPUT_TOKENS,
-  MODEL,
-  llmEndpoint,
+  providersFor,
+  type Provider,
   type Tier,
 } from "./config";
 
@@ -37,6 +37,11 @@ export type LLMUsage = {
 export type LLMResult<T> =
   | { ok: true; data: T; usage: LLMUsage }
   | { ok: false; error: string };
+
+// 内部用：失败时多带一个「这种错值不值得换一家再试」。
+// 对外仍然只暴露 LLMResult，多出来的字段调用方看不到也用不上。
+type Fail = { ok: false; error: string; failover?: boolean };
+type Attempt<T> = { ok: true; data: T; usage: LLMUsage } | Fail;
 
 type BaseOptions = {
   /** 落进 llm_calls.purpose，用来回答「哪个环节贵」。如 pass1_segment。 */
@@ -62,14 +67,39 @@ export type EmbeddingOptions = BaseOptions & {
 };
 
 // ---- 重载 ----
-// 一次请求最多等这么久。Pass 2 实测最慢 1m31s，给到 2.5 分钟余量够宽；
-// 再久基本就是中转站卡住了，不是真在生成。
-const ATTEMPT_TIMEOUT_MS = 150_000;
+// 一次请求最多等这么久。实测：itokens 上最慢 1m31s，DeepSeek 兜底跑一段
+// 5200 字的长片段要 2m09s（输出 8448 token）。按最慢那个的 1.8 倍留余量，
+// 不然会把正在正常生成的兜底调用误杀掉。
+const ATTEMPT_TIMEOUT_MS = 240_000;
 
 // 连 SDK 重试一起算的总上限。SDK 对超时也会重试，不封顶的话一次卡死
 // 能拖到 50 分钟——那条候选就一直挂在 pending，界面看着跟死了一样，
 // 还不报错。宁可判失败让人重试，也不能无声地等下去。
 const CALL_DEADLINE_MS = 300_000;
+
+// ---- 熔断 ----
+// 供应商整体宕机时，「每条候选都先花 5 分钟撞主用、再换兜底」是不能接受的：
+// 13 条就是一小时的空等。所以一家在短时间内连着挂几次，就先跳过它，
+// 过一阵再放行试探。只在进程内存里记，重启即忘——它只是为了让这一批跑完。
+const TRIP_AFTER = 2;
+const TRIP_FOR_MS = 60_000;
+const strikes = new Map<string, { n: number; until: number }>();
+
+function isTripped(name: string): boolean {
+  const s = strikes.get(name);
+  return s !== undefined && s.n >= TRIP_AFTER && Date.now() < s.until;
+}
+
+function strike(name: string): void {
+  const now = Date.now();
+  const s = strikes.get(name);
+  const n = s !== undefined && now < s.until ? s.n + 1 : 1;
+  strikes.set(name, { n, until: now + TRIP_FOR_MS });
+}
+
+function clearStrikes(name: string): void {
+  strikes.delete(name);
+}
 
 export async function callLLM(
   opts: EmbeddingOptions,
@@ -82,22 +112,57 @@ export async function callLLM(opts: TextOptions): Promise<LLMResult<string>>;
 export async function callLLM(
   opts: (TextOptions & { jsonSchema?: ZodType }) | EmbeddingOptions,
 ): Promise<LLMResult<unknown>> {
-  const endpoint = llmEndpoint(opts.tier);
-  if (!endpoint) {
+  const providers = providersFor(opts.tier);
+  if (providers.length === 0) {
     return { ok: false, error: "没有配置模型接入，先在 .env.local 里填 OPENAI_API_KEY" };
   }
-  const client = new OpenAI({
-    apiKey: endpoint.apiKey,
-    baseURL: endpoint.baseURL,
-    // 网络层重试，与下面的校验重试是两回事。
-    // 中转站在并发下会回 503，SDK 的指数退避能扛过大部分，所以给到 4 次。
-    maxRetries: 4,
-    timeout: ATTEMPT_TIMEOUT_MS,
-  });
 
-  return opts.tier === "embedding"
-    ? embed(client, opts)
-    : complete(client, opts);
+  // 熔断中的排到后面去，但一个都不删——全被熔断时还是要有人去试，
+  // 否则整批直接失败，比慢一点更糟。
+  const ordered = [...providers].sort(
+    (a, b) => Number(isTripped(a.name)) - Number(isTripped(b.name)),
+  );
+
+  let last: Fail = { ok: false, error: "模型调用失败" };
+
+  for (let i = 0; i < ordered.length; i++) {
+    const p = ordered[i];
+    const client = new OpenAI({
+      apiKey: p.apiKey,
+      baseURL: p.baseURL,
+      // 网络层重试，与下面的校验重试是两回事。
+      // 中转站在并发下会回 503，SDK 的指数退避能扛过大部分，所以给到 4 次。
+      maxRetries: 4,
+      timeout: ATTEMPT_TIMEOUT_MS,
+    });
+
+    const r: Attempt<unknown> =
+      opts.tier === "embedding"
+        ? await embed(client, p, opts)
+        : await complete(client, p, opts);
+
+    if (r.ok) {
+      clearStrikes(p.name);
+      return r;
+    }
+    last = r;
+    if (r.failover) strike(p.name);
+
+    // 只有「这家挂了」才换下一家。key 不对、型号不存在、请求本身有问题，
+    // 换一家结果一样，还会把配置错误盖掉——那种就地返回。
+    if (!r.failover || i === ordered.length - 1) return { ok: false, error: r.error };
+  }
+
+  return { ok: false, error: last.error };
+}
+
+/** 这种错换一家还有戏吗。只认「这家不可用」，不认「这个请求有问题」。 */
+function shouldFailover(e: unknown): boolean {
+  if (e instanceof OpenAI.APIUserAbortError) return true; // 撞上我们的总时限
+  if (e instanceof OpenAI.APIConnectionError) return true; // 连不上，含 SDK 超时
+  if (e instanceof OpenAI.RateLimitError) return true;
+  if (e instanceof OpenAI.APIError) return (e.status ?? 0) >= 500;
+  return false;
 }
 
 // =============================================================
@@ -106,9 +171,10 @@ export async function callLLM(
 
 async function complete(
   client: OpenAI,
+  provider: Provider,
   opts: TextOptions & { jsonSchema?: ZodType },
-): Promise<LLMResult<unknown>> {
-  const model = MODEL[opts.tier];
+): Promise<Attempt<unknown>> {
+  const model = provider.model;
   const maxRetries = opts.maxRetries ?? 1;
 
   // jsonSchema 传了就强制 JSON。约束追加在系统提示词末尾，
@@ -150,6 +216,7 @@ async function complete(
       completionTokens += res.usage?.completion_tokens ?? 0;
       await logCall({
         tier: opts.tier,
+        provider: provider.name,
         purpose: opts.purpose,
         promptTokens: res.usage?.prompt_tokens ?? null,
         completionTokens: res.usage?.completion_tokens ?? null,
@@ -166,12 +233,13 @@ async function complete(
     } catch (e) {
       await logCall({
         tier: opts.tier,
+        provider: provider.name,
         purpose: opts.purpose,
         promptTokens: null,
         completionTokens: null,
         durationMs: Date.now() - t0,
       });
-      return { ok: false, error: apiError(e) };
+      return { ok: false, error: apiError(e), failover: shouldFailover(e) };
     }
 
     const usage: LLMUsage = {
@@ -273,9 +341,10 @@ function parseJson(raw: string, schema: ZodType): ParseOutcome {
 
 async function embed(
   client: OpenAI,
+  provider: Provider,
   opts: EmbeddingOptions,
-): Promise<LLMResult<number[]>> {
-  const model = MODEL.embedding;
+): Promise<Attempt<number[]>> {
+  const model = provider.model;
   const t0 = Date.now();
   try {
     const res = await client.embeddings.create(
@@ -289,6 +358,7 @@ async function embed(
     const ms = Date.now() - t0;
     await logCall({
       tier: "embedding",
+      provider: provider.name,
       purpose: opts.purpose,
       promptTokens: res.usage?.prompt_tokens ?? null,
       completionTokens: null,
@@ -318,12 +388,13 @@ async function embed(
   } catch (e) {
     await logCall({
       tier: "embedding",
+      provider: provider.name,
       purpose: opts.purpose,
       promptTokens: null,
       completionTokens: null,
       durationMs: Date.now() - t0,
     });
-    return { ok: false, error: apiError(e) };
+    return { ok: false, error: apiError(e), failover: shouldFailover(e) };
   }
 }
 
@@ -333,6 +404,8 @@ async function embed(
 
 type CallLog = {
   tier: Tier;
+  /** 这笔调用实际是谁服务的：primary / deepseek。用来分清钱是谁收的。 */
+  provider: string;
   purpose: string;
   promptTokens: number | null;
   completionTokens: number | null;

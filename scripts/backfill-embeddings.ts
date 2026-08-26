@@ -55,6 +55,7 @@ async function main() {
   setCallLogger(async (e) => {
     const { error: logErr } = await supabase.from("llm_calls").insert({
       tier: e.tier,
+      provider: e.provider,
       purpose: e.purpose,
       prompt_tokens: e.promptTokens,
       completion_tokens: e.completionTokens,

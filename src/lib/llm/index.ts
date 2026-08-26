@@ -16,6 +16,7 @@ setCallLogger(async (entry) => {
   const supabase = await createClient();
   await supabase.from("llm_calls").insert({
     tier: entry.tier,
+    provider: entry.provider,
     purpose: entry.purpose,
     prompt_tokens: entry.promptTokens,
     completion_tokens: entry.completionTokens,
