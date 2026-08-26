@@ -43,77 +43,45 @@ NEXT_PUBLIC_SUPABASE_URL=https://vsbwlxxrjwgkhsdxdxgl.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_6nhOPw1nEWeMc0xJtdI2bA_-DJnhKwX
 ```
 
-Step 2 起还需要模型接入。这两个不带 `NEXT_PUBLIC_` 前缀，只在服务端可见：
+Step 2 起还需要模型接入。这些都不带 `NEXT_PUBLIC_` 前缀，只在服务端可见。
+
+**一档配一条供应商链**，前一家挂了（连不上、超时、5xx、限流）就换后一家重发整条请求：
+
+| 档 | 1 主用 | 2 | 3 |
+|---|---|---|---|
+| light（Pass 1 切分） | `gpt-5.6-luna` | `qwen3.8-max` | `deepseek-v4-flash` |
+| strong（Pass 2/3） | `gpt-5.6-sol` | `qwen3.8-max` | `deepseek-v4-pro` |
+| vision（OCR） | `gpt-5.6-terra` | `qwen3-vl-plus` | `deepseek-v4-flash-vision-exp` |
+| embedding | `qwen3.7-text-embedding` | — | — |
+
+向量档只有百炼一家：itokens 和 DeepSeek 都不提供向量模型。
 
 ```
 OPENAI_BASE_URL=https://itokens.fun/v1
 OPENAI_API_KEY=sk-...
-```
 
-向量档走另一个接入点——中转站通常只转发对话模型，向量得单独接：
+BAILIAN_BASE_URL=https://<百炼实例>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+BAILIAN_API_KEY=sk-...
 
-```
-EMBEDDING_BASE_URL=https://<百炼实例>/compatible-mode/v1
-EMBEDDING_API_KEY=sk-ws-...
-```
-
-不填 `EMBEDDING_*` 就回落到 `OPENAI_*`。**接入点换了先 `GET /v1/models` 看清单**，
-型号写死在 `src/lib/llm/config.ts`，别处不许出现模型字符串。
-
-对话三档还有一个兜底接入点。主用挂了（连不上、超时、5xx、限流）时，
-整条请求换到这里重发一次：
-
-```
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_API_KEY=sk-...
 ```
 
-不填就是没有兜底，行为跟以前一样。向量档没有兜底——DeepSeek 不提供向量模型。
+哪一家没配 key 就自动从链里去掉，一家不配也能跑，只是没有兜底。
+`EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` 是向量档的老配法，只在 `BAILIAN_*`
+缺席时兜底读取，新配置不用管它。
+
+**接入点换了先 `GET /v1/models` 看清单**，型号写死在 `src/lib/llm/config.ts`
+的 `CHAIN`，别处不许出现模型字符串。
 
 切换只认「这家不可用」。key 不对、型号不存在、请求本身有问题，都是就地报错，
 不换家——换了结果一样，还会把配置错误盖掉。
 
-一家在 60 秒内连挂两次会被熔断，之后的请求直接走另一家，不再每次都先撞它。
+一家在 60 秒内连挂两次会被熔断，之后的请求跳过它直接走下一家，不再每次都先撞。
 整站宕机时这是七倍的差别（实测 11.8s → 1.2s）。熔断只记在进程内存里，重启即忘。
 
-当前向量档是阿里云百炼的 `qwen3.7-text-embedding`。它默认输出 1024 维，
-但支持 `dimensions` 参数，适配层传 1536，正好对上 `atoms.embedding` 的列宽。
-**换向量模型时先确认它能出 1536 维**，出不了就得改 Step 0 的列并重建索引，
-而且旧向量的语义空间对不上，必须全量重算：
-
-```bash
-PROOFLY_EMAIL=你的邮箱 PROOFLY_PASSWORD=你的密码 pnpm embed:backfill --all
-```
-
-不带 `--all` 就只补还没有向量的那些。平时不用跑——新增和编辑经历时
-Server Action 会自己补。
-
-模板见 `.env.example`。
-
----
-
-## 本地启动
-
-```bash
-pnpm install
-cp .env.example .env.local   # 填入上面的两个值
-pnpm dev                     # http://localhost:3000
-```
-
-其他脚本：`pnpm build`（生产构建）、`pnpm start`（生产启动）、`pnpm lint`。
-
----
-
-## 数据库：SQL 执行顺序
-
-在 Supabase 控制台 **SQL Editor** 中，按顺序执行 `supabase/` 下四个文件：
-
-1. `01_extensions_and_helpers.sql` — 扩展（pgcrypto、vector）+ 通用/触发器函数
-2. `02_tables.sql` — 全部 23 张表 + `task_priority` 视图 + 索引
-3. `03_triggers.sql` — `updated_at` 与派生字段（证明度 / 技能证据强度）触发器
-4. `04_rls.sql` — 23 张表 RLS + 每表 4 条策略 + 视图 `security_invoker`
-
-Step 2 追加，接着往下执行：
+换向量模型要 `pnpm embed:backfill --all` 全量重算——旧向量的语义空间跟新模型对不上。
+**换 key 不用**：同型号不同实例实测余弦 1.000000，是同一个空间。
 
 5. `05_llm_calls.sql` — 模型调用日志 + RLS。没有它就不知道钱花在哪
 6. `06_storage.sql` — 私有桶 `source-docs`，路径首段必须等于 `auth.uid()`
