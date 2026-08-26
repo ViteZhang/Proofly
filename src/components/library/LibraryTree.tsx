@@ -357,7 +357,9 @@ function TreeRow({
 
 // 命中片段高亮。q 已经小写化。
 function Mark({ text, q }: { text: string; q: string }) {
-  if (!q) return <>{text}</>;
+  // text 名义上是 string，但数据是从库里来的，缺字段时会是 undefined，
+  // 下面 text.toLowerCase() 就会直接把整棵树炸掉。宁可少个高亮。
+  if (!q || !text) return <>{text ?? ""}</>;
 
   const lower = text.toLowerCase();
   const parts: React.ReactNode[] = [];

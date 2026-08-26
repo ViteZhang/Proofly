@@ -41,6 +41,9 @@ export type Candidate = {
 
 const PASS2_CONCURRENCY = 3;
 
+// 干活期间多久报一次「我还活着」。要明显小于界面判定断线的 6 分钟。
+const HEARTBEAT_MS = 30_000;
+
 // 单份文档最多抽这么多条。Pass 1 偶尔会把目录当成经历切出几十条，
 // 真跑起来又慢又贵，先截断并在界面上说清楚。
 const MAX_CANDIDATES = 40;
@@ -192,16 +195,40 @@ async function runCandidates(
       (onlyIndexes === undefined || onlyIndexes.includes(c.index)),
   );
 
-  await inBatches(todo.length, PASS2_CONCURRENCY, async (i) => {
-    const c = todo[i];
-    const err = await handleOne(jobId, fullText, docTitle, c, all.length);
-    c.state = err === null ? "done" : "failed";
-    c.error = err;
-    await writeCandidates(jobId, all);
-    await bumpProgress(jobId, all);
-  });
+  // 干活期间一直跳心跳。只在「一条抽完」时才跳是不够的：一条慢的调用要几分钟，
+  // 期间心跳不动，界面会判定作业断了并自动续跑——于是同一批候选被两个 worker
+  // 同时抽，钱翻倍。心跳的含义必须是「进程还活着」，不是「又抽完一条」。
+  const beat = setInterval(() => void touch(jobId), HEARTBEAT_MS);
+  try {
+    await inBatches(todo.length, PASS2_CONCURRENCY, async (i) => {
+      const c = todo[i];
+      // handleOne 约定是返回错误而不是抛，但它下面还有一串调用。
+      // 真抛出来一个，Promise.all 会整批拒掉，剩下的候选全留在 pending——
+      // 界面上就是「进度停住、没有错误、也没有按钮」，最难查的那种。
+      let err: string | null;
+      try {
+        err = await handleOne(jobId, fullText, docTitle, c, all.length);
+      } catch (e) {
+        err = e instanceof Error ? e.message : "抽这条时出了意外";
+      }
+      c.state = err === null ? "done" : "failed";
+      c.error = err;
+      await writeCandidates(jobId, all);
+      await bumpProgress(jobId, all);
+    });
+  } finally {
+    clearInterval(beat);
+  }
 
   await finishIfDone(jobId, all);
+}
+
+async function touch(jobId: string): Promise<void> {
+  const supabase = await createClient();
+  await supabase
+    .from("ingest_jobs")
+    .update({ heartbeat_at: new Date().toISOString() })
+    .eq("id", jobId);
 }
 
 async function handleOne(
@@ -274,6 +301,17 @@ async function handleOne(
       : atom;
 
   const supabase = await createClient();
+
+  // 续跑 / 重试同一条时，把上一轮留下的待校对草稿先清掉。
+  // 「写完草稿」和「标记这条完成」是两次写，中间断电就会留下一份孤儿草稿，
+  // 不清就会在校对队列里出现两条一样的。只删 pending——已经确认过的不能碰。
+  await supabase
+    .from("drafts")
+    .delete()
+    .eq("ingest_job_id", jobId)
+    .eq("review_status", "pending")
+    .eq("payload->>candidate_index", String(c.index));
+
   const { error } = await supabase.from("drafts").insert({
     ingest_job_id: jobId,
     intent: intent === "UPDATE" && target === null ? "ASK" : intent,

@@ -49,14 +49,23 @@ async function main() {
 
   // core.ts 的记账是注入式的，应用里由 llm/index.ts 接上 Supabase。
   // 这个脚本不经过 Next，得自己接一次，否则回填的花销不进账。
+  // 记完报一句：记账悄悄失败过一次，直到翻表才发现，这次让它自己说。
+  let logged = 0;
+  let logWarn = "";
   setCallLogger(async (e) => {
-    await supabase.from("llm_calls").insert({
+    const { error: logErr } = await supabase.from("llm_calls").insert({
       tier: e.tier,
+      provider: e.provider,
       purpose: e.purpose,
       prompt_tokens: e.promptTokens,
       completion_tokens: e.completionTokens,
       duration_ms: e.durationMs,
     });
+    if (logErr) {
+      logWarn ||= logErr.message;
+      return;
+    }
+    logged++;
   });
 
   let q = supabase.from("atoms").select("id, title, org, role, situation, actions");
@@ -109,6 +118,8 @@ async function main() {
 
   console.log(`\n补上 ${done} 条${failed.length ? `，失败 ${failed.length} 条` : ""}`);
   for (const f of failed) console.log(`  ✗ ${f.title} —— ${f.why}`);
+  if (logWarn) console.log(`  ! 花销没记进 llm_calls：${logWarn}`);
+  else if (logged > 0) console.log(`  花销已记账 ${logged} 笔`);
   process.exit(failed.length > 0 ? 1 : 0);
 }
 

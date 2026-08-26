@@ -18,6 +18,11 @@ import { createClient } from "@/lib/supabase/server";
 
 const uuid = z.uuid();
 
+// 心跳超过这么久没动，就当跑作业的进程已经没了。
+// 阈值要大于「单条最慢一次跑完」：Pass 2 实测最慢 1m31s，加上 Pass 3，
+// 一条最坏 3 分钟左右。取 6 分钟，宁可晚一点发现，也别把还活着的作业重复跑。
+const STALE_MS = 6 * 60_000;
+
 export type JobProgress = {
   id: string;
   status: "extracting" | "awaiting_review" | "committed" | "discarded";
@@ -31,6 +36,8 @@ export type JobProgress = {
   headline: string;
   /** 作业跑完了，可以去校对了 */
   settled: boolean;
+  /** 还标着 extracting，但心跳早停了——跑它的进程多半已经没了 */
+  stalled: boolean;
 };
 
 export async function startJob(sourceDocId: string): Promise<ActionResult<string>> {
@@ -57,6 +64,7 @@ export async function startJob(sourceDocId: string): Promise<ActionResult<string
       source_doc_id: sourceDocId,
       status: "extracting",
       progress_stage: "segmenting",
+      heartbeat_at: new Date().toISOString(),
     })
     .select("id")
     .single();
@@ -72,7 +80,9 @@ export async function getJobProgress(jobId: string): Promise<ActionResult<JobPro
   const supabase = await createClient();
   const { data: job } = await supabase
     .from("ingest_jobs")
-    .select("id, status, progress_stage, progress_current, progress_total, error_message, candidates")
+    .select(
+      "id, status, progress_stage, progress_current, progress_total, error_message, candidates, heartbeat_at, created_at",
+    )
     .eq("id", jobId)
     .maybeSingle();
   if (!job) return fail("找不到这个作业");
@@ -88,6 +98,11 @@ export async function getJobProgress(jobId: string): Promise<ActionResult<JobPro
   const drafts = count ?? 0;
   const settled = job.status !== "extracting";
 
+  // 没有心跳的（这个字段加进来之前建的作业）拿建作业时间顶上，
+  // 否则这种作业永远判不出断线，会一直挂在那儿。
+  const beat = Date.parse(job.heartbeat_at ?? job.created_at ?? "");
+  const stalled = !settled && Number.isFinite(beat) && Date.now() - beat > STALE_MS;
+
   return ok({
     id: job.id,
     status: job.status,
@@ -98,6 +113,7 @@ export async function getJobProgress(jobId: string): Promise<ActionResult<JobPro
     errorMessage: job.error_message,
     candidates,
     settled,
+    stalled,
     headline: headline(job.progress_stage, job.status, current, total, drafts),
   });
 }
@@ -146,6 +162,34 @@ export async function restartJob(jobId: string): Promise<ActionResult<null>> {
   if (error) return fail(`重来失败：${error.message}`);
   after(() => runJob(jobId));
   return ok(null);
+}
+
+/**
+ * 接着上次继续跑。已经 done 的候选不会重跑（runJob 本身可重入）。
+ *
+ * 用心跳做独占认领：只有心跳「还是旧的」这次更新才会命中行，
+ * 命中了才把活扔到后台。两个标签页同时发现作业断了，也只有一个跑得起来——
+ * 不这样做就会同一条抽两遍，出两份重复草稿。
+ */
+export async function resumeJob(jobId: string): Promise<ActionResult<boolean>> {
+  if (!uuid.safeParse(jobId).success) return fail("作业标识不对");
+  const supabase = await createClient();
+
+  const cutoff = new Date(Date.now() - STALE_MS).toISOString();
+  const { data, error } = await supabase
+    .from("ingest_jobs")
+    .update({ heartbeat_at: new Date().toISOString() })
+    .eq("id", jobId)
+    .eq("status", "extracting")
+    .or(`heartbeat_at.is.null,heartbeat_at.lt.${cutoff}`)
+    .select("id");
+  if (error) return fail(`没能接着抽：${error.message}`);
+
+  // 没命中：要么已经有人接手了，要么作业其实还活着。两种都不该再跑一遍。
+  if (data === null || data.length === 0) return ok(false);
+
+  after(() => runJob(jobId));
+  return ok(true);
 }
 
 /** 放弃这个作业，回到上传区。Pass 1 就挂掉时，重试之外总得有条退路。 */
