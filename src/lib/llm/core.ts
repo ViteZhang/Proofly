@@ -62,6 +62,15 @@ export type EmbeddingOptions = BaseOptions & {
 };
 
 // ---- 重载 ----
+// 一次请求最多等这么久。Pass 2 实测最慢 1m31s，给到 2.5 分钟余量够宽；
+// 再久基本就是中转站卡住了，不是真在生成。
+const ATTEMPT_TIMEOUT_MS = 150_000;
+
+// 连 SDK 重试一起算的总上限。SDK 对超时也会重试，不封顶的话一次卡死
+// 能拖到 50 分钟——那条候选就一直挂在 pending，界面看着跟死了一样，
+// 还不报错。宁可判失败让人重试，也不能无声地等下去。
+const CALL_DEADLINE_MS = 300_000;
+
 export async function callLLM(
   opts: EmbeddingOptions,
 ): Promise<LLMResult<number[]>>;
@@ -83,6 +92,7 @@ export async function callLLM(
     // 网络层重试，与下面的校验重试是两回事。
     // 中转站在并发下会回 503，SDK 的指数退避能扛过大部分，所以给到 4 次。
     maxRetries: 4,
+    timeout: ATTEMPT_TIMEOUT_MS,
   });
 
   return opts.tier === "embedding"
@@ -127,11 +137,14 @@ async function complete(
       // （连接一直有数据），但这个沙箱的出网代理会把 SSE 连接重置，
       // 没法在这里验证，所以不上没验证过的改动。
       // 当前的兜底是每条可以单独重试，见 ingest/pipeline.ts。
-      const res = await client.chat.completions.create({
-        model,
-        messages,
-        max_completion_tokens: cap,
-      });
+      const res = await client.chat.completions.create(
+        {
+          model,
+          messages,
+          max_completion_tokens: cap,
+        },
+        { signal: AbortSignal.timeout(CALL_DEADLINE_MS) },
+      );
       const ms = Date.now() - t0;
       promptTokens += res.usage?.prompt_tokens ?? 0;
       completionTokens += res.usage?.completion_tokens ?? 0;
@@ -265,11 +278,14 @@ async function embed(
   const model = MODEL.embedding;
   const t0 = Date.now();
   try {
-    const res = await client.embeddings.create({
-      model,
-      input: opts.user,
-      dimensions: EMBEDDING_DIM,
-    });
+    const res = await client.embeddings.create(
+      {
+        model,
+        input: opts.user,
+        dimensions: EMBEDDING_DIM,
+      },
+      { signal: AbortSignal.timeout(CALL_DEADLINE_MS) },
+    );
     const ms = Date.now() - t0;
     await logCall({
       tier: "embedding",
@@ -345,6 +361,11 @@ async function logCall(entry: CallLog): Promise<void> {
 }
 
 function apiError(e: unknown): string {
+  // 超时两种：SDK 自己的单次超时，和我们用 AbortSignal 卡的总时限。
+  // 都要排在 APIConnectionError 前面——前者是它的子类。
+  if (e instanceof OpenAI.APIUserAbortError)
+    return `等了 ${Math.round(CALL_DEADLINE_MS / 60000)} 分钟模型还没回，先算这条失败`;
+  if (e instanceof OpenAI.APIConnectionTimeoutError) return "模型接口超时没回";
   if (e instanceof OpenAI.AuthenticationError) return "模型接口拒绝了这个 key";
   if (e instanceof OpenAI.NotFoundError)
     return "这个型号在当前接入点上不存在，检查 config.ts 里的 MODEL";
