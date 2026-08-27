@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "eval:extract": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/eval-extract.ts",
-    "embed:backfill": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/backfill-embeddings.ts"
+    "embed:backfill": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/backfill-embeddings.ts",
+    "chat:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/chat-probe.ts",
+    "split:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/split-probe.ts",
+    "locate:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/locate-probe.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",
