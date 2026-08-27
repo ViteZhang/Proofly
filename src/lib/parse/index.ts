@@ -170,12 +170,17 @@ async function parseScannedPdf(
 
 // ---- 图片 ----
 
+// 「认出来了，但里面确实没有字」和「认不出来」是两回事。
+// 上传文档时前者也该拦下（传了张风景照当简历），但随手记里粘一张风景照
+// 只是没什么可记的，不是出错——两边要能分辨，所以这句话得有个名字。
+export const EMPTY_IMAGE_ERROR = "这张图里没有文字";
+
 async function parseImage(bytes: Uint8Array, ext: string): Promise<ParseOutcome> {
   const mime = ext === "jpg" ? "jpeg" : ext;
   const b64 = `data:image/${mime};base64,${Buffer.from(bytes).toString("base64")}`;
   const r = await ocrImage(b64, null);
   if (!r.ok) return { ok: false, error: `这张图没认出来：${r.error}` };
-  if (r.text.trim() === "") return { ok: false, error: "这张图里没有文字" };
+  if (r.text.trim() === "") return { ok: false, error: EMPTY_IMAGE_ERROR };
   return {
     ok: true,
     text: r.text.trim(),

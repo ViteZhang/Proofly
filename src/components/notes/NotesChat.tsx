@@ -13,12 +13,15 @@ import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/Button";
-import { answerLinks, type ChatMessageView } from "@/lib/chat/message-shape";
+import { ChatConfirmCard } from "@/components/notes/ChatConfirmCard";
+import { answerLinks, confirmCard, type ChatMessageView } from "@/lib/chat/message-shape";
+import { createClient } from "@/lib/supabase/client";
 import { retryMessage, sendMessage } from "@/app/(app)/notes/actions";
 
 export function NotesChat({ initial }: { initial: ChatMessageView[] }) {
   const [messages, setMessages] = useState(initial);
   const [text, setText] = useState("");
+  const [image, setImage] = useState<{ path: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const bottom = useRef<HTMLDivElement>(null);
@@ -33,18 +36,40 @@ export function NotesChat({ initial }: { initial: ChatMessageView[] }) {
 
   function send() {
     const body = text.trim();
-    if (body === "" || pending) return;
+    if ((body === "" && image === null) || pending) return;
     setError(null);
+    const path = image?.path;
     start(async () => {
-      const r = await sendMessage(body);
+      const r = await sendMessage(body, path);
       if (!r.ok) {
         setError(r.error);      // 连库都没写进去，输入框里的话原样留着
         return;
       }
       setMessages((prev) => [...prev, ...r.data.messages]);
       setText("");
+      setImage(null);
       setError(r.data.modelError);
     });
+  }
+
+  // 完整的粘贴图片是 3.5 的活。这里放个文件选择框，只为把 OCR 那条路径跑通。
+  async function pick(file: File) {
+    setError(null);
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setError("登录状态过期了，刷新一下页面");
+      return;
+    }
+    const path = `${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
+    const up = await supabase.storage.from("chat-images").upload(path, file);
+    if (up.error) {
+      setError(`图没传上去：${up.error.message}`);
+      return;
+    }
+    setImage({ path, name: file.name });
   }
 
   function retry() {
@@ -98,6 +123,20 @@ export function NotesChat({ initial }: { initial: ChatMessageView[] }) {
         <div ref={bottom} />
       </div>
 
+      {image !== null && (
+        <p className="mt-4 text-[13px]" style={{ color: "var(--slate)" }}>
+          带了一张图：{image.name}
+          <button
+            type="button"
+            onClick={() => setImage(null)}
+            className="ml-2 underline"
+            style={{ color: "var(--mute)" }}
+          >
+            去掉
+          </button>
+        </p>
+      )}
+
       <div className="mt-5 flex items-end gap-2">
         <textarea
           rows={3}
@@ -113,10 +152,24 @@ export function NotesChat({ initial }: { initial: ChatMessageView[] }) {
           className="flex-1 resize-none rounded-btn border px-3 py-2 text-[14px] outline-none"
           style={{ borderColor: "var(--line)" }}
         />
-        <Button onClick={send} disabled={pending || text.trim() === ""}>
+        <Button onClick={send} disabled={pending || (text.trim() === "" && image === null)}>
           发送
         </Button>
       </div>
+
+      <label className="mt-2 inline-block text-[13px] underline" style={{ color: "var(--mute)" }}>
+        选一张图
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void pick(f);
+            e.target.value = "";
+          }}
+        />
+      </label>
     </div>
   );
 }
@@ -124,17 +177,31 @@ export function NotesChat({ initial }: { initial: ChatMessageView[] }) {
 function Message({ m }: { m: ChatMessageView }) {
   const mine = m.role === "user";
   const links = m.kind === "query_answer" ? answerLinks(m.payload) : [];
+  const card = m.kind === "confirm_card" ? confirmCard(m.payload) : null;
 
   return (
     <div className={mine ? "flex justify-end" : ""}>
       <div className="max-w-[85%]">
         <p className="text-[12px]" style={{ color: "var(--mute)" }}>
           {mine ? "你" : "助手"}
-          {m.kind !== "text" && !mine ? ` · ${m.kind}` : ""}
         </p>
         <p className="mt-0.5 whitespace-pre-wrap text-[14px]" style={{ color: "var(--ink)" }}>
           {m.content}
         </p>
+        {m.imageUrl !== null && mine && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={m.imageUrl}
+            alt="你贴的图"
+            className="mt-1.5 max-h-[140px] rounded-btn border"
+            style={{ borderColor: "var(--line)" }}
+          />
+        )}
+        {card !== null && (
+          <div className="mt-1.5">
+            <ChatConfirmCard card={card} imageUrl={m.imageUrl} />
+          </div>
+        )}
         {links.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-2">
             {links.map((l) => (
