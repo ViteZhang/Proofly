@@ -27,6 +27,8 @@ export type IngestStatus = "extracting" | "awaiting_review" | "committed" | "dis
 export type IngestStage = "segmenting" | "extracting" | "finishing";
 export type DraftIntent = "CREATE" | "UPDATE" | "ASK";
 export type DraftReviewStatus = "pending" | "accepted" | "edited" | "rejected";
+export type ChatRole = "user" | "assistant" | "system";
+export type ChatKind = "text" | "image" | "confirm_card" | "query_answer" | "clarify";
 export type LlmTier = "light" | "strong" | "vision" | "embedding";
 export type RenderWeight = "expand" | "brief" | "one_line" | "omit";
 export type RequirementKind = "hard" | "implicit" | "nice_to_have";
@@ -1196,6 +1198,101 @@ export type Database = {
           updated_at?: string | null;
         };
         Relationships: [];
+      };
+      chat_messages: {
+        Row: {
+          id: string;
+          user_id: string;
+          role: ChatRole;
+          kind: ChatKind;
+          content: string | null;
+          image_path: string | null;
+          payload: Json;
+          ingest_job_id: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          role: ChatRole;
+          kind?: ChatKind;
+          content?: string | null;
+          image_path?: string | null;
+          payload?: Json;
+          ingest_job_id?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          role?: ChatRole;
+          kind?: ChatKind;
+          content?: string | null;
+          image_path?: string | null;
+          payload?: Json;
+          ingest_job_id?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_ingest_job_id_fkey";
+            columns: ["ingest_job_id"];
+            referencedRelation: "ingest_jobs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      undo_log: {
+        Row: {
+          id: string;
+          user_id: string;
+          chat_message_id: string | null;
+          draft_id: string | null;
+          inverse_ops: Json;
+          expires_at: string;
+          undone_at: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          chat_message_id?: string | null;
+          draft_id?: string | null;
+          inverse_ops: Json;
+          expires_at?: string;
+          undone_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          chat_message_id?: string | null;
+          draft_id?: string | null;
+          inverse_ops?: Json;
+          expires_at?: string;
+          undone_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "undo_log_chat_message_id_fkey";
+            columns: ["chat_message_id"];
+            referencedRelation: "chat_messages";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "undo_log_draft_id_fkey";
+            columns: ["draft_id"];
+            referencedRelation: "drafts";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
     Views: {

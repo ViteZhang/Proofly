@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "eval:extract": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/eval-extract.ts",
-    "embed:backfill": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/backfill-embeddings.ts"
+    "embed:backfill": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/backfill-embeddings.ts",
+    "chat:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/chat-probe.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",
