@@ -13,6 +13,8 @@
 
 import Link from "next/link";
 
+import { RippleList } from "@/components/notes/RippleList";
+
 import { EVIDENCE_LABEL, METRIC_KIND_LABEL, STATUS_LABEL } from "@/lib/domain";
 import type { CardDiff, CardMetric, ConfirmCardView } from "@/lib/chat/message-shape";
 import type { AtomStatus, EvidenceLevel, MetricKind } from "@/types/database";
@@ -33,9 +35,12 @@ const DIFF_LABEL: Record<string, string> = {
 
 export function ChatConfirmCard({
   card,
+  headline,
   imageUrl,
 }: {
   card: ConfirmCardView;
+  /** 助手那句话本身。卡嵌在对话流里，得先读得像一句话，再是一张表。 */
+  headline: string;
   imageUrl: string | null;
 }) {
   const u = card.unit;
@@ -46,24 +51,23 @@ export function ChatConfirmCard({
       className="rounded-btn border px-3 py-2.5 text-[13px]"
       style={{ borderColor: ask ? "var(--warn)" : "var(--line)" }}
     >
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-[14px] font-medium" style={{ color: "var(--ink)" }}>
-          {INTENT_LABEL[card.intent]}
-        </span>
+      {headline.trim() !== "" && (
+        <p className="text-[14px] font-medium" style={{ color: "var(--ink)" }}>
+          {headline}
+        </p>
+      )}
+
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span style={{ color: "var(--slate)" }}>{INTENT_LABEL[card.intent]}</span>
         <span style={{ color: "var(--mute)" }}>置信度 {card.confidence.toFixed(2)}</span>
-        {card.targetTitle !== "" && (
-          <span style={{ color: "var(--slate)" }}>
-            落到「{card.targetTitle}」
-            {card.targetAtomId !== null && (
-              <Link
-                href={`/library?atom=${card.targetAtomId}`}
-                className="ml-1 underline"
-                style={{ color: "var(--mute)" }}
-              >
-                去看
-              </Link>
-            )}
-          </span>
+        {card.targetAtomId !== null && (
+          <Link
+            href={`/library?atom=${card.targetAtomId}`}
+            className="underline"
+            style={{ color: "var(--mute)" }}
+          >
+            去看「{card.targetTitle}」
+          </Link>
         )}
       </div>
 
@@ -98,6 +102,11 @@ export function ChatConfirmCard({
       )}
 
       {u !== null && <UnitFacts unit={u} />}
+
+      <RippleList
+        effects={card.ripple}
+        titles={card.targetAtomId === null ? {} : { [card.targetAtomId]: card.targetTitle }}
+      />
 
       {u !== null && u.userWords.trim() !== "" && (
         <p className="mt-2" style={{ color: "var(--mute)" }}>
@@ -134,7 +143,10 @@ export function ChatConfirmCard({
       )}
 
       <p className="mt-2 text-[12px]" style={{ color: "var(--mute)" }}>
-        连带影响和「确认入库」还没接上（切片 3.4 / 3.6）。草稿 {card.draftId.slice(0, 8)}
+        {card.ripple.length === 0
+          ? "连带影响要等确认入库之后才算得出来（切片 3.6）。"
+          : ""}
+        草稿 {card.draftId.slice(0, 8)}
       </p>
     </div>
   );
@@ -188,7 +200,9 @@ function metricLine(m: CardMetric): string {
 
 function diffLine(d: CardDiff): string {
   const head = DIFF_LABEL[d.type] ?? d.type;
-  const field = d.field === "" ? "" : ` ${d.field}`;
+  // 模型常把 field 填成和这一类同名（status_change 的 field 就是「状态」），
+  // 照直拼出来是「状态 状态：…」。同名就只留一个。
+  const field = d.field === "" || d.field === head ? "" : ` ${d.field}`;
   const change =
     d.before !== "" && d.after !== ""
       ? `：${d.before} → ${d.after}`

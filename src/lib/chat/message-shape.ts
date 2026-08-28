@@ -9,6 +9,7 @@
 // 不让一条脏消息把整个对话流白屏掉。
 // =============================================================
 
+import type { RippleEffect } from "@/lib/ripple/types";
 import type { ChatKind, ChatRole, Json } from "@/types/database";
 
 export type ChatMessageView = {
@@ -127,6 +128,7 @@ export type ConfirmCardView = {
   recallDegraded: boolean;
   imagePath: string | null;
   unit: CardUnit | null;
+  ripple: RippleEffect[];
 };
 
 export function confirmCard(payload: Json): ConfirmCardView | null {
@@ -167,7 +169,56 @@ export function confirmCard(payload: Json): ConfirmCardView | null {
     recallDegraded: o.recall_degraded === true,
     imagePath: nullableStr(o.image_path),
     unit: cardUnit(o.unit),
+    ripple: rippleEffects(o.ripple),
   };
+}
+
+/**
+ * payload.ripple → RippleEffect[]。
+ *
+ * 认不出的 kind 直接丢掉，不猜。Step 5 加了新 kind 之后，
+ * 老客户端读到新卡片时会走到这里——少显示一行，好过显示一行看不懂的。
+ */
+export function rippleEffects(v: Json | undefined): RippleEffect[] {
+  const out: RippleEffect[] = [];
+  for (const raw of list(v)) {
+    const o = obj(raw);
+    switch (o.kind) {
+      case "proof_change":
+        out.push({ kind: "proof_change", atomId: str(o.atomId), from: str(o.from), to: str(o.to) });
+        break;
+      case "global_proof_change":
+        if (typeof o.from === "number" && typeof o.to === "number") {
+          out.push({ kind: "global_proof_change", from: o.from, to: o.to });
+        }
+        break;
+      case "pending_resolved":
+        out.push({
+          kind: "pending_resolved",
+          atomId: str(o.atomId),
+          metricName: str(o.metricName),
+        });
+        break;
+      case "skill_strength_change":
+        out.push({
+          kind: "skill_strength_change",
+          skillId: str(o.skillId),
+          label: str(o.label),
+          from: str(o.from),
+          to: str(o.to),
+        });
+        break;
+      case "match_score_change":
+        if (typeof o.from === "number" && typeof o.to === "number") {
+          out.push({ kind: "match_score_change", targetId: str(o.targetId), from: o.from, to: o.to });
+        }
+        break;
+      case "task_auto_complete":
+        out.push({ kind: "task_auto_complete", taskId: str(o.taskId), title: str(o.title) });
+        break;
+    }
+  }
+  return out;
 }
 
 function cardUnit(v: Json | undefined): CardUnit | null {
