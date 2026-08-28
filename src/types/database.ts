@@ -1328,6 +1328,21 @@ export type Database = {
         };
         Returns: string;
       };
+      commit_chat_draft: {
+        Args: {
+          p_draft_id: string;
+          p_atom: Json;
+          p_intent: string;
+          p_target: string | null;
+          p_parent: string | null;
+          p_chat_message_id: string | null;
+        };
+        Returns: Json;
+      };
+      undo_chat: {
+        Args: { p_undo_id: string };
+        Returns: boolean;
+      };
       match_atoms: {
         Args: { query_embedding: string; match_count?: number };
         Returns: {

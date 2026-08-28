@@ -32,7 +32,14 @@ import {
   retryMessage,
   sendMessage,
 } from "@/app/(app)/notes/actions";
+import {
+  commitCard,
+  rejectCard,
+  undoCard,
+  type Choice,
+} from "@/app/(app)/notes/commit-actions";
 import { AnswerLinks } from "./AnswerLinks";
+import { UndoToast } from "./UndoToast";
 import { AtomPicker, type PickerAtom } from "./AtomPicker";
 import { Composer } from "./Composer";
 
@@ -53,6 +60,8 @@ export function NotesChat({
   const [hint, setHint] = useState<string | null>(null);
   const [placeholder, setPlaceholder] = useState(PLACEHOLDER);
   const [picker, setPicker] = useState<PickerAtom[] | null>(null);
+  const [undo, setUndo] = useState<{ id: string; text: string; expiresAt: string } | null>(null);
+  const [cardBusy, setCardBusy] = useState<string | null>(null);
   const [older, setOlder] = useState<"idle" | "loading" | "done">(
     initial.length === 0 ? "done" : "idle",
   );
@@ -177,6 +186,79 @@ export function NotesChat({
     });
   }
 
+  // 入库 / 放弃 / 撤销：三个都要把那张卡在本地也换成新状态，
+  // 不然要等下一次刷新才看得出来自己刚点了什么。
+  function patch(draftId: string, patchPayload: Record<string, unknown>) {
+    setMessages((prev) =>
+      prev.map((m) => {
+        const o = m.payload;
+        if (o === null || typeof o !== "object" || Array.isArray(o)) return m;
+        if ((o as Record<string, unknown>).draft_id !== draftId) return m;
+        return { ...m, payload: { ...o, ...patchPayload } as typeof m.payload };
+      }),
+    );
+  }
+
+  function commit(draftId: string, choice?: Choice) {
+    setCardBusy(draftId);
+    setError(null);
+    start(async () => {
+      try {
+        const r = await commitCard(draftId, choice);
+        if (!r.ok) {
+          setError(r.error);
+          return;
+        }
+        patch(draftId, {
+          committed: true,
+          undo_id: r.data.undoId,
+          ripple: r.data.ripple,
+        });
+        setUndo({ id: r.data.undoId, text: r.data.toast, expiresAt: r.data.expiresAt });
+      } catch {
+        setError("没写进去，网络断了或者请求被掐断了。再点一次确认。");
+      } finally {
+        setCardBusy(null);
+      }
+    });
+  }
+
+  function reject(draftId: string) {
+    setCardBusy(draftId);
+    start(async () => {
+      try {
+        const r = await rejectCard(draftId);
+        if (r.ok) patch(draftId, { rejected: true });
+        else setError(r.error);
+      } catch {
+        setError("没放下这条，网络可能断了。");
+      } finally {
+        setCardBusy(null);
+      }
+    });
+  }
+
+  function doUndo() {
+    if (undo === null) return;
+    const { id } = undo;
+    const draftId = draftOfUndo(messages, id);
+    setUndo(null);
+    start(async () => {
+      try {
+        const r = await undoCard(id);
+        if (!r.ok) {
+          setError(r.error);
+          return;
+        }
+        if (draftId !== null) {
+          patch(draftId, { committed: false, undone: true, ripple: [] });
+        }
+      } catch {
+        setError("撤销没发出去，网络可能断了。");
+      }
+    });
+  }
+
   function openPicker() {
     setHint(null);
     start(async () => {
@@ -210,7 +292,13 @@ export function NotesChat({
 
         <div className="flex flex-col gap-3 pb-2">
           {messages.map((m) => (
-            <Message key={m.id} m={m} />
+            <Message
+              key={m.id}
+              m={m}
+              busy={cardBusy}
+              onCommit={commit}
+              onReject={reject}
+            />
           ))}
 
           {thinking && <Thinking />}
@@ -235,6 +323,16 @@ export function NotesChat({
           <div ref={bottom} />
         </div>
       </div>
+
+      {undo !== null && (
+        <UndoToast
+          text={undo.text}
+          expiresAt={undo.expiresAt}
+          busy={cardBusy !== null}
+          onUndo={doUndo}
+          onExpire={() => setUndo(null)}
+        />
+      )}
 
       {picker !== null && (
         <AtomPicker
@@ -283,6 +381,16 @@ export function NotesChat({
   );
 }
 
+function draftOfUndo(messages: ChatMessageView[], undoId: string): string | null {
+  for (const m of messages) {
+    const o = m.payload;
+    if (o === null || typeof o !== "object" || Array.isArray(o)) continue;
+    const r = o as Record<string, unknown>;
+    if (r.undo_id === undoId && typeof r.draft_id === "string") return r.draft_id;
+  }
+  return null;
+}
+
 // ---- 图片：浏览器直传 Storage，绕开 Server Action 的请求体上限 ----
 
 async function uploadImage(file: File): Promise<{ path: string } | { error: string }> {
@@ -300,7 +408,17 @@ async function uploadImage(file: File): Promise<{ path: string } | { error: stri
 
 // ---- 单条消息 ----
 
-function Message({ m }: { m: ChatMessageView }) {
+function Message({
+  m,
+  busy,
+  onCommit,
+  onReject,
+}: {
+  m: ChatMessageView;
+  busy: string | null;
+  onCommit: (draftId: string, choice?: Choice) => void;
+  onReject: (draftId: string) => void;
+}) {
   const mine = m.role === "user";
   const card = m.kind === "confirm_card" ? confirmCard(m.payload) : null;
 
@@ -308,7 +426,14 @@ function Message({ m }: { m: ChatMessageView }) {
   if (card !== null) {
     return (
       <div className="ml-9">
-        <ChatConfirmCard card={card} headline={m.content} imageUrl={m.imageUrl} />
+        <ChatConfirmCard
+          card={card}
+          headline={m.content}
+          imageUrl={m.imageUrl}
+          busy={busy === card.draftId}
+          onCommit={(choice) => onCommit(card.draftId, choice)}
+          onReject={() => onReject(card.draftId)}
+        />
       </div>
     );
   }

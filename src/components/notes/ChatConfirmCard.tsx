@@ -14,9 +14,11 @@
 import Link from "next/link";
 
 import { RippleList } from "@/components/notes/RippleList";
+import { Button } from "@/components/ui/Button";
 
 import { EVIDENCE_LABEL, METRIC_KIND_LABEL, STATUS_LABEL } from "@/lib/domain";
 import type { CardDiff, CardMetric, ConfirmCardView } from "@/lib/chat/message-shape";
+import type { Choice } from "@/app/(app)/notes/commit-actions";
 import type { AtomStatus, EvidenceLevel, MetricKind } from "@/types/database";
 
 const INTENT_LABEL = {
@@ -24,6 +26,19 @@ const INTENT_LABEL = {
   CREATE: "新建一条经历",
   ASK: "拿不准，你来定",
 } as const;
+
+// diff.field 是模型填的，中英文都有：status_change 常带 "status"，
+// 也常带「状态」。两种都要能对上，否则拼出来是「状态 status：…」。
+const FIELD_LABEL: Record<string, string> = {
+  status: "状态",
+  situation: "背景",
+  task: "任务",
+  role: "角色",
+  org: "组织",
+  actions: "动作",
+  period_end: "结束时间",
+  evidence_level: "证明度",
+};
 
 const DIFF_LABEL: Record<string, string> = {
   field_change: "改了",
@@ -37,19 +52,31 @@ export function ChatConfirmCard({
   card,
   headline,
   imageUrl,
+  busy = false,
+  onCommit,
+  onReject,
 }: {
   card: ConfirmCardView;
   /** 助手那句话本身。卡嵌在对话流里，得先读得像一句话，再是一张表。 */
   headline: string;
   imageUrl: string | null;
+  busy?: boolean;
+  onCommit?: (choice?: Choice) => void;
+  onReject?: () => void;
 }) {
   const u = card.unit;
   const ask = card.intent === "ASK";
+  // 撤销之后卡片变灰留在原地，不删 —— 用户得看得见自己刚撤了什么（验收 35）
+  const spent = card.undone || card.rejected;
 
   return (
     <div
       className="rounded-btn border px-3 py-2.5 text-[13px]"
-      style={{ borderColor: ask ? "var(--warn)" : "var(--line)" }}
+      style={{
+        borderColor: spent ? "var(--line)" : ask ? "var(--warn)" : "var(--line)",
+        background: spent ? "var(--line-soft)" : undefined,
+        opacity: spent ? 0.6 : 1,
+      }}
     >
       {headline.trim() !== "" && (
         <p className="text-[14px] font-medium" style={{ color: "var(--ink)" }}>
@@ -142,13 +169,80 @@ export function ChatConfirmCard({
         </p>
       )}
 
-      <p className="mt-2 text-[12px]" style={{ color: "var(--mute)" }}>
-        {card.ripple.length === 0
-          ? "连带影响要等确认入库之后才算得出来（切片 3.6）。"
-          : ""}
-        草稿 {card.draftId.slice(0, 8)}
-      </p>
+      <Footer
+        card={card}
+        ask={ask}
+        busy={busy}
+        onCommit={onCommit}
+        onReject={onReject}
+      />
     </div>
+  );
+}
+
+function Footer({
+  card,
+  ask,
+  busy,
+  onCommit,
+  onReject,
+}: {
+  card: ConfirmCardView;
+  ask: boolean;
+  busy: boolean;
+  onCommit?: (choice?: Choice) => void;
+  onReject?: () => void;
+}) {
+  if (card.undone) return <State>已撤销</State>;
+  if (card.rejected) return <State>没收这条</State>;
+  if (card.committed) return <State>已入库</State>;
+  if (onCommit === undefined || onReject === undefined) return null;
+
+  // ASK 不给「确认」——它本来就是「我不知道该落到哪」，
+  // 给一个默认按钮等于替用户做了那个它自己都没把准的决定。
+  if (ask) {
+    return (
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        {card.options.map((o, i) => (
+          <Button
+            key={i}
+            size="sm"
+            variant={i === 0 ? "primary" : "secondary"}
+            disabled={busy}
+            onClick={() =>
+              onCommit({
+                action: o.action === "UPDATE" || o.action === "MERGE" ? o.action : "CREATE",
+                targetAtomId: o.targetAtomId,
+              })
+            }
+          >
+            {o.label === "" ? o.action : o.label}
+          </Button>
+        ))}
+        <Button size="sm" variant="text" disabled={busy} onClick={onReject}>
+          都不是，先放着
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2.5 flex gap-2">
+      <Button size="sm" disabled={busy} onClick={() => onCommit()}>
+        确认
+      </Button>
+      <Button size="sm" variant="text" disabled={busy} onClick={onReject}>
+        不用了
+      </Button>
+    </div>
+  );
+}
+
+function State({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-2 text-[12px]" style={{ color: "var(--mute)" }}>
+      {children}
+    </p>
   );
 }
 
@@ -200,9 +294,10 @@ function metricLine(m: CardMetric): string {
 
 function diffLine(d: CardDiff): string {
   const head = DIFF_LABEL[d.type] ?? d.type;
-  // 模型常把 field 填成和这一类同名（status_change 的 field 就是「状态」），
-  // 照直拼出来是「状态 状态：…」。同名就只留一个。
-  const field = d.field === "" || d.field === head ? "" : ` ${d.field}`;
+  const named = FIELD_LABEL[d.field] ?? d.field;
+  // 模型常把 field 填成和这一类同名（status_change 的 field 就是 status／状态），
+  // 照直拼出来是「状态 status：…」。同名就只留一个。
+  const field = named === "" || named === head ? "" : ` ${named}`;
   const change =
     d.before !== "" && d.after !== ""
       ? `：${d.before} → ${d.after}`
