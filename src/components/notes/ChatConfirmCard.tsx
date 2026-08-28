@@ -13,6 +13,8 @@
 
 import Link from "next/link";
 
+import { RippleList } from "@/components/notes/RippleList";
+
 import { EVIDENCE_LABEL, METRIC_KIND_LABEL, STATUS_LABEL } from "@/lib/domain";
 import type { CardDiff, CardMetric, ConfirmCardView } from "@/lib/chat/message-shape";
 import type { AtomStatus, EvidenceLevel, MetricKind } from "@/types/database";
@@ -99,6 +101,11 @@ export function ChatConfirmCard({
 
       {u !== null && <UnitFacts unit={u} />}
 
+      <RippleList
+        effects={card.ripple}
+        titles={card.targetAtomId === null ? {} : { [card.targetAtomId]: card.targetTitle }}
+      />
+
       {u !== null && u.userWords.trim() !== "" && (
         <p className="mt-2" style={{ color: "var(--mute)" }}>
           你的原话：{u.userWords}
@@ -134,7 +141,10 @@ export function ChatConfirmCard({
       )}
 
       <p className="mt-2 text-[12px]" style={{ color: "var(--mute)" }}>
-        连带影响和「确认入库」还没接上（切片 3.4 / 3.6）。草稿 {card.draftId.slice(0, 8)}
+        {card.ripple.length === 0
+          ? "连带影响要等确认入库之后才算得出来（切片 3.6）。"
+          : ""}
+        草稿 {card.draftId.slice(0, 8)}
       </p>
     </div>
   );
