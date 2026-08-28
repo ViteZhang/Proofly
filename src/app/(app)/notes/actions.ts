@@ -4,7 +4,11 @@ import { z } from "zod";
 
 import { chitchatReply } from "@/lib/chat/chitchat";
 import { classifyMessage } from "@/lib/chat/classify";
-import { toMessageView, type ChatMessageView } from "@/lib/chat/message-shape";
+import {
+  toMessageView,
+  type ChatMessageRow,
+  type ChatMessageView,
+} from "@/lib/chat/message-shape";
 import { ocrChatImage } from "@/lib/chat/ocr";
 import { runRecord } from "@/lib/chat/pipeline";
 import { answerQuery, renderQueryAnswer } from "@/lib/chat/query-answer";
@@ -30,6 +34,71 @@ export type SendResult = { messages: ChatMessageView[]; modelError: string | nul
 
 export async function loadMore(before: string): Promise<ActionResult<ChatMessageView[]>> {
   return ok(await loadMessages(before));
+}
+
+/**
+ * 刷新页面后把「还在处理」这件事捡回来（验收 42）。
+ *
+ * 处理是在 Server Action 里同步跑完的，页面刷新不会打断它——
+ * 但新页面并不知道后台还有活。靠这条作业记录知道。
+ *
+ * 卡了很久的作业不算「在处理」：跑它的那次请求多半已经没了，
+ * 一直转圈比说错话还难查。
+ */
+const BUSY_WINDOW_MS = 10 * 60_000;
+
+export async function chatBusy(): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("ingest_jobs")
+    .select("id")
+    .eq("input_type", "chat")
+    .eq("status", "extracting")
+    .gt("created_at", new Date(Date.now() - BUSY_WINDOW_MS).toISOString())
+    .limit(1);
+  return (data ?? []).length > 0;
+}
+
+/** 处理期间轮询新消息。afterIso 为 null 时只回状态，不回消息。 */
+export async function pollChat(
+  afterIso: string | null,
+): Promise<ActionResult<{ messages: ChatMessageView[]; busy: boolean }>> {
+  const busy = await chatBusy();
+  if (afterIso === null) return ok({ messages: [], busy });
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("chat_messages")
+    .select("id, role, kind, content, image_path, payload, created_at")
+    .gt("created_at", afterIso)
+    .order("created_at", { ascending: true })
+    .limit(50);
+
+  return ok({
+    messages: await signImages(((data ?? []) as ChatMessageRow[]).map(toMessageView)),
+    busy,
+  });
+}
+
+/** 「更新某个项目」的经历选择器。只要能认出是哪条的最少几个字段。 */
+export async function pickerAtoms(): Promise<
+  ActionResult<{ id: string; title: string; org: string; status: string }[]>
+> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("atoms")
+    .select("id, title, org, status")
+    .order("updated_at", { ascending: false })
+    .limit(60);
+  if (error) return fail(`没读到经历列表：${error.message}`);
+  return ok(
+    (data ?? []).map((a) => ({
+      id: a.id,
+      title: a.title,
+      org: a.org ?? "",
+      status: a.status,
+    })),
+  );
 }
 
 /**
