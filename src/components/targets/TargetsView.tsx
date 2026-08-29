@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -225,6 +226,14 @@ function SelectedPanel({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          {/* 批量配置这个方向下每条经历讲多少 */}
+          <Link
+            href={`/targets/strategy?target=${target.id}`}
+            className="inline-flex h-[30px] items-center rounded-btn px-3 text-[13px] font-medium transition-colors hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            style={{ background: "var(--card)", border: "1px solid var(--line)", color: "var(--ink)" }}
+          >
+            配置经历策略
+          </Link>
           <Button variant="secondary" size="sm" onClick={onEdit}>
             编辑
           </Button>

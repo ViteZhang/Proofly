@@ -1,4 +1,5 @@
 import { getAtomDetail, getAtomTree, getProofSummary } from "@/lib/queries/atoms";
+import { getAtomStrategies } from "@/lib/queries/strategy";
 import { AtomPane } from "@/components/library/AtomPane";
 import { EmptyLibrary } from "@/components/library/EmptyLibrary";
 import { LibraryTree } from "@/components/library/LibraryTree";
@@ -20,6 +21,10 @@ export default async function LibraryPage({
   // id 不存在 / 不是本人的 / 压根不是 uuid，都返回 null，走下面的降级。
   const detail = atom ? await getAtomDetail(atom) : null;
 
+  // 各方向策略跟经历本体分开查：经历库是全局视图，策略是方向视图，
+  // 两者的生命周期不一样，硬塞进 getAtomDetail 会让经历库读取绑上 targets。
+  const strategies = detail ? await getAtomStrategies(detail.id) : [];
+
   // 父级下拉只列经历，且不能选自己。
   const projects = tree.groups
     .flatMap((g) => g.atoms)
@@ -38,7 +43,7 @@ export default async function LibraryPage({
 
         <section className="min-w-0 flex-1">
           {detail ? (
-            <AtomPane key={detail.id} detail={detail} projects={projects} />
+            <AtomPane key={detail.id} detail={detail} projects={projects} strategies={strategies} />
           ) : (
             <div
               className="rounded-card px-6 py-7 text-[13.5px]"

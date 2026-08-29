@@ -10,22 +10,26 @@ import {
 } from "@/lib/domain";
 import { explainEvidence, STRENGTH_EXPLAIN } from "@/lib/evidence";
 import type { AtomDetail as Detail } from "@/lib/queries/atoms";
+import type { AtomStrategyRow } from "@/lib/queries/strategy";
 import { GuardsBlock } from "./GuardsBlock";
 import { MetricsBlock } from "./MetricsBlock";
 import { PendingBlock } from "./PendingBlock";
 import { ProofDot } from "./ProofDot";
 import { SkillsBlock } from "./SkillsBlock";
+import { StrategyBlock } from "./StrategyBlock";
 import { WhyTip } from "./WhyTip";
 
 // 区块顺序固定（S3）：标题 → 元信息 → 背景 → 我做了什么 → 结果 →
 // 待补数据 → 叙事护栏 → 技能证据 → 各方向策略。
 export function AtomReadView({
   atom,
+  strategies,
   onEdit,
   onAddSlice,
   addingSlice,
 }: {
   atom: Detail;
+  strategies: AtomStrategyRow[];
   onEdit: () => void;
   onAddSlice: () => void;
   addingSlice: boolean;
@@ -154,11 +158,9 @@ export function AtomReadView({
         <SkillsBlock atomId={atom.id} skills={atom.skills} />
       </Block>
 
-      {/* 9 各方向策略 —— targets 表要到 Step 4 才有数据，这里先占位 */}
+      {/* 9 各方向策略 */}
       <Block title="各方向策略">
-        <Todo>
-          还没有求职方向。建了方向之后，可以在这里配置这条经历在各方向下的展开程度。
-        </Todo>
+        <StrategyBlock atomId={atom.id} rows={strategies} />
       </Block>
 
       {/* 只有两层：能力点下面不能再挂能力点，所以这个按钮只对经历出现 */}

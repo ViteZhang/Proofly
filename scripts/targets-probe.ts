@@ -57,6 +57,8 @@ const SCOPED = ["/targets", "/resume", "/interview"];
 for (const p of GLOBAL) check(`${p} 是全局视图 → 置灰`, isGlobalPath(p) === true);
 for (const p of SCOPED) check(`${p} 是方向视图 → 可选`, isGlobalPath(p) === false);
 check("子路由 /import/review/xxx 也算全局", isGlobalPath("/import/review/abc") === true);
+check("批量配置页 /targets/strategy 属于方向视图", isGlobalPath("/targets/strategy") === false);
+check("别把 /targetsomething 当成方向页", isGlobalPath("/targetsomething") === true);
 
 console.log("\n验收 1、2 · 平权（源码层面）");
 const view = readFileSync(new URL("../src/components/targets/TargetsView.tsx", import.meta.url), "utf8");
