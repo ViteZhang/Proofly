@@ -29,6 +29,7 @@ export type DraftIntent = "CREATE" | "UPDATE" | "ASK";
 export type DraftReviewStatus = "pending" | "accepted" | "edited" | "rejected";
 export type ChatRole = "user" | "assistant" | "system";
 export type ChatKind = "text" | "image" | "confirm_card" | "query_answer" | "clarify";
+export type NudgeRule = "R1" | "R2" | "R3";
 export type LlmTier = "light" | "strong" | "vision" | "embedding";
 export type RenderWeight = "expand" | "brief" | "one_line" | "omit";
 export type RequirementKind = "hard" | "implicit" | "nice_to_have";
@@ -1241,6 +1242,58 @@ export type Database = {
             foreignKeyName: "chat_messages_ingest_job_id_fkey";
             columns: ["ingest_job_id"];
             referencedRelation: "ingest_jobs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      nudge_log: {
+        Row: {
+          id: string;
+          user_id: string;
+          rule: NudgeRule;
+          atom_id: string | null;
+          chat_message_id: string | null;
+          sent_at: string;
+          sent_on: string;
+          responded: boolean;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          rule: NudgeRule;
+          atom_id?: string | null;
+          chat_message_id?: string | null;
+          sent_at?: string;
+          sent_on?: string;
+          responded?: boolean;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          rule?: NudgeRule;
+          atom_id?: string | null;
+          chat_message_id?: string | null;
+          sent_at?: string;
+          sent_on?: string;
+          responded?: boolean;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "nudge_log_atom_id_fkey";
+            columns: ["atom_id"];
+            referencedRelation: "atoms";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "nudge_log_chat_message_id_fkey";
+            columns: ["chat_message_id"];
+            referencedRelation: "chat_messages";
             referencedColumns: ["id"];
           },
         ];

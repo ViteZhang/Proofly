@@ -12,7 +12,8 @@
     "chat:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/chat-probe.ts",
     "split:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/split-probe.ts",
     "locate:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/locate-probe.ts",
-    "ripple:probe": "node --import ./scripts/ts-resolve.mjs scripts/ripple-probe.ts"
+    "ripple:probe": "node --import ./scripts/ts-resolve.mjs scripts/ripple-probe.ts",
+    "nudge:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/nudge-probe.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",

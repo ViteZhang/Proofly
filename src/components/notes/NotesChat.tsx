@@ -26,6 +26,7 @@ import {
 } from "@/lib/chat/message-shape";
 import { createClient } from "@/lib/supabase/client";
 import {
+  checkNudge,
   loadMore,
   pickerAtoms,
   pollChat,
@@ -71,6 +72,7 @@ export function NotesChat({
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<{ focus: () => void; prepend: (s: string) => void }>(null);
   const stick = useRef(true);
+  const asked = useRef(false);
 
   // 按 id 去重后追加。轮询和 Server Action 的返回会送来同一条消息。
   const append = useCallback((incoming: ChatMessageView[]) => {
@@ -85,6 +87,21 @@ export function NotesChat({
   useEffect(() => {
     if (stick.current) bottom.current?.scrollIntoView({ block: "end" });
   }, [messages, thinking]);
+
+  // 进页面时看看该不该主动问一句。一次挂载只问一次；
+  // 该不该问、今天问过没有，都由服务端说了算，这里只负责别重复调。
+  useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+    void (async () => {
+      try {
+        const r = await checkNudge();
+        if (r.ok && r.data !== null) append([r.data]);
+      } catch {
+        // 追问失败不该打断任何事，安静跳过
+      }
+    })();
+  }, [append]);
 
   // 处理中：轮询捡新消息，直到后台没活了
   useEffect(() => {
