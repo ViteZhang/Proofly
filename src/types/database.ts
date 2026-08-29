@@ -697,6 +697,10 @@ export type Database = {
           jd_id: string;
           text: string;
           kind: RequirementKind;
+          idx: number | null;
+          raw_phrase: string | null;
+          is_structural: boolean;
+          derived_from: string | null;
           weight: number | null;
           mapped_skill_id: string | null;
           created_at: string | null;
@@ -708,6 +712,10 @@ export type Database = {
           jd_id: string;
           text: string;
           kind?: RequirementKind;
+          idx?: number | null;
+          raw_phrase?: string | null;
+          is_structural?: boolean;
+          derived_from?: string | null;
           weight?: number | null;
           mapped_skill_id?: string | null;
           created_at?: string | null;
@@ -719,6 +727,10 @@ export type Database = {
           jd_id?: string;
           text?: string;
           kind?: RequirementKind;
+          idx?: number | null;
+          raw_phrase?: string | null;
+          is_structural?: boolean;
+          derived_from?: string | null;
           weight?: number | null;
           mapped_skill_id?: string | null;
           created_at?: string | null;
@@ -747,6 +759,7 @@ export type Database = {
           jd_id: string;
           match_score: number | null;
           strengths: Json;
+          results: Json;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -757,6 +770,7 @@ export type Database = {
           jd_id: string;
           match_score?: number | null;
           strengths?: Json;
+          results?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -767,6 +781,7 @@ export type Database = {
           jd_id?: string;
           match_score?: number | null;
           strengths?: Json;
+          results?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -794,6 +809,8 @@ export type Database = {
           gap_type: GapType;
           severity: GapSeverity;
           score_impact: number | null;
+          requirement_index: number | null;
+          detail: Json;
           resolved_at: string | null;
           created_at: string | null;
           updated_at: string | null;
@@ -806,6 +823,8 @@ export type Database = {
           gap_type: GapType;
           severity?: GapSeverity;
           score_impact?: number | null;
+          requirement_index?: number | null;
+          detail?: Json;
           resolved_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
@@ -818,6 +837,8 @@ export type Database = {
           gap_type?: GapType;
           severity?: GapSeverity;
           score_impact?: number | null;
+          requirement_index?: number | null;
+          detail?: Json;
           resolved_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
