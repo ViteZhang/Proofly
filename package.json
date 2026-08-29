@@ -16,7 +16,9 @@
     "nudge:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/nudge-probe.ts",
     "targets:probe": "node --import ./scripts/ts-resolve.mjs scripts/targets-probe.ts",
     "strategy:probe": "node --import ./scripts/ts-resolve.mjs scripts/strategy-probe.ts",
-    "jd:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/jd-probe.ts"
+    "jd:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/jd-probe.ts",
+    "scoring:probe": "node --import ./scripts/ts-resolve.mjs scripts/scoring-probe.ts",
+    "assess:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/assess-probe.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",

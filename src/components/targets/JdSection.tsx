@@ -16,16 +16,12 @@ export function JdSection({
   jds,
   jd,
   assessPanel,
-  onAssess,
-  assessing,
 }: {
   targetId: string;
   jds: JdCard[];
   jd: JdDetail | null;
   /** 区块三：评估结果。由页面装配好传进来。 */
   assessPanel?: React.ReactNode;
-  onAssess?: (jdId: string) => void;
-  assessing?: boolean;
 }) {
   const router = useRouter();
   const [addingJd, setAddingJd] = useState(false);
@@ -171,21 +167,22 @@ export function JdSection({
               <span className="text-[13px]" style={{ color: "var(--ai)" }}>
                 解析出 {parsedCount} 条要求。要现在评估匹配度吗？
               </span>
-              {onAssess && (
-                <div className="ml-auto flex items-center gap-1.5">
-                  <Button
-                    variant="text"
-                    size="sm"
-                    onClick={() => setParsedCount(null)}
-                    disabled={assessing}
-                  >
-                    先不用
-                  </Button>
-                  <Button size="sm" onClick={() => onAssess(jd.id)} disabled={assessing}>
-                    {assessing ? "评估中…" : "现在评估"}
-                  </Button>
-                </div>
-              )}
+              <div className="ml-auto flex items-center gap-1.5">
+                <Button variant="text" size="sm" onClick={() => setParsedCount(null)}>
+                  先不用
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setParsedCount(null);
+                    document
+                      .getElementById("assess-panel")
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }}
+                >
+                  去评估
+                </Button>
+              </div>
             </div>
           )}
 

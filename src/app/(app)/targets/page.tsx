@@ -1,5 +1,7 @@
+import { AssessPanel } from "@/components/targets/AssessPanel";
 import { JdSection } from "@/components/targets/JdSection";
 import { TargetsView } from "@/components/targets/TargetsView";
+import { getLatestAssessment } from "@/lib/queries/assessments";
 import { getJd, listJds } from "@/lib/queries/jds";
 import { listTargets } from "@/lib/queries/targets";
 import { resolveTarget } from "@/lib/targets/shape";
@@ -20,6 +22,7 @@ export default async function TargetsPage({
   const wantedJd = Array.isArray(params.jd) ? params.jd[0] : params.jd;
   const jdId = jds.find((j) => j.id === wantedJd)?.id ?? jds[0]?.id ?? null;
   const jd = jdId ? await getJd(jdId) : null;
+  const assessment = jdId ? await getLatestAssessment(jdId) : null;
 
   return (
     <div>
@@ -28,7 +31,23 @@ export default async function TargetsPage({
         selectedId={selected?.id ?? null}
         openNew={params.new === "1"}
       />
-      {selected && <JdSection targetId={selected.id} jds={jds} jd={jd} />}
+      {selected && (
+        <JdSection
+          targetId={selected.id}
+          jds={jds}
+          jd={jd}
+          assessPanel={
+            jd && (
+              <AssessPanel
+                key={jd.id}
+                jdId={jd.id}
+                hasRequirements={jd.requirements.length > 0}
+                assessment={assessment}
+              />
+            )
+          }
+        />
+      )}
     </div>
   );
 }
