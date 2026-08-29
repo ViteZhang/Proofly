@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getOverviewStats, getProofSummary } from "@/lib/queries/atoms";
+import { getRiskCards } from "@/lib/queries/risk";
 import { EmptyLibrary } from "@/components/library/EmptyLibrary";
 import { ProofDot } from "@/components/library/ProofDot";
 import { ProofRing } from "@/components/home/ProofRing";
@@ -15,7 +16,11 @@ const BAR: Record<EvidenceLevel, string> = {
 };
 
 export default async function HomePage() {
-  const [summary, stats] = await Promise.all([getProofSummary(), getOverviewStats()]);
+  const [summary, stats, risks] = await Promise.all([
+    getProofSummary(),
+    getOverviewStats(),
+    getRiskCards(),
+  ]);
 
   // 一条经历都没有的时候，摆一个 0% 的环没有任何意义
   if (summary.total === 0) return <EmptyLibrary />;
@@ -82,6 +87,33 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* S2 区块二 · 风险提示。做过一堆事但都拿不出数据，
+          比「没做过」更容易在面试里被问穿，而它平时看不出来。 */}
+      {risks.map((risk) => (
+        <Link
+          key={risk.targetId}
+          href={`/targets?target=${risk.targetId}`}
+          className="mt-4 block rounded-card px-5 py-4 transition-opacity hover:opacity-90"
+          style={{ background: "var(--caution-soft)", border: "1px solid var(--caution)" }}
+        >
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-[14px] font-semibold" style={{ color: "var(--caution)" }}>
+              「{risk.targetName}」方向：做过，但拿不出数据
+            </span>
+            <span className="shrink-0 font-display text-[13px] font-semibold" style={{ color: "var(--caution)" }}>
+              −{risk.weakLoss.toFixed(1)} 分
+            </span>
+          </div>
+          <p className="mt-1.5 text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
+            在「{risk.jdLabel}」上，命中要求的经历里有 {risk.weakLoss.toFixed(1)} 分丢在「还没有实测数据」上。
+            {risk.atomTitles.length > 0 && (
+              <> 主要是{risk.atomTitles.slice(0, 3).map((t) => `「${t}」`).join("")}。</>
+            )}
+            {" "}补一条实测数据，这些分会自己回来。
+          </p>
+        </Link>
+      ))}
 
       {/* 数据概览 */}
       <div className="mt-4 grid grid-cols-3 gap-4">

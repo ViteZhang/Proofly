@@ -11,6 +11,9 @@
 
 import { readFileSync } from "node:fs";
 import { isGlobalPath } from "../src/lib/nav";
+import { aggregate } from "../src/lib/scoring";
+import { WEAK_EVIDENCE_RISK_THRESHOLD } from "../src/lib/scoring/config";
+import { parseResults } from "../src/lib/scoring/parse";
 import { resolveTarget } from "../src/lib/targets/shape";
 
 // 注释里写「不要加星标」是好事，不该被当成违规。扫描前先把注释剥掉，
@@ -94,6 +97,57 @@ check(
   "写操作里没有设主方向的接口",
   !actions.includes("setPrimary") && !actions.includes("主方向") && !actions.includes("pin"),
 );
+
+console.log("\n验收 43、44 · 首页风险提示卡的门槛");
+{
+  // 用跟真库里同一份 jsonb 形状喂进来
+  const withWeak = (loss: number) =>
+    parseResults([
+      {
+        requirementIndex: 1,
+        text: "RAG 企业知识库",
+        kind: "hard",
+        weight: 3,
+        coverage: "partial",
+        scoreLoss: loss,
+        gapType: "weak_evidence",
+        matchedTitles: ["知识宇宙", "润泽园 APP"],
+        matchedAtomIds: [],
+        relatedSkillLabels: [],
+        emptySkillLabels: [],
+      },
+      {
+        requirementIndex: 2,
+        text: "SQL",
+        kind: "hard",
+        weight: 3,
+        coverage: "none",
+        scoreLoss: 20.5,
+        gapType: "no_capability",
+        matchedTitles: [],
+        matchedAtomIds: [],
+        relatedSkillLabels: [],
+        emptySkillLabels: [],
+      },
+    ]);
+
+  const weakLoss = (loss: number) =>
+    aggregate(withWeak(loss)).find((b) => b.gapType === "weak_evidence")?.loss ?? 0;
+
+  check("门槛是 15 分", WEAK_EVIDENCE_RISK_THRESHOLD === 15);
+  check("18.5 分 → 出卡", weakLoss(18.5) > WEAK_EVIDENCE_RISK_THRESHOLD);
+  check("14.9 分 → 不出卡", !(weakLoss(14.9) > WEAK_EVIDENCE_RISK_THRESHOLD));
+  check("正好 15 分 → 不出卡（要求是「大于」）", !(weakLoss(15) > WEAK_EVIDENCE_RISK_THRESHOLD));
+  check(
+    "只统计 weak_evidence，不把别的类算进来",
+    Math.abs(weakLoss(18.5) - 18.5) < 0.01,
+    `${weakLoss(18.5)}`,
+  );
+  check(
+    "一条 weak_evidence 都没有时不出卡",
+    (aggregate(parseResults([{ requirementIndex: 1, text: "x", kind: "hard", weight: 3, coverage: "none", scoreLoss: 50, gapType: "no_capability", matchedTitles: [], matchedAtomIds: [], relatedSkillLabels: [], emptySkillLabels: [] }])).find((b) => b.gapType === "weak_evidence")?.loss ?? 0) === 0,
+  );
+}
 
 console.log(`\n${fail === 0 ? "全过" : "有挂"}：${pass} / ${pass + fail}\n`);
 process.exit(fail === 0 ? 0 : 1);

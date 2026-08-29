@@ -59,6 +59,13 @@ export const NO_MATCH_MULTIPLIER = 0;
 export const WEAK_EVIDENCE_LEVELS: EvidenceLevel[] = ["designed_only", "absent"];
 
 /**
+ * 首页风险提示卡的门槛：一个方向下 weak_evidence 类缺口的失分之和
+ * 超过这个数，就说明「主要命中的经历证明度普遍偏低」——做过一堆事，
+ * 但都拿不出数据。
+ */
+export const WEAK_EVIDENCE_RISK_THRESHOLD = 15;
+
+/**
  * 恒等式的浮点容差：全部 score_loss 之和必须等于 100 - match_score。
  * 超出这个范围不是精度问题，是归因逻辑写错了，直接抛错。
  */
