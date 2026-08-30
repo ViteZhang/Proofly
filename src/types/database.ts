@@ -41,6 +41,7 @@ export type TaskActionType =
   | "rewrite_narrative"
   | "learn";
 export type TaskStatus = "todo" | "doing" | "done" | "dropped";
+export type TaskSource = "ai_generated" | "manual";
 export type InterviewKind = "project_probe" | "product_case" | "ai_tech" | "data_case";
 export type CheckScope = "facts" | "skills" | "resume" | "cross_doc";
 export type CheckLevel = "blocking" | "warning" | "pass";
@@ -812,6 +813,7 @@ export type Database = {
           requirement_index: number | null;
           detail: Json;
           resolved_at: string | null;
+          dismissed_at: string | null;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -826,6 +828,7 @@ export type Database = {
           requirement_index?: number | null;
           detail?: Json;
           resolved_at?: string | null;
+          dismissed_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -840,6 +843,7 @@ export type Database = {
           requirement_index?: number | null;
           detail?: Json;
           resolved_at?: string | null;
+          dismissed_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -871,6 +875,12 @@ export type Database = {
           produces_atom_id: string | null;
           deliverable: string | null;
           pinned: boolean | null;
+          source: TaskSource;
+          anchor_atom_id: string | null;
+          dismissed_at: string | null;
+          completed_at: string | null;
+          edited: boolean;
+          auto_completed: boolean;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -886,6 +896,12 @@ export type Database = {
           produces_atom_id?: string | null;
           deliverable?: string | null;
           pinned?: boolean | null;
+          source?: TaskSource;
+          anchor_atom_id?: string | null;
+          dismissed_at?: string | null;
+          completed_at?: string | null;
+          edited?: boolean;
+          auto_completed?: boolean;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -901,6 +917,12 @@ export type Database = {
           produces_atom_id?: string | null;
           deliverable?: string | null;
           pinned?: boolean | null;
+          source?: TaskSource;
+          anchor_atom_id?: string | null;
+          dismissed_at?: string | null;
+          completed_at?: string | null;
+          edited?: boolean;
+          auto_completed?: boolean;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -921,6 +943,7 @@ export type Database = {
           target_id: string;
           gap_id: string | null;
           impact: number | null;
+          impact_basis: Json;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -931,6 +954,7 @@ export type Database = {
           target_id: string;
           gap_id?: string | null;
           impact?: number | null;
+          impact_basis?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -941,6 +965,7 @@ export type Database = {
           target_id?: string;
           gap_id?: string | null;
           impact?: number | null;
+          impact_basis?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
