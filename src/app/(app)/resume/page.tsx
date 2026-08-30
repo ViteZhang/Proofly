@@ -1,6 +1,12 @@
 import { BaselineWorkbench } from "@/components/resume/BaselineWorkbench";
 import { VersionSection } from "@/components/resume/VersionSection";
-import { getBaseline, listBaselines, listVersions } from "@/lib/queries/resume";
+import { EvolutionBanner } from "@/components/resume/EvolutionBanner";
+import {
+  getBaseline,
+  getEvolutionSignals,
+  listBaselines,
+  listVersions,
+} from "@/lib/queries/resume";
 import { listTargets } from "@/lib/queries/targets";
 import { resolveTarget } from "@/lib/targets/shape";
 import Link from "next/link";
@@ -32,10 +38,11 @@ export default async function ResumePage({
     );
   }
 
-  const [baseline, summaries, versions] = await Promise.all([
+  const [baseline, summaries, versions, evolution] = await Promise.all([
     getBaseline(selected.id),
     listBaselines(),
     listVersions(selected.id),
+    getEvolutionSignals(selected.id),
   ]);
 
   return (
@@ -61,6 +68,11 @@ export default async function ResumePage({
         targetName={selected.name}
         baseline={baseline}
       />
+      {evolution.baselineId && evolution.signals.length > 0 && (
+        <div className="mt-9">
+          <EvolutionBanner baselineId={evolution.baselineId} signals={evolution.signals} />
+        </div>
+      )}
       <VersionSection
         hasBaseline={!!baseline && baseline.blocks.length > 0}
         locked={versions.locked}

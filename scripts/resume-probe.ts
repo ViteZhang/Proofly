@@ -27,6 +27,7 @@ import {
   type DeltaBlock,
 } from "../src/lib/resume/delta";
 import { containment, refExists, unusedContent, type SourceAtom } from "../src/lib/resume/unused";
+import { detectSignals, signatureOf, REPEAT_THRESHOLD } from "../src/lib/resume/evolution";
 import type { EvidenceLevel, RenderWeight } from "../src/types/database";
 
 let pass = 0;
@@ -338,6 +339,66 @@ console.log("\n【deltas 解析】");
   check("accepted 缺省视为 true", one.length === 1 && one[0].accepted === true);
   const off = parseDeltas([{ type: "bullet_add", accepted: false }] as never);
   check("accepted: false 保留", off[0].accepted === false);
+}
+
+console.log("\n【重复 delta 检测】");
+{
+  const mk = (o: Partial<Delta>): Delta => ({
+    id: "d", type: "bullet_add", targetBlockId: "b1", before: "", after: "", reason: "",
+    sourceAtomId: "", sourceRef: "", accepted: true, ...o,
+  });
+  const add = mk({ type: "bullet_add", sourceAtomId: "a1", sourceRef: "设计三层记忆系统", after: "设计三层记忆系统" });
+  const drop = mk({ type: "bullet_drop", targetBlockId: "b7", before: "业务中台 7 环节数字化" });
+  const align = mk({ type: "keyword_align", before: "AI 模块", after: "AI 助手" });
+
+  check("同一条 bullet_add 的签名稳定", signatureOf(add) === signatureOf({ ...add, id: "x", reason: "别的理由" }));
+  check("改了来源引用就是另一条", signatureOf(add) !== signatureOf({ ...add, sourceRef: "别的内容" }));
+  check("reorder 不参与检测", signatureOf(mk({ type: "reorder" })) === null);
+  check("headline_tweak 不参与检测", signatureOf(mk({ type: "headline_tweak" })) === null);
+  check("没写来源的 bullet_add 不参与检测", signatureOf(mk({ type: "bullet_add", sourceAtomId: "" })) === null);
+
+  const three = [
+    { id: "v1", deltas: [add] },
+    { id: "v2", deltas: [add] },
+    { id: "v3", deltas: [add] },
+  ];
+  check("验收 28｜连续 3 份版本加入同一条 → 触发「并进基线」",
+    detectSignals(three, new Set()).some((s) => s.kind === "merge_add" && s.acceptLabel === "并进基线"));
+  check("提示文案里带出现次数", detectSignals(three, new Set())[0].copy.includes("3 份版本"));
+
+  check("只出现 2 次不提示", detectSignals(three.slice(0, 2), new Set()).length === 0);
+  check("门槛就是 3", REPEAT_THRESHOLD === 3);
+
+  const dup = [{ id: "v1", deltas: [add, { ...add, id: "d2" }] }, { id: "v2", deltas: [add] }, { id: "v3", deltas: [add] }];
+  check("同一份版本里重复只算一次（这里仍是 3 份 → 触发）", detectSignals(dup, new Set()).length === 1);
+  const dup2 = [{ id: "v1", deltas: [add, { ...add, id: "d2" }, { ...add, id: "d3" }] }];
+  check("一份版本里加三遍不算三次", detectSignals(dup2, new Set()).length === 0);
+
+  check("被拒绝过的签名不再出现", detectSignals(three, new Set([signatureOf(add)!])).length === 0);
+  check("已拒绝的 delta 不计数", detectSignals(three.map((v) => ({ ...v, deltas: [{ ...add, accepted: false }] })), new Set()).length === 0);
+
+  const drops = [1, 2, 3].map((i) => ({ id: `v${i}`, deltas: [drop] }));
+  const ds = detectSignals(drops, new Set(), { blockTitle: () => "业务中台 7 环节数字化" });
+  check("验收 29｜连续 3 份删掉同一块 → 触发「从基线移除」",
+    ds.length === 1 && ds[0].kind === "remove_block" && ds[0].acceptLabel === "从基线移除");
+  check("移除提示用的是块标题", ds[0].copy.includes("业务中台"));
+
+  const aligns = [1, 2, 3].map((i) => ({ id: `v${i}`, deltas: [align] }));
+  const as_ = detectSignals(aligns, new Set());
+  check("验收 30｜连续 3 次同样的关键词对齐 → 触发「改基线用词」",
+    as_.length === 1 && as_[0].kind === "align_wording" && as_[0].acceptLabel === "改基线");
+  check("对齐提示带上原词与新词", as_[0].copy.includes("AI 模块") && as_[0].copy.includes("AI 助手"));
+
+  const many = [1, 2, 3, 4].map((i) => ({ id: `v${i}`, deltas: [add, drop, align] }));
+  check("三种可以同时触发", detectSignals(many, new Set()).length === 3);
+  check("出现次数多的排前面", detectSignals(
+    [{ id: "v1", deltas: [add, drop] }, { id: "v2", deltas: [add, drop] },
+     { id: "v3", deltas: [add, drop] }, { id: "v4", deltas: [add] }],
+    new Set(),
+  )[0].kind === "merge_add");
+
+  const six = [1, 2, 3, 4, 5, 6].map((i) => ({ id: `v${i}`, deltas: i <= 3 ? [] : [add] }));
+  check("只看最近 5 份：第 6 份里的那次不算", detectSignals(six, new Set()).length === 0);
 }
 
 console.log(`\n${fail === 0 ? "全部通过" : "有失败"}：${pass} 通过 / ${fail} 失败\n`);

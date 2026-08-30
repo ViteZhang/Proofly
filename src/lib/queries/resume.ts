@@ -14,6 +14,7 @@ import { parseResults } from "@/lib/scoring/parse";
 import { listResumeChecks, type CheckRow } from "@/lib/resume/check-results";
 import { applyDeltas, parseDeltas, type DeltaType } from "@/lib/resume/delta";
 import { locateRef } from "@/lib/resume/unused";
+import { detectSignals, WINDOW, type Signal } from "@/lib/resume/evolution";
 import type { GateAtom, GateFact } from "@/lib/resume/gate";
 import type { SelectableAtom, SelectableSkill, Tradeoff } from "@/lib/resume/select";
 import type {
@@ -783,4 +784,43 @@ export async function listRecentVersions(limit = 4): Promise<
       updatedAt: r.updated_at,
     };
   });
+}
+
+// ---- 重复 delta 检测 ----
+
+export async function getEvolutionSignals(targetId: string): Promise<{
+  baselineId: string | null;
+  signals: Signal[];
+}> {
+  if (!UUID_RE.test(targetId)) return { baselineId: null, signals: [] };
+  const supabase = await createClient();
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id")
+    .eq("target_id", targetId)
+    .maybeSingle();
+  if (!baseline) return { baselineId: null, signals: [] };
+
+  const [{ data: versions }, { data: decided }, { data: blocks }] = await Promise.all([
+    supabase
+      .from("resume_versions")
+      .select("id,deltas,updated_at")
+      .eq("baseline_id", baseline.id)
+      .order("updated_at", { ascending: false })
+      .limit(WINDOW),
+    supabase
+      .from("baseline_evolution_log")
+      .select("signature")
+      .eq("baseline_id", baseline.id),
+    supabase.from("resume_blocks").select("id,title").eq("baseline_id", baseline.id),
+  ]);
+
+  const titleById = new Map((blocks ?? []).map((b) => [b.id, b.title ?? ""]));
+  const signals = detectSignals(
+    (versions ?? []).map((v) => ({ id: v.id, deltas: parseDeltas(v.deltas) })),
+    new Set((decided ?? []).map((d) => d.signature)),
+    { blockTitle: (id) => titleById.get(id) ?? "这一块" },
+  );
+  return { baselineId: baseline.id, signals };
 }

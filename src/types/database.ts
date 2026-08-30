@@ -1237,6 +1237,46 @@ export type Database = {
           },
         ];
       };
+      baseline_evolution_log: {
+        Row: {
+          id: string;
+          user_id: string;
+          baseline_id: string;
+          signature: string;
+          decision: "accepted" | "rejected";
+          decided_at: string;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          baseline_id: string;
+          signature: string;
+          decision: "accepted" | "rejected";
+          decided_at?: string;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          baseline_id?: string;
+          signature?: string;
+          decision?: "accepted" | "rejected";
+          decided_at?: string;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "baseline_evolution_log_baseline_id_fkey";
+            columns: ["baseline_id"];
+            referencedRelation: "resume_baselines";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       check_results: {
         Row: {
           id: string;
