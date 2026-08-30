@@ -518,5 +518,76 @@ check(
   viewCode.includes("关联缺口都被忽略了，要一并放弃吗"),
 );
 
+// =============================================================
+console.log("\n验收 22–28 · 回流");
+// =============================================================
+
+const reflowView = stripComments(
+  fs2.readFileSync("src/components/actions/ReflowPanel.tsx", "utf8"),
+);
+const reflowSrc = stripComments(
+  fs2.readFileSync("src/app/(app)/actions/reflow-actions.ts", "utf8"),
+);
+
+check(
+  "勾选复选框弹回流面板，不直接标记完成",
+  viewCode.includes("setReflow(true)") && viewCode.includes("<ReflowPanel"),
+);
+check(
+  "「只标记完成」是文字按钮，「生成经历并完成」是主按钮",
+  /<button[\s\S]{0,400}只标记完成/.test(reflowView) &&
+    /<Button[^>]*>\s*\{busy \? "处理中…" : "生成经历并完成"\}/.test(reflowView),
+);
+check(
+  "两个入口都在：上传交付物 / 直接描述",
+  reflowView.includes("上传交付物") && reflowView.includes("直接描述"),
+);
+check(
+  "直接描述走 Step 3 的 Stage B/C（runRecord）",
+  reflowSrc.includes("runRecord(") && reflowSrc.includes("taskContext: ctx"),
+);
+check(
+  "上传交付物走 Step 2 的导入链路，带上行动 id",
+  reflowView.includes("/import?task=$"),
+);
+check(
+  "入库后写 produces_atom_id、status=done、completed_at、actual_hours",
+  reflowSrc.includes("produces_atom_id: atomId") &&
+    reflowSrc.includes('status: "done"') &&
+    reflowSrc.includes("completed_at: new Date().toISOString()") &&
+    reflowSrc.includes("actual_hours: hours"),
+);
+check(
+  "只标记完成时 produces_atom_id 为 null，不伪造一条经历",
+  reflowSrc.includes("return completeTaskWithAtom(taskId, null, actualHours)"),
+);
+check(
+  "回流中途关掉：只有确认入库才标完成，卡片摆出来那一步不动任务状态",
+  !/setCards\([\s\S]{0,200}markDone/.test(reflowView) &&
+    reflowSrc.includes("const res = await commitCard(draftId, choice);"),
+);
+check(
+  "自动完成可改回待办",
+  reflowSrc.includes("export async function reopenTask") &&
+    viewCode.includes("改回待办"),
+);
+
+// 验收 26：挂靠项目置顶 + user 附加一句
+const pipelineSrc = stripComments(fs2.readFileSync("src/lib/chat/pipeline.ts", "utf8"));
+check(
+  "挂靠项目被顶到 Stage C 候选第一位（召回没捞到也补进来）",
+  pipelineSrc.includes("pinAnchor(atoms, v.taskContext?.anchorAtomId") &&
+    pipelineSrc.includes("[pinned, ...atoms]"),
+);
+check(
+  "提示词本身不改，只在 user 末尾附一句来源说明",
+  pipelineSrc.includes("taskContextLine(v.taskContext") &&
+    pipelineSrc.includes("这段内容来自一项针对『${ctx.taskTitle}』的工作"),
+);
+check(
+  "编造出来的 target_atom_id 仍然会被挡掉（候选集含置顶那条）",
+  pipelineSrc.includes("new Set(ranked.map((a) => a.id))"),
+);
+
 console.log(`\n${fail === 0 ? "全过" : "有挂"}：${pass} / ${pass + fail}\n`);
 process.exit(fail === 0 ? 0 : 1);

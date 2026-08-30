@@ -1,9 +1,13 @@
 import { ImportFlow } from "@/components/import/ImportFlow";
 import { findOpenJob } from "./job-actions";
 
-export default async function ImportPage() {
+export default async function ImportPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ task?: string }>;
+}) {
   // 上次没处理完的作业接着显示——页面关掉不代表活停了。
-  const open = await findOpenJob();
+  const [open, sp] = await Promise.all([findOpenJob(), searchParams]);
 
   return (
     <div className="max-w-[720px]">
@@ -13,7 +17,7 @@ export default async function ImportPage() {
       </p>
 
       <div className="mt-5">
-        <ImportFlow resumeJobId={open.ok ? open.data : null} />
+        <ImportFlow resumeJobId={open.ok ? open.data : null} taskId={sp.task ?? null} />
       </div>
     </div>
   );

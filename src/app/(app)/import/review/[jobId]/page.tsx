@@ -3,10 +3,12 @@ import { ReviewQueue } from "@/components/import/ReviewQueue";
 
 export default async function ReviewPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ jobId: string }>;
+  searchParams: Promise<{ task?: string }>;
 }) {
-  const { jobId } = await params;
+  const [{ jobId }, sp] = await Promise.all([params, searchParams]);
   const queue = await getReviewQueue(jobId);
 
   if (!queue) {
@@ -30,7 +32,7 @@ export default async function ReviewPage({
       </p>
 
       <div className="mt-5">
-        <ReviewQueue queue={queue} />
+        <ReviewQueue queue={queue} taskId={sp.task ?? null} />
       </div>
     </div>
   );

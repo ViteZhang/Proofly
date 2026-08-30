@@ -14,6 +14,8 @@ import {
   type TaskDraft,
 } from "./TaskFormDialog";
 import { GAP_COPY } from "@/lib/scoring/gap-copy";
+import { ReflowPanel } from "./ReflowPanel";
+import { reopenTask } from "@/app/(app)/actions/reflow-actions";
 import { ACTION_COPY, EMPTY_COPY, SORT_LABEL } from "@/lib/planning/labels";
 import { IMPACT_IS_ESTIMATED_NOTE } from "@/lib/planning/config";
 import { sortTasks, type SortMode } from "@/lib/planning/sort";
@@ -256,6 +258,8 @@ function TaskCard({ t, onEdit }: { t: TaskView; onEdit: (d: TaskDraft) => void }
   const router = useRouter();
   // 就地展开，不跳页 —— 清单的价值在于一眼扫完，跳走就断了。
   const [open, setOpen] = useState(false);
+  // 勾选不直接标记完成，先弹回流面板。闭环成不成立就看这一步。
+  const [reflow, setReflow] = useState(false);
   const [confirmDrop, setConfirmDrop] = useState(false);
   const [ask, setAsk] = useState<string | null>(null);
   const [busy, start] = useTransition();
@@ -272,10 +276,18 @@ function TaskCard({ t, onEdit }: { t: TaskView; onEdit: (d: TaskDraft) => void }
       className="rounded-card px-4 py-3.5"
       style={{ background: "var(--card)", border: "1px solid var(--line)" }}
     >
+      {reflow && <ReflowPanel task={t} onClose={() => setReflow(false)} />}
       <div className="flex items-start gap-3">
-        <span aria-hidden className="mt-[3px] text-[14px]" style={{ color: "var(--ghost)" }}>
+        <button
+          type="button"
+          onClick={() => setReflow(true)}
+          aria-label={`完成「${t.title}」`}
+          title="完成这条行动"
+          className="mt-[3px] text-[14px]"
+          style={{ color: "var(--ghost)" }}
+        >
           ☐
-        </span>
+        </button>
         <div className="min-w-0 flex-1">
           <button
             type="button"
@@ -527,6 +539,8 @@ function PerTargetImpact({ t }: { t: TaskView }) {
 }
 
 function DoneCard({ t }: { t: TaskView }) {
+  const router = useRouter();
+  const [busy, start] = useTransition();
   return (
     <li
       className="rounded-card px-4 py-3"
@@ -543,7 +557,29 @@ function DoneCard({ t }: { t: TaskView }) {
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: "var(--mute)" }}>
             <ActionTag type={t.actionType} />
             <span>实际 {t.actualHours === null ? "未记录" : `${t.actualHours}h`}</span>
-            {t.autoCompleted && <span>因数据补齐自动完成</span>}
+            {t.autoCompleted && (
+              <span
+                className="rounded-pill px-1.5"
+                style={{ background: "var(--ai-soft)", color: "var(--ai)" }}
+              >
+                因数据补齐自动完成
+              </span>
+            )}
+            {/* 自动完成可能判错，必须能改回待办。 */}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                start(async () => {
+                  await reopenTask(t.id);
+                  router.refresh();
+                })
+              }
+              className="hover:underline"
+              style={{ color: "var(--mute)" }}
+            >
+              改回待办
+            </button>
             {t.producesTitle && (
               <span>
                 产出 →{" "}

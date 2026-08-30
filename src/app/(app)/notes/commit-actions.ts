@@ -23,6 +23,8 @@ import type { Json } from "@/types/database";
 const uuid = z.uuid();
 
 export type CommitResult = {
+  /** 入库后那条经历的 id。回流要拿它写 tasks.produces_atom_id。 */
+  atomId: string;
   undoId: string;
   /** 撤销窗口的截止时刻。倒计时以它为准，不以点下去那一刻为准。 */
   expiresAt: string;
@@ -109,6 +111,7 @@ export async function commitCard(
   });
 
   return ok({
+    atomId,
     undoId,
     expiresAt: undoRow?.expires_at ?? new Date(Date.now() + 6000).toISOString(),
     ripple,

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { completeTaskWithAtom } from "@/app/(app)/actions/reflow-actions";
 
 import { Button } from "@/components/ui/Button";
 import type { ReviewQueue as Queue, ReviewDraft } from "@/lib/queries/drafts";
@@ -21,13 +22,21 @@ const SECTIONS = [
   { key: "create" as const, title: "新增", hint: "库里没有的，收下就进事实层" },
 ];
 
-export function ReviewQueue({ queue }: { queue: Queue }) {
+export function ReviewQueue({
+  queue,
+  taskId = null,
+}: {
+  queue: Queue;
+  /** 从行动清单的回流面板过来时带着的行动 id。入库之后把它标成完成。 */
+  taskId?: string | null;
+}) {
   const router = useRouter();
   const [gone, setGone] = useState<Set<string>>(new Set());
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [flashIds, setFlashIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [reflowed, setReflowed] = useState(false);
 
   const left = (list: ReviewDraft[]) => list.filter((d) => !gone.has(d.id));
   const total = left(queue.ask).length + left(queue.update).length + left(queue.create).length;
@@ -68,6 +77,12 @@ export function ReviewQueue({ queue }: { queue: Queue }) {
       asCreate,
     });
     if (!r.ok) throw new Error(r.error);
+    // 回流上传路径：这条经历就是那条行动的产出。入库成功才标完成 ——
+    // 标早了会出现「行动完成了但档案里什么都没有」。
+    if (taskId && r.data.atomId) {
+      const done = await completeTaskWithAtom(taskId, r.data.atomId, null);
+      if (done.ok) setReflowed(true);
+    }
     announce(r.data);
     retire(d.id);
   }
@@ -99,6 +114,11 @@ export function ReviewQueue({ queue }: { queue: Queue }) {
         <p className="mt-1 text-[13.5px]" style={{ color: "var(--slate)" }}>
           收下的经历已经进了事实层。去经历库看看，补上缺的结果数据，证明度还能往上走。
         </p>
+        {reflowed && (
+          <p className="mt-1.5 text-[13.5px]" style={{ color: "var(--proof)" }}>
+            对应的那条行动已经标成完成，产出的经历也挂上去了。
+          </p>
+        )}
         <div className="mt-4 flex gap-2">
           <Button
             onClick={() =>
