@@ -10,6 +10,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { parsePendingMetrics, parseStringList } from "@/lib/domain";
 import { mergeStrategies, type StrategyRow } from "@/lib/targets/strategy";
+import { parseResults } from "@/lib/scoring/parse";
 import { listResumeChecks, type CheckRow } from "@/lib/resume/check-results";
 import type { GateAtom, GateFact } from "@/lib/resume/gate";
 import type { SelectableAtom, SelectableSkill, Tradeoff } from "@/lib/resume/select";
@@ -244,6 +245,8 @@ export type BaselineView = {
   tradeoffs: Tradeoff[];
   skills: string[];
   checks: CheckRow[];
+  /** 「为啥选它」：每条经历命中了这个方向下哪几条 JD 要求。 */
+  why: Record<string, string[]>;
   /** 未投递的草稿版本数。解锁时要提示「它们的差异会重新计算」。 */
   draftCount: number;
   versionCount: number;
@@ -357,7 +360,7 @@ export async function getBaseline(targetId: string): Promise<BaselineView | null
     .maybeSingle();
   if (!baseline) return null;
 
-  const [{ data: rows }, { data: versions }, checks] = await Promise.all([
+  const [{ data: rows }, { data: versions }, checks, why] = await Promise.all([
     supabase
       .from("resume_blocks")
       .select(
@@ -367,6 +370,7 @@ export async function getBaseline(targetId: string): Promise<BaselineView | null
       .order("order_index", { ascending: true }),
     supabase.from("resume_versions").select("id,submitted_at").eq("baseline_id", baseline.id),
     listResumeChecks({ kind: "baseline", id: baseline.id }),
+    whySelected(targetId),
   ]);
 
   const blocks: BaselineBlockView[] = (rows ?? []).map((r) => {
@@ -400,7 +404,53 @@ export async function getBaseline(targetId: string): Promise<BaselineView | null
     tradeoffs: parseTradeoffs(baseline.tradeoffs),
     skills: parseStringList(baseline.skills),
     checks,
+    why,
     draftCount: (versions ?? []).filter((v) => !v.submitted_at).length,
     versionCount: (versions ?? []).length,
   };
+}
+
+/**
+ * 每条经历命中了这个方向下哪几条 JD 要求。
+ *
+ * 只看每份 JD 最新那次评估 —— 历史评估是快照，拿旧快照说「命中第 2 条」，
+ * 而那条要求早就被编辑过了，说出来的话是错的。
+ */
+async function whySelected(targetId: string): Promise<Record<string, string[]>> {
+  const supabase = await createClient();
+
+  const { data: jds } = await supabase
+    .from("jds")
+    .select("id,company,role_title")
+    .eq("target_id", targetId);
+  if (!jds || jds.length === 0) return {};
+
+  const { data: rows } = await supabase
+    .from("assessments")
+    .select("id,jd_id,results,created_at")
+    .in("jd_id", jds.map((j) => j.id))
+    // created_at 是事务时间，同一事务插的多条会撞，补 id 兜底。
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+  if (!rows || rows.length === 0) return {};
+
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) if (!latest.has(r.jd_id)) latest.set(r.jd_id, r);
+
+  const label = new Map(
+    jds.map((j) => [j.id, [j.company, j.role_title].filter(Boolean).join(" · ") || "这份 JD"]),
+  );
+
+  const out: Record<string, string[]> = {};
+  for (const a of latest.values()) {
+    for (const r of parseResults(a.results as Json)) {
+      const phrase = (r.rawPhrase ?? r.text ?? "").trim();
+      for (const id of r.matchedAtomIds) {
+        const line = `命中「${label.get(a.jd_id)}」第 ${r.requirementIndex + 1} 条「${phrase.slice(0, 28)}」`;
+        (out[id] ??= []).push(line);
+      }
+    }
+  }
+  for (const k of Object.keys(out)) out[k] = [...new Set(out[k])].slice(0, 4);
+  return out;
 }

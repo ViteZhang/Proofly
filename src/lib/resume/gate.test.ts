@@ -216,3 +216,26 @@ test("G6｜互斥组里的另一条没进这份简历 → 不撞车", () => {
   ]);
   assert.ok(!r.some((x) => x.code === "G6"));
 });
+
+test("G3｜时间标注「2015.07 – 2016.06」对得上库里的 2015-07-01 / 2016-06-01", () => {
+  const r = checkBlock(
+    block("担任 Java 研发工程师", "absent", { meta: "2015.07 – 2016.06" }),
+    atom({ periodStart: "2015-07-01", periodEnd: "2016-06-01", actions: ["担任 Java 研发工程师"] }),
+  );
+  assert.ok(!r.some((x) => x.code === "G3"));
+});
+
+test("G3｜每一段都查得到才放行：2015.99 里的 99 不在来源里 → 拦截", () => {
+  const r = checkBlock(
+    block("x", "absent", { meta: "2015.99" }),
+    atom({ periodStart: "2015-07-01", periodEnd: null, actions: [] }),
+  );
+  assert.ok(r.some((x) => x.code === "G3"));
+});
+
+test("G3｜同一个数字重复出现只报一次", () => {
+  const r = checkBlock(block("92% 与 92%", "measured"), atom());
+  const g3 = r.filter((x) => x.code === "G3");
+  assert.equal(g3.length, 1);
+  assert.ok(g3[0].message.includes("92") && !g3[0].message.includes("92、92"));
+});

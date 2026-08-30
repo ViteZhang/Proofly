@@ -140,14 +140,37 @@ export function atomText(a: GateAtom): string {
     .join("\n");
 }
 
-/** 归一化数字：去掉千分位与前导零，5.0 与 5 视为同一个。 */
-function normalizeNumbers(text: string): Set<string> {
+/**
+ * 来源经历里出现过的数字。去掉千分位与前导零，5.0 与 5 视为同一个。
+ * 小数整体与它的每一段都收进来 —— 「2015-07-01」要能支撑块里写的
+ * 「2015.07」，靠的就是「2015」和「07」这两段。
+ */
+function knownNumbers(text: string): Set<string> {
   const out = new Set<string>();
-  for (const raw of text.replace(/,/g, "").matchAll(NUMBER_TOKEN)) {
+  const clean = text.replace(/,/g, "");
+  for (const raw of clean.matchAll(NUMBER_TOKEN)) {
     const n = Number(raw[0]);
     if (Number.isFinite(n)) out.add(String(n));
   }
+  for (const raw of clean.matchAll(/\d+/g)) out.add(String(Number(raw[0])));
   return out;
+}
+
+/**
+ * 块里的一个数字算不算「有出处」。
+ *
+ * 整体查得到就算。查不到时，只对「2015.07」这种带小数点的写法放宽：
+ * 每一段都查得到就放行，因为日期在库里存的是 2015-07-01，写到简历上
+ * 是 2015.07，两者本来就不可能字面相等。
+ *
+ * 放宽的代价是「2018.99」这种把两个真数字拼出来的假数字能混过去。
+ * 收紧的代价是每一份带时间标注的简历都被拦。后者每次都发生，前者要
+ * 刻意构造，所以选了前者。
+ */
+function hasSource(token: string, known: Set<string>): boolean {
+  if (known.has(String(Number(token)))) return true;
+  const parts = token.split(".").filter((p) => p !== "");
+  return parts.length > 1 && parts.every((p) => known.has(String(Number(p))));
 }
 
 // ---- G1 措辞与证明度 ----
@@ -240,27 +263,30 @@ export function checkBlock(block: GateBlock, sourceAtom: GateAtom | null): GateR
   }
 
   // G3 —— 块里的每个数字都要在来源经历里找得到。
-  const known = normalizeNumbers(atomText(sourceAtom));
+  const known = knownNumbers(atomText(sourceAtom));
   const unknown: string[] = [];
-  for (const n of normalizeNumbers(text)) if (!known.has(n)) unknown.push(n);
-  if (unknown.length > 0) {
+  for (const raw of text.replace(/,/g, "").matchAll(NUMBER_TOKEN)) {
+    if (!hasSource(raw[0], known)) unknown.push(raw[0]);
+  }
+  const missing = [...new Set(unknown)];
+  if (missing.length > 0) {
     out.push({
       code: "G3",
       level: "blocking",
       blockId: block.id,
-      message: `出现了来源经历里没有的数字：${unknown.join("、")}`,
+      message: `出现了来源经历里没有的数字：${missing.join("、")}`,
       detail: `经历「${sourceAtom.title}」的 actions 与 metrics 里查不到这些数字。要么是编的，要么是原始记录漏了 —— 两种都得先解决。`,
     });
   }
 
   // must_say 只提示不阻断：它是「这次没写进去」，不是「写错了」。
-  const missing = sourceAtom.mustSay.filter((s) => s.trim() !== "" && !text.includes(s.trim()));
-  if (missing.length > 0) {
+  const unsaid = sourceAtom.mustSay.filter((s) => s.trim() !== "" && !text.includes(s.trim()));
+  if (unsaid.length > 0) {
     out.push({
       code: "G2",
       level: "warning",
       blockId: block.id,
-      message: `必说要点没体现：${missing.join("、")}`,
+      message: `必说要点没体现：${unsaid.join("、")}`,
       detail: `来源经历「${sourceAtom.title}」的 must_say 里有这些要点，这个块里没找到。`,
     });
   }

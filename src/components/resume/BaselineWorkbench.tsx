@@ -1,9 +1,9 @@
 "use client";
 
 // =============================================================
-// Proofly · 基线工作台（S8-A 主体）
+// Proofly · 基线工作台（S8-A）
 //
-// 左边是简历本身，右边是「为什么是这样」。右边这一半才是这个产品
+// 左边是简历本身，右边是「为什么是这样」。右边那一半才是这个产品
 // 跟一个简历生成器的区别：每一句话都能查到出处，每一条没出现的经历
 // 都说得出是被哪条规则筛掉的。
 //
@@ -13,18 +13,23 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { ProofDot } from "@/components/library/ProofDot";
-import { EVIDENCE_LABEL } from "@/lib/domain";
+import { ProofBar } from "./ProofBar";
+import { InspectPanel } from "./InspectPanel";
 import { RENDER_WEIGHT_LABEL } from "@/lib/targets/strategy";
 import {
   generateBaseline,
   prepareBaseline,
   type SelectionPreview,
 } from "@/app/(app)/resume/baseline-actions";
+import {
+  lockBaseline,
+  reorderBlocks,
+  unlockBaseline,
+} from "@/app/(app)/resume/block-actions";
 import type { GateResult } from "@/lib/resume/gate";
-import type { BaselineView } from "@/lib/queries/resume";
+import type { BaselineBlockView, BaselineView } from "@/lib/queries/resume";
 
 type Phase = "idle" | "selecting" | "rendering" | "blocked";
 
@@ -45,12 +50,15 @@ export function BaselineWorkbench({
   const [blocked, setBlocked] = useState<GateResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ blockId: string; x: number; y: number } | null>(null);
+  const [confirm, setConfirm] = useState<"lock" | "unlock" | null>(null);
   const [, start] = useTransition();
 
   const blocks = baseline?.blocks ?? [];
+  const locked = !!baseline?.lockedAt;
+  const selected = blocks.find((b) => b.id === selectedId) ?? null;
 
-  // 新生成的块逐条露出来。不是进度条 —— 数据已经全在手上了，
-  // 这只是让人能跟着读一遍，而不是「唰」地拍一整页在脸上。
   const [revealed, setRevealed] = useState(0);
   useEffect(() => {
     if (!fresh) return;
@@ -64,6 +72,22 @@ export function BaselineWorkbench({
   }, [fresh, blocks.length]);
   // 不是新生成的（刷新、切方向）就整份直接显示，逐条露出只发生在刚生成完那一次。
   const shown = fresh ? revealed : blocks.length;
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    // 不监听 scroll：右键之前浏览器会把元素滚进视野，那个 scroll 会在
+    // 菜单刚渲染出来的下一帧把它关掉，看起来就是「右键没反应」。
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
 
   function run() {
     setError(null);
@@ -98,167 +122,311 @@ export function BaselineWorkbench({
     });
   }
 
+  function move(blockId: string, delta: number) {
+    if (!baseline) return;
+    const ids = blocks.map((b) => b.id);
+    const from = ids.indexOf(blockId);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    setError(null);
+    start(async () => {
+      const r = await reorderBlocks(baseline.id, ids);
+      if (!r.ok) setError(r.error);
+      router.refresh();
+    });
+  }
+
+  function drop(fromId: string, toId: string) {
+    if (!baseline || fromId === toId) return;
+    const ids = blocks.map((b) => b.id);
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(toId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    start(async () => {
+      const r = await reorderBlocks(baseline.id, ids);
+      if (!r.ok) setError(r.error);
+      router.refresh();
+    });
+  }
+
+  function toggleLock() {
+    if (!baseline) return;
+    setError(null);
+    setConfirm(null);
+    start(async () => {
+      const r = locked ? await unlockBaseline(baseline.id) : await lockBaseline(baseline.id);
+      if (!r.ok) setError(r.error);
+      router.refresh();
+    });
+  }
+
   const busy = phase === "selecting" || phase === "rendering";
-  const locked = !!baseline?.lockedAt;
 
   return (
-    <div className="mt-5 flex gap-6">
-      {/* ---- 左：简历预览 ---- */}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-3">
-          <Button size="sm" onClick={run} disabled={busy || locked}>
-            {blocks.length > 0 ? "重新生成" : "生成基线"}
+    <div className="mt-5">
+      <div className="flex items-center gap-3">
+        <Button size="sm" variant="secondary" onClick={run} disabled={busy || locked}>
+          {blocks.length > 0 ? "重新生成" : "生成基线"}
+        </Button>
+        {blocks.length > 0 && (
+          <Button size="sm" onClick={() => setConfirm(locked ? "unlock" : "lock")} disabled={busy}>
+            {locked ? "解锁修改" : "锁定基线"}
           </Button>
-          {locked && (
-            <span className="text-[12.5px]" style={{ color: "var(--mute)" }}>
-              已锁定，要重新生成先解锁
-            </span>
-          )}
-          {baseline?.generatedAt && !busy && (
-            <span className="text-[12px]" style={{ color: "var(--ghost)" }}>
-              {new Date(baseline.generatedAt).toLocaleString("zh-CN")} 生成
-            </span>
-          )}
+        )}
+        {baseline?.generatedAt && !busy && (
+          <span className="text-[12px]" style={{ color: "var(--ghost)" }}>
+            {new Date(baseline.generatedAt).toLocaleString("zh-CN")} 生成
+            {locked && baseline.lockedAt
+              ? ` · ${new Date(baseline.lockedAt).toLocaleDateString("zh-CN")} 锁定`
+              : ""}
+          </span>
+        )}
+      </div>
+
+      {error && (
+        <p className="mt-3 text-[13px]" style={{ color: "var(--danger)" }}>
+          {error}
+        </p>
+      )}
+
+      {blocks.length > 0 && !locked && (
+        <div
+          className="mt-3 max-w-[720px] rounded-card px-4 py-3"
+          style={{ background: "var(--caution-soft)", border: "1px solid var(--caution)" }}
+        >
+          <p className="text-[13px] font-semibold">基线还没锁定</p>
+          <p className="mt-0.5 text-[12.5px] leading-relaxed" style={{ color: "var(--slate)" }}>
+            锁定之后，每份 JD 只生成差异部分，措辞就不会飘了。先通读一遍，改到满意再锁。
+          </p>
         </div>
+      )}
 
-        {error && (
-          <p className="mt-3 text-[13px]" style={{ color: "var(--danger)" }}>
-            {error}
-          </p>
-        )}
+      {busy && <Progress phase={phase} preview={preview} />}
 
-        {busy && <Progress phase={phase} preview={preview} />}
+      {phase === "blocked" && <Blocked results={blocked} onRetry={run} />}
 
-        {phase === "blocked" && (
-          <div
-            className="mt-4 rounded-card px-4 py-3"
-            style={{ background: "var(--danger-soft)", border: "1px solid var(--danger)" }}
-          >
-            <p className="text-[13.5px] font-medium">
-              这一版没过门禁，{blocked.length} 处必须先解决，没有写入。
-            </p>
-            <ul className="mt-2 space-y-1.5">
-              {blocked.map((r, i) => (
-                <li key={i} className="text-[12.5px] leading-relaxed">
-                  <span
-                    className="mr-1.5 rounded-pill px-1.5 py-0.5 text-[11px]"
-                    style={{ background: "var(--card)", color: "var(--danger)" }}
-                  >
-                    {r.code}
-                  </span>
-                  {r.message}
-                  <span className="ml-1" style={{ color: "var(--slate)" }}>
-                    {r.detail}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <Button size="sm" variant="secondary" className="mt-3" onClick={run}>
-              带着这些问题重试一次
-            </Button>
-          </div>
-        )}
+      {blocks.length === 0 && !busy && phase !== "blocked" && (
+        <p
+          className="mt-4 max-w-[52ch] rounded-card px-5 py-4 text-[13.5px] leading-relaxed"
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--line)",
+            color: "var(--slate)",
+          }}
+        >
+          「{targetName}」还没有基线。生成之前先确认两件事：这个方向下的经历策略配好了
+          （谁展开、谁一行、谁不出现），互斥组也定了。选材是按那份配置来的。
+        </p>
+      )}
 
-        {blocks.length === 0 && !busy && phase !== "blocked" && (
-          <p
-            className="mt-4 max-w-[52ch] rounded-card px-5 py-4 text-[13.5px] leading-relaxed"
-            style={{
-              background: "var(--card)",
-              border: "1px solid var(--line)",
-              color: "var(--slate)",
-            }}
-          >
-            「{targetName}」还没有基线。生成之前先确认两件事：这个方向下的经历策略配好了
-            （谁展开、谁一行、谁不出现），互斥组也定了。选材是按那份配置来的。
-          </p>
-        )}
-
+      <div className="mt-4 flex gap-6">
         {blocks.length > 0 && (
           <article
-            className="mt-4 rounded-card px-8 py-7"
+            className="rounded-card px-9 py-8"
             style={{
               background: "#fff",
               border: "1px solid var(--line)",
               boxShadow: "var(--shadow-1)",
-              maxWidth: 720,
+              width: 720,
+              // A4 比例：210 × 297。不是装饰，是让人对篇幅有真实的判断。
+              minHeight: Math.round((720 * 297) / 210),
             }}
           >
+            <ProofBar
+              blocks={blocks.map((b) => ({
+                evidenceLevel: b.evidenceLevel,
+                weight: 1 + b.bullets.length + (b.summary ? 1 : 0),
+              }))}
+            />
+
             {baseline?.headline && (
-              <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--ink)" }}>
-                {baseline.headline}
-              </p>
+              <p className="mt-5 text-[13.5px] leading-relaxed">{baseline.headline}</p>
             )}
 
             {blocks.slice(0, shown).map((b, i) => (
-              <section key={b.id} className={i === 0 && !baseline?.headline ? "" : "mt-6"}>
-                {(i === 0 || blocks[i - 1].section !== b.section) && (
-                  <h3
-                    className="mb-2 border-b pb-1 text-[12px] font-medium tracking-wide"
-                    style={{ color: "var(--mute)", borderColor: "var(--line-soft)" }}
-                  >
-                    {b.section}
-                  </h3>
-                )}
-                <div className="flex items-baseline gap-2">
-                  <ProofDot level={b.evidenceLevel} size={9} className="translate-y-[1px]" />
-                  <span className="text-[14px] font-medium">{b.title}</span>
-                  <span className="ml-auto text-[12px]" style={{ color: "var(--mute)" }}>
-                    {b.meta}
-                  </span>
-                </div>
-                {b.summary && (
-                  <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
-                    {b.summary}
-                  </p>
-                )}
-                {b.bullets.length > 0 && (
-                  <ul className="mt-1.5 space-y-1">
-                    {b.bullets.map((line, j) => (
-                      <li key={j} className="flex gap-2 text-[13px] leading-relaxed">
-                        <span style={{ color: "var(--ghost)" }}>·</span>
-                        <span>{line}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <p className="mt-1.5 text-[11.5px]" style={{ color: "var(--ghost)" }}>
-                  {EVIDENCE_LABEL[b.templateUsed]}模板 · 来源「{b.atomTitle}」
-                </p>
-              </section>
+              <BlockRow
+                key={b.id}
+                block={b}
+                first={i === 0}
+                newSection={i === 0 || blocks[i - 1].section !== b.section}
+                selected={b.id === selectedId}
+                locked={locked}
+                onSelect={() => setSelectedId(b.id)}
+                onMenu={(x, y) => {
+                  setSelectedId(b.id);
+                  setMenu({ blockId: b.id, x, y });
+                }}
+                onDrop={(fromId) => drop(fromId, b.id)}
+              />
             ))}
 
             {baseline && baseline.skills.length > 0 && shown >= blocks.length && (
-              <section className="mt-6">
-                <h3
-                  className="mb-2 border-b pb-1 text-[12px] font-medium tracking-wide"
-                  style={{ color: "var(--mute)", borderColor: "var(--line-soft)" }}
-                >
-                  技能
-                </h3>
+              <section className="mt-7">
+                <SectionTitle>技能</SectionTitle>
                 <p className="text-[13px] leading-relaxed">{baseline.skills.join("、")}</p>
               </section>
             )}
           </article>
         )}
+
+        <aside className="w-[300px] shrink-0">
+          <InspectPanel
+            baseline={baseline}
+            preview={preview}
+            block={selected}
+            locked={locked}
+            onMove={(d) => selected && move(selected.id, d)}
+            canMoveUp={!!selected && blocks[0]?.id !== selected.id}
+            canMoveDown={!!selected && blocks[blocks.length - 1]?.id !== selected.id}
+          />
+        </aside>
       </div>
 
-      {/* ---- 右：本版取舍与门禁 ---- */}
-      <aside className="w-[288px] shrink-0">
-        <SidePanel baseline={baseline} preview={preview} />
-      </aside>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          blockId={menu.blockId}
+          onDone={() => {
+            setMenu(null);
+            router.refresh();
+          }}
+          onError={(e) => {
+            setMenu(null);
+            setError(e);
+          }}
+        />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          mode={confirm}
+          draftCount={baseline?.draftCount ?? 0}
+          onCancel={() => setConfirm(null)}
+          onConfirm={toggleLock}
+        />
+      )}
     </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h3
+      className="mb-2 border-b pb-1 text-[12px] font-medium tracking-wide"
+      style={{ color: "var(--mute)", borderColor: "var(--line-soft)" }}
+    >
+      {children}
+    </h3>
+  );
+}
+
+function BlockRow({
+  block,
+  first,
+  newSection,
+  selected,
+  locked,
+  onSelect,
+  onMenu,
+  onDrop,
+}: {
+  block: BaselineBlockView;
+  first: boolean;
+  newSection: boolean;
+  selected: boolean;
+  locked: boolean;
+  onSelect: () => void;
+  onMenu: (x: number, y: number) => void;
+  onDrop: (fromId: string) => void;
+}) {
+  const [over, setOver] = useState(false);
+
+  return (
+    <>
+      {newSection && (
+        <div className={first ? "mt-5" : "mt-7"}>
+          <SectionTitle>{block.section}</SectionTitle>
+        </div>
+      )}
+      <div
+        draggable={!locked}
+        onDragStart={(e) => e.dataTransfer.setData("text/plain", block.id)}
+        onDragOver={(e) => {
+          if (locked) return;
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          const id = e.dataTransfer.getData("text/plain");
+          if (id) onDrop(id);
+        }}
+        onClick={onSelect}
+        onContextMenu={(e) => {
+          if (locked) return;
+          e.preventDefault();
+          onMenu(e.clientX, e.clientY);
+        }}
+        role="button"
+        tabIndex={0}
+        aria-pressed={selected}
+        aria-label={`简历块 ${block.title}`}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect();
+          }
+        }}
+        className={`${newSection ? "" : "mt-5"} cursor-pointer border-l-[3px] pl-3 transition-colors`}
+        style={{
+          borderColor: selected ? "var(--proof)" : over ? "var(--ai)" : "transparent",
+          marginLeft: -15,
+        }}
+      >
+        <div className="flex items-baseline gap-2">
+          <ProofDot level={block.evidenceLevel} size={9} className="translate-y-[1px]" />
+          <span className="text-[14px] font-medium">{block.title}</span>
+          {block.edited && (
+            <span className="text-[11px]" style={{ color: "var(--ai)" }}>
+              手工改过
+            </span>
+          )}
+          <span className="ml-auto text-[12px]" style={{ color: "var(--mute)" }}>
+            {block.meta}
+          </span>
+        </div>
+        {block.summary && (
+          <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
+            {block.summary}
+          </p>
+        )}
+        {block.bullets.length > 0 && (
+          <ul className="mt-1.5 space-y-1">
+            {block.bullets.map((line, j) => (
+              <li key={j} className="flex gap-2 text-[13px] leading-relaxed">
+                <span style={{ color: "var(--ghost)" }}>·</span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
   );
 }
 
 function Progress({ phase, preview }: { phase: Phase; preview: SelectionPreview | null }) {
   return (
     <div
-      className="mt-4 rounded-card px-4 py-3 text-[13px]"
+      className="mt-4 max-w-[720px] rounded-card px-4 py-3 text-[13px]"
       style={{ background: "var(--card)", border: "1px solid var(--line)" }}
     >
-      <p style={{ color: "var(--ink)" }}>
-        {phase === "selecting" ? "正在按方向策略选材…" : "正在渲染正文…"}
-      </p>
+      <p>{phase === "selecting" ? "正在按方向策略选材…" : "正在渲染正文…"}</p>
       {preview && (
         <>
           <p className="mt-1.5 text-[12.5px]" style={{ color: "var(--slate)" }}>
@@ -284,103 +452,160 @@ function Progress({ phase, preview }: { phase: Phase; preview: SelectionPreview 
   );
 }
 
-function SidePanel({
-  baseline,
-  preview,
+function Blocked({ results, onRetry }: { results: GateResult[]; onRetry: () => void }) {
+  return (
+    <div
+      className="mt-4 max-w-[720px] rounded-card px-4 py-3"
+      style={{ background: "var(--danger-soft)", border: "1px solid var(--danger)" }}
+    >
+      <p className="text-[13.5px] font-medium">
+        这一版没过门禁，{results.length} 处必须先解决，没有写入。
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {results.map((r, i) => (
+          <li key={i} className="text-[12.5px] leading-relaxed">
+            <span
+              className="mr-1.5 rounded-pill px-1.5 py-0.5 text-[11px]"
+              style={{ background: "var(--card)", color: "var(--danger)" }}
+            >
+              {r.code}
+            </span>
+            {r.message}
+            <span className="ml-1" style={{ color: "var(--slate)" }}>
+              {r.detail}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <Button size="sm" variant="secondary" className="mt-3" onClick={onRetry}>
+        带着这些问题重试一次
+      </Button>
+    </div>
+  );
+}
+
+function ContextMenu({
+  x,
+  y,
+  blockId,
+  onDone,
+  onError,
 }: {
-  baseline: BaselineView | null;
-  preview: SelectionPreview | null;
+  x: number;
+  y: number;
+  blockId: string;
+  onDone: () => void;
+  onError: (e: string) => void;
 }) {
-  const tradeoffs = baseline?.tradeoffs ?? preview?.tradeoffs ?? [];
-  const checks = baseline?.checks ?? [];
-  const warnings = checks.filter((c) => c.level === "warning");
-  const blocking = checks.filter((c) => c.level === "blocking");
+  const [busy, start] = useTransition();
+
+  function apply(weight: "one_line" | "omit") {
+    start(async () => {
+      const { setBlockWeight } = await import("@/app/(app)/resume/block-actions");
+      const r = await setBlockWeight(blockId, weight);
+      if (!r.ok) onError(r.error);
+      else onDone();
+    });
+  }
 
   return (
-    <div className="space-y-4">
-      {blocking.length > 0 && (
-        <Panel title={`必须先解决 ${blocking.length} 处`} tone="danger">
-          {blocking.map((c) => (
-            <p key={c.id} className="text-[12.5px] leading-relaxed">
-              <b>{c.code}</b> {c.title}
-              <span className="block" style={{ color: "var(--slate)" }}>
-                {c.detail}
-              </span>
-            </p>
-          ))}
-        </Panel>
-      )}
-
-      {warnings.length > 0 && (
-        <Panel title={`提醒 ${warnings.length} 处`} tone="warn">
-          {warnings.map((c) => (
-            <p key={c.id} className="text-[12.5px] leading-relaxed">
-              {c.title}
-              <span className="block" style={{ color: "var(--slate)" }}>
-                {c.detail}
-              </span>
-            </p>
-          ))}
-        </Panel>
-      )}
-
-      <Panel title="本版取舍">
-        {tradeoffs.length === 0 ? (
-          <p className="text-[12.5px]" style={{ color: "var(--mute)" }}>
-            这个方向下没有落选的经历，技能栏也没有被过滤的标签。
-          </p>
-        ) : (
-          tradeoffs.map((t, i) => (
-            <p key={i} className="text-[12.5px] leading-relaxed">
-              <span
-                className="mr-1.5 rounded-pill px-1.5 py-0.5 text-[11px]"
-                style={{
-                  background: "var(--bg)",
-                  color: t.kind === "skill" ? "var(--mute)" : "var(--slate)",
-                }}
-              >
-                {t.kind === "exclusive" ? "互斥" : t.kind === "omit" ? "省略" : "空标签"}
-              </span>
-              <b>{t.title}</b>
-              <span className="block" style={{ color: "var(--slate)" }}>
-                {t.detail}
-              </span>
-            </p>
-          ))
-        )}
-      </Panel>
-
-      <p className="text-[12px] leading-relaxed" style={{ color: "var(--mute)" }}>
-        选材、互斥消解、技能过滤全部由代码判定，同样的策略配置生成十次得到同样的名单。
-        模型只负责措辞。
-        <Link href="/targets/strategy" className="ml-1 underline" style={{ color: "var(--ink)" }}>
-          去改策略
-        </Link>
+    <div
+      className="fixed z-50 rounded-card py-1"
+      style={{
+        left: x,
+        top: y,
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        boxShadow: "var(--shadow-2)",
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      role="menu"
+    >
+      <MenuItem disabled={busy} onClick={() => apply("one_line")}>
+        压缩为一行
+      </MenuItem>
+      <MenuItem disabled={busy} onClick={() => apply("omit")}>
+        省略
+      </MenuItem>
+      <p className="px-3 pt-1 text-[11px]" style={{ color: "var(--ghost)", maxWidth: 180 }}>
+        改的是这个方向的展开权重，不只是这一块的显示方式。
       </p>
     </div>
   );
 }
 
-function Panel({
-  title,
-  tone = "plain",
+function MenuItem({
   children,
+  disabled,
+  onClick,
 }: {
-  title: string;
-  tone?: "plain" | "warn" | "danger";
   children: React.ReactNode;
+  disabled: boolean;
+  onClick: () => void;
 }) {
-  const border =
-    tone === "danger" ? "var(--danger)" : tone === "warn" ? "var(--warn)" : "var(--line)";
-  const bg =
-    tone === "danger" ? "var(--danger-soft)" : tone === "warn" ? "var(--warn-soft)" : "var(--card)";
   return (
-    <section
-      className="rounded-card px-4 py-3"
-      style={{ background: bg, border: `1px solid ${border}` }}
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
+      className="block w-full px-3 py-1.5 text-left text-[13px] hover:bg-line-soft disabled:opacity-50"
     >
-      <h3 className="text-[12.5px] font-semibold">{title}</h3>
-      <div className="mt-2 space-y-2">{children}</div>
-    </section>
+      {children}
+    </button>
+  );
+}
+
+function ConfirmDialog({
+  mode,
+  draftCount,
+  onCancel,
+  onConfirm,
+}: {
+  mode: "lock" | "unlock";
+  draftCount: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-6"
+      style={{ background: "rgba(12,14,20,0.4)" }}
+      onClick={onCancel}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={mode === "lock" ? "锁定基线" : "解锁修改"}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[440px] rounded-card px-6 py-5"
+        style={{ background: "var(--card)", boxShadow: "var(--shadow-3)" }}
+      >
+        <h2 className="text-[15.5px] font-semibold">
+          {mode === "lock" ? "锁定这份基线？" : "解锁修改？"}
+        </h2>
+        <p className="mt-2 text-[13.5px] leading-relaxed" style={{ color: "var(--slate)" }}>
+          {mode === "lock"
+            ? "锁定后，投递版本只会生成差异部分。你随时可以解锁重改，已投递的版本不受影响。"
+            : draftCount > 0
+              ? `有 ${draftCount} 份草稿版本，解锁后它们的差异会重新计算。已投递的版本不受影响。`
+              : "解锁之后可以继续改措辞。已投递的版本不受影响。"}
+        </p>
+        <div className="mt-5 flex items-center gap-3">
+          <Button size="sm" onClick={onConfirm}>
+            {mode === "lock" ? "锁定" : "解锁"}
+          </Button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-[12.5px] hover:underline"
+            style={{ color: "var(--mute)" }}
+          >
+            再想想
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
