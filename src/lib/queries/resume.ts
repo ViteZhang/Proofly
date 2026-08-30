@@ -12,6 +12,7 @@ import { parsePendingMetrics, parseStringList } from "@/lib/domain";
 import { mergeStrategies, type StrategyRow } from "@/lib/targets/strategy";
 import { parseResults } from "@/lib/scoring/parse";
 import { listResumeChecks, type CheckRow } from "@/lib/resume/check-results";
+import { parseDeltas } from "@/lib/resume/delta";
 import type { GateAtom, GateFact } from "@/lib/resume/gate";
 import type { SelectableAtom, SelectableSkill, Tradeoff } from "@/lib/resume/select";
 import type {
@@ -453,4 +454,118 @@ async function whySelected(targetId: string): Promise<Record<string, string[]>> 
   }
   for (const k of Object.keys(out)) out[k] = [...new Set(out[k])].slice(0, 4);
   return out;
+}
+
+// ---- 投递版本 ----
+
+export type VersionSummary = {
+  id: string;
+  jdId: string;
+  company: string;
+  roleTitle: string;
+  /** 这份 JD 最新一次评估的匹配度。没评估过是 null。 */
+  matchScore: number | null;
+  deltaCount: number;
+  deltaRatio: number;
+  overThresholdAck: boolean;
+  submittedAt: string | null;
+  locked: boolean;
+  updatedAt: string | null;
+  warnings: string[];
+  unmatchedCount: number;
+};
+
+/** 这个方向下每份 JD 一行：有没有版本、几处调整、投没投。 */
+export async function listVersions(targetId: string): Promise<{
+  baselineId: string | null;
+  locked: boolean;
+  versions: VersionSummary[];
+  jdsWithoutVersion: { id: string; company: string; roleTitle: string }[];
+}> {
+  const empty = { baselineId: null, locked: false, versions: [], jdsWithoutVersion: [] };
+  if (!UUID_RE.test(targetId)) return empty;
+  const supabase = await createClient();
+
+  const [{ data: baseline }, { data: jds }] = await Promise.all([
+    supabase
+      .from("resume_baselines")
+      .select("id,locked_at")
+      .eq("target_id", targetId)
+      .maybeSingle(),
+    supabase
+      .from("jds")
+      .select("id,company,role_title,created_at")
+      .eq("target_id", targetId)
+      .order("created_at", { ascending: false }),
+  ]);
+  if (!baseline) {
+    return {
+      ...empty,
+      jdsWithoutVersion: (jds ?? []).map((j) => ({
+        id: j.id,
+        company: j.company ?? "未填公司",
+        roleTitle: j.role_title ?? "未填岗位",
+      })),
+    };
+  }
+
+  const { data: rows } = await supabase
+    .from("resume_versions")
+    .select("id,jd_id,deltas,delta_ratio,over_threshold_ack,submitted_at,locked,updated_at,warnings,unmatched")
+    .eq("baseline_id", baseline.id);
+
+  const jdIds = (jds ?? []).map((j) => j.id);
+  const scoreByJd = new Map<string, number>();
+  if (jdIds.length > 0) {
+    const { data: assessments } = await supabase
+      .from("assessments")
+      .select("jd_id,match_score,created_at,id")
+      .in("jd_id", jdIds)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
+    for (const a of assessments ?? []) {
+      if (!scoreByJd.has(a.jd_id)) scoreByJd.set(a.jd_id, a.match_score ?? 0);
+    }
+  }
+
+  const jdById = new Map((jds ?? []).map((j) => [j.id, j]));
+  const versions: VersionSummary[] = (rows ?? []).map((v) => {
+    const jd = jdById.get(v.jd_id);
+    const deltas = parseDeltas(v.deltas);
+    return {
+      id: v.id,
+      jdId: v.jd_id,
+      company: jd?.company ?? "未填公司",
+      roleTitle: jd?.role_title ?? "未填岗位",
+      matchScore: scoreByJd.get(v.jd_id) ?? null,
+      deltaCount: deltas.filter((d) => d.accepted).length,
+      deltaRatio: Number(v.delta_ratio ?? 0),
+      overThresholdAck: !!v.over_threshold_ack,
+      submittedAt: v.submitted_at,
+      locked: !!v.locked,
+      updatedAt: v.updated_at,
+      warnings: parseStringList(v.warnings),
+      unmatchedCount: Array.isArray(v.unmatched) ? v.unmatched.length : 0,
+    };
+  });
+
+  // 草稿在前，已投递在后；同组按更新时间倒序。
+  versions.sort((a, b) => {
+    if (!!a.submittedAt !== !!b.submittedAt) return a.submittedAt ? 1 : -1;
+    return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+  });
+
+  const have = new Set(versions.map((v) => v.jdId));
+  return {
+    baselineId: baseline.id,
+    locked: !!baseline.locked_at,
+    versions,
+    jdsWithoutVersion: (jds ?? [])
+      .filter((j) => !have.has(j.id))
+      .map((j) => ({
+        id: j.id,
+        company: j.company ?? "未填公司",
+        roleTitle: j.role_title ?? "未填岗位",
+      })),
+  };
 }

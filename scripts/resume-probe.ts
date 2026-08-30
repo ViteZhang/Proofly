@@ -17,6 +17,16 @@ import {
   type SelectableSkill,
 } from "../src/lib/resume/select";
 import { renderMarkdown, exportFilename } from "../src/lib/resume/markdown";
+import {
+  applyDeltas,
+  deltaRatio,
+  farOff,
+  overThreshold,
+  parseDeltas,
+  type Delta,
+  type DeltaBlock,
+} from "../src/lib/resume/delta";
+import { containment, refExists, unusedContent, type SourceAtom } from "../src/lib/resume/unused";
 import type { EvidenceLevel, RenderWeight } from "../src/types/database";
 
 let pass = 0;
@@ -229,6 +239,105 @@ console.log("\n【导出渲染】");
   const f = exportFilename("张昭", "C 端 AI 产品经理", "md");
   check("导出文件名是 {姓名}-{岗位}-{日期}.md", /^张昭-C端AI产品经理-\d{8}\.md$/.test(f), f);
   check("文件名里的路径分隔符被清掉", !exportFilename("a/b", "c:d", "pdf").includes("/"));
+}
+
+console.log("\n【未被基线使用的内容】");
+{
+  const atom: SourceAtom = {
+    id: "a1",
+    title: "知识宇宙",
+    evidenceLevel: "estimated",
+    actions: [
+      "将用 AI 学习重构为五层对象模型，设计阅读中划词问 AI 交互",
+      "自主设计由北极星指标、活跃层、价值层和商业层组成的三层驱动指标体系",
+    ],
+    metrics: [
+      { name: "内测用户", kind: "output", value: "50 人", evidenceLevel: "measured" },
+    ],
+  };
+  const blockText = ["将用 AI 学习重构为五层对象模型，设计阅读中划词问 AI 交互，建立四层提示词架构"];
+  const out = unusedContent([atom], blockText);
+  check("已经写进基线的 action 不再列为「未使用」", !out[0].unused_actions.some((a) => a.includes("五层对象模型")));
+  check("没写进去的 action 会被列出来", out[0].unused_actions.some((a) => a.includes("北极星指标")));
+  check("没写进去的 metric 会被列出来", out[0].unused_metrics.length === 1);
+  check("包含度是不对称的：短句在长文里 > 长文在短句里",
+    containment("北极星指标", "自主设计由北极星指标组成的体系") >
+    containment("自主设计由北极星指标组成的体系", "北极星指标"));
+
+  check("验收 21｜source_ref 逐字能在来源经历里找到 → 放行",
+    refExists("自主设计由北极星指标、活跃层、价值层和商业层组成的三层驱动指标体系", atom));
+  check("验收 21｜改了几个字的 source_ref 仍能对上",
+    refExists("自主设计由北极星指标、活跃层和商业层组成的三层指标体系", atom));
+  check("验收 21｜编造的 source_ref → 拦下",
+    !refExists("将日活从 3 万提升到 12 万，留存提升 40%", atom));
+  check("空 source_ref → 拦下", !refExists("", atom));
+}
+
+console.log("\n【差异应用】");
+{
+  const blocks: DeltaBlock[] = [
+    { id: "b1", section: "个人项目", title: "知识宇宙", meta: "", summary: "", bullets: ["设计 AI 模块的记忆结构"] },
+    { id: "b2", section: "个人项目", title: "Proofly", meta: "", summary: "", bullets: ["独立完成全栈交付", "设计门禁"] },
+    { id: "b3", section: "工作经历", title: "润泽园", meta: "", summary: "", bullets: ["规划五大模块"] },
+  ];
+  const d = (o: Partial<Delta>): Delta => ({
+    id: "d", type: "bullet_add", targetBlockId: "b1", before: "", after: "", reason: "",
+    sourceAtomId: "", sourceRef: "", accepted: true, ...o,
+  });
+
+  let r = applyDeltas(blocks, "定位段", [d({ type: "keyword_align", targetBlockId: "b1", before: "AI 模块", after: "AI 助手" })]);
+  check("keyword_align 替换命中的文本", r.blocks[0].bullets[0].includes("AI 助手"));
+  check("keyword_align 只算它真的改到的块", r.affected.size === 1 && r.affected.has("b1"));
+
+  r = applyDeltas(blocks, "定位段", [d({ type: "keyword_align", targetBlockId: "b1", before: "不存在的词", after: "X" })]);
+  check("没改到任何东西的 keyword_align 不计入受影响", r.affected.size === 0);
+
+  r = applyDeltas(blocks, "定位段", [d({ type: "bullet_add", targetBlockId: "b2", after: "新增一条" })]);
+  check("bullet_add 加在目标块末尾", r.blocks[1].bullets.length === 3);
+
+  r = applyDeltas(blocks, "定位段", [d({ type: "bullet_drop", targetBlockId: "b2", before: "设计门禁" })]);
+  check("bullet_drop 删掉匹配的那条", r.blocks[1].bullets.length === 1 && !r.blocks[1].bullets.includes("设计门禁"));
+
+  r = applyDeltas(blocks, "定位段", [d({ type: "headline_tweak", after: "新的定位段" })]);
+  check("headline_tweak 换掉定位段", r.headline === "新的定位段");
+  check("headline 不算块", deltaRatio(r.affected, 3) === 0);
+
+  r = applyDeltas(blocks, "定位段", [d({ type: "reorder", targetBlockId: "b3", after: "移到第 1 位" })]);
+  check("reorder 读得出名次时真的搬", r.blocks[0].id === "b3");
+
+  const manual = [d({ type: "reorder", targetBlockId: "b3", after: "往前放一点" })];
+  r = applyDeltas(blocks, "定位段", manual);
+  check("reorder 读不出名次时不乱搬，标成手动", r.blocks[0].id === "b1" && manual[0].manual === true);
+
+  r = applyDeltas(blocks, "定位段", [d({ targetBlockId: "b1", accepted: false, after: "被拒绝的" })]);
+  check("验收 26｜拒绝掉的 delta 不参与渲染", r.blocks[0].bullets.length === 1 && r.affected.size === 0);
+
+  r = applyDeltas(blocks, "定位段", [
+    d({ targetBlockId: "b1", after: "x" }),
+    d({ targetBlockId: "b2", after: "y" }),
+  ]);
+  check("delta_ratio = 受影响块数 ÷ 基线总块数", Math.abs(deltaRatio(r.affected, 3) - 2 / 3) < 1e-9);
+}
+
+console.log("\n【三档与「差得比较远」】");
+{
+  check("< 0.2 不提示", !overThreshold(0.15));
+  check("0.2–0.4 不提示", !overThreshold(0.35));
+  check("正好 0.4 不提示（> 0.4 才提示）", !overThreshold(0.4));
+  check("> 0.4 提示", overThreshold(0.42));
+  check("对不上的要求过半 → 也提示新建方向", farOff(10, 14));
+  check("对不上的要求不过半 → 不提示", !farOff(4, 14));
+  check("没有要求时不提示", !farOff(0, 0));
+}
+
+console.log("\n【deltas 解析】");
+{
+  check("坏数据降级为空", parseDeltas("不是数组" as never).length === 0);
+  check("不认识的 type 直接丢掉", parseDeltas([{ type: "rewrite_everything" }] as never).length === 0);
+  const one = parseDeltas([{ type: "bullet_add", targetBlockId: "b1", after: "x" }] as never);
+  check("accepted 缺省视为 true", one.length === 1 && one[0].accepted === true);
+  const off = parseDeltas([{ type: "bullet_add", accepted: false }] as never);
+  check("accepted: false 保留", off[0].accepted === false);
 }
 
 console.log(`\n${fail === 0 ? "全部通过" : "有失败"}：${pass} 通过 / ${fail} 失败\n`);

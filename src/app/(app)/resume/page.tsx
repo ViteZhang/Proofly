@@ -1,5 +1,6 @@
 import { BaselineWorkbench } from "@/components/resume/BaselineWorkbench";
-import { getBaseline, listBaselines } from "@/lib/queries/resume";
+import { VersionSection } from "@/components/resume/VersionSection";
+import { getBaseline, listBaselines, listVersions } from "@/lib/queries/resume";
 import { listTargets } from "@/lib/queries/targets";
 import { resolveTarget } from "@/lib/targets/shape";
 import Link from "next/link";
@@ -31,7 +32,11 @@ export default async function ResumePage({
     );
   }
 
-  const [baseline, summaries] = await Promise.all([getBaseline(selected.id), listBaselines()]);
+  const [baseline, summaries, versions] = await Promise.all([
+    getBaseline(selected.id),
+    listBaselines(),
+    listVersions(selected.id),
+  ]);
 
   return (
     <div>
@@ -55,6 +60,12 @@ export default async function ResumePage({
         targetId={selected.id}
         targetName={selected.name}
         baseline={baseline}
+      />
+      <VersionSection
+        hasBaseline={!!baseline && baseline.blocks.length > 0}
+        locked={versions.locked}
+        versions={versions.versions}
+        jdsWithoutVersion={versions.jdsWithoutVersion}
       />
     </div>
   );
