@@ -18,14 +18,19 @@ type Step = 0 | 1 | 2 | 3; // 0 = 没在跑
 const STEP_LABEL = ["解析要求", "检索经历", "计算匹配"];
 
 // S6 区块三。分数由代码算，这里只负责把算好的数字摆出来。
+export type TaskLink = { taskId: string; title: string };
+
 export function AssessPanel({
   jdId,
   hasRequirements,
   assessment,
+  taskLinks = {},
 }: {
   jdId: string;
   hasRequirements: boolean;
   assessment: AssessmentView | null;
+  /** requirementIndex → 已经生成的行动。Step 5 之后这里就不再是占位了。 */
+  taskLinks?: Record<number, TaskLink>;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>(0);
@@ -105,7 +110,7 @@ export function AssessPanel({
             <ScoreCard a={assessment} />
             <LossCard a={assessment} />
           </div>
-          <Comparison results={assessment.results} />
+          <Comparison results={assessment.results} taskLinks={taskLinks} />
         </>
       )}
     </div>
@@ -268,7 +273,13 @@ function LossCard({ a }: { a: AssessmentView }) {
 
 // ---- 逐条对照 ----
 
-function Comparison({ results }: { results: RequirementResult[] }) {
+function Comparison({
+  results,
+  taskLinks,
+}: {
+  results: RequirementResult[];
+  taskLinks: Record<number, TaskLink>;
+}) {
   const [showAll, setShowAll] = useState(true);
   const shown = showAll ? results : results.filter((r) => r.gapType !== null);
 
@@ -288,14 +299,18 @@ function Comparison({ results }: { results: RequirementResult[] }) {
 
       <ul className="mt-2 space-y-2">
         {shown.map((r) => (
-          <RequirementCard key={r.requirementIndex} r={r} />
+          <RequirementCard
+            key={r.requirementIndex}
+            r={r}
+            link={taskLinks[r.requirementIndex] ?? null}
+          />
         ))}
       </ul>
     </div>
   );
 }
 
-function RequirementCard({ r }: { r: RequirementResult }) {
+function RequirementCard({ r, link }: { r: RequirementResult; link: TaskLink | null }) {
   const strong = isStrong(r);
   const copy = r.gapType ? GAP_COPY[r.gapType] : null;
 
@@ -353,12 +368,21 @@ function RequirementCard({ r }: { r: RequirementResult }) {
         </span>
       </div>
 
-      {/* tasks 表要到 Step 5 才有数据。
-          structural 也有对应行动——「改叙事」就是 rewrite_narrative，
+      {/* structural 也有对应行动——「改叙事」就是 rewrite_narrative，
           补不上不等于不用管。 */}
       {r.gapType && (
-        <p className="mt-1 pl-[44px] text-[12px]" style={{ color: "var(--ghost)" }}>
-          → Step 5 会在这里生成对应行动
+        <p className="mt-1 pl-[44px] text-[12px]">
+          {link ? (
+            <Link
+              href={`/actions?task=${link.taskId}`}
+              className="hover:underline"
+              style={{ color: "var(--ai)" }}
+            >
+              → 已生成行动「{link.title}」
+            </Link>
+          ) : (
+            <span style={{ color: "var(--ghost)" }}>还没有对应行动，去行动清单生成一次</span>
+          )}
         </p>
       )}
     </li>

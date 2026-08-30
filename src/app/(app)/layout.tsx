@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { countOpenTasks } from "@/lib/queries/tasks";
 import { Topbar } from "@/components/layout/Topbar";
 import { createClient } from "@/lib/supabase/server";
 import { getProfileFacts } from "@/lib/queries/facts";
@@ -21,11 +22,12 @@ export default async function AppLayout({
   const { blockingCount } = await getProfileFacts();
 
   // 顶栏方向选择器接真实数据（Step 0 那三个写死的选项到此为止）
-  const targets = await listTargetOptions();
+  // 侧栏「行动清单」徽标接真实待办数
+  const [targets, todoCount] = await Promise.all([listTargetOptions(), countOpenTasks()]);
 
   return (
     <div className="flex min-h-screen" style={{ background: "var(--bg)" }}>
-      <Sidebar email={user?.email ?? ""} />
+      <Sidebar email={user?.email ?? ""} todoCount={todoCount} />
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Topbar 读 useSearchParams，包一层 Suspense 免得拖累外层渲染 */}
         <Suspense fallback={<div style={{ height: 56, borderBottom: "1px solid var(--line)" }} />}>

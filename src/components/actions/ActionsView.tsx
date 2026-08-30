@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { generatePlan } from "@/app/(app)/actions/plan-actions";
@@ -32,6 +32,8 @@ export function ActionsView({
   anchors: AnchorOption[];
 }) {
   const router = useRouter();
+  // 从首页或 Step 4 的逐条对照跳过来时带着 ?task=，那条要展开并高亮。
+  const highlight = useSearchParams().get("task");
   const [mode, setMode] = useState<SortMode>("priority");
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -134,6 +136,7 @@ export function ActionsView({
                 key={t.id}
                 t={board.open.find((x) => x.id === t.id)!}
                 onEdit={setDraft}
+                highlighted={t.id === highlight}
               />
             ))}
             {board.open.length === 0 && (
@@ -254,10 +257,18 @@ export function ActionTag({ type }: { type: TaskView["actionType"] }) {
   );
 }
 
-function TaskCard({ t, onEdit }: { t: TaskView; onEdit: (d: TaskDraft) => void }) {
+function TaskCard({
+  t,
+  onEdit,
+  highlighted = false,
+}: {
+  t: TaskView;
+  onEdit: (d: TaskDraft) => void;
+  highlighted?: boolean;
+}) {
   const router = useRouter();
   // 就地展开，不跳页 —— 清单的价值在于一眼扫完，跳走就断了。
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(highlighted);
   // 勾选不直接标记完成，先弹回流面板。闭环成不成立就看这一步。
   const [reflow, setReflow] = useState(false);
   const [confirmDrop, setConfirmDrop] = useState(false);
@@ -274,7 +285,13 @@ function TaskCard({ t, onEdit }: { t: TaskView; onEdit: (d: TaskDraft) => void }
   return (
     <li
       className="rounded-card px-4 py-3.5"
-      style={{ background: "var(--card)", border: "1px solid var(--line)" }}
+      style={{
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        // 跳过来的那条描个边，不然一屏十条根本找不到是哪一条。
+        outline: highlighted ? "2px solid var(--ink)" : undefined,
+        outlineOffset: highlighted ? "-2px" : undefined,
+      }}
     >
       {reflow && <ReflowPanel task={t} onClose={() => setReflow(false)} />}
       <div className="flex items-start gap-3">

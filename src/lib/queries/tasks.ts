@@ -192,3 +192,47 @@ export async function countOpenTasks(): Promise<number> {
     .in("status", ["todo", "doing"]);
   return count ?? 0;
 }
+
+/**
+ * 某次评估里，每条要求对应的行动（如果已经生成过）。
+ *
+ * Step 4 逐条对照里那句「→ Step 5 会在这里生成对应行动」的占位靠它接上。
+ * 键是 requirement_index —— 缺口和要求是一一对应的，用 index 比用 gap_id
+ * 稳：界面上拿到的是算分结果，不是 gap 行。
+ */
+export async function getGapTaskLinks(
+  assessmentId: string,
+): Promise<Record<number, { taskId: string; title: string }>> {
+  if (!assessmentId) return {};
+  const supabase = await createClient();
+
+  const { data: gaps } = await supabase
+    .from("gaps")
+    .select("id,requirement_index")
+    .eq("assessment_id", assessmentId);
+  if (!gaps || gaps.length === 0) return {};
+
+  const { data: links } = await supabase
+    .from("task_targets")
+    .select("gap_id,tasks(id,title,status,dismissed_at)")
+    .in(
+      "gap_id",
+      gaps.map((g) => g.id),
+    );
+
+  const byGap = new Map<string, { taskId: string; title: string }>();
+  for (const l of links ?? []) {
+    const t = l.tasks;
+    if (!t || !l.gap_id) continue;
+    // 已放弃／已忽略的行动不往回指 —— 点过去找不到东西比没有链接更糟。
+    if (t.status === "dropped" || t.dismissed_at) continue;
+    byGap.set(l.gap_id, { taskId: t.id, title: t.title });
+  }
+
+  const out: Record<number, { taskId: string; title: string }> = {};
+  for (const g of gaps) {
+    const hit = byGap.get(g.id);
+    if (hit && g.requirement_index !== null) out[g.requirement_index] = hit;
+  }
+  return out;
+}

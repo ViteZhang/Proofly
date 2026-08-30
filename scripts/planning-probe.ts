@@ -678,5 +678,71 @@ check(
   ).includes("await startReassess([atomId])"),
 );
 
+// =============================================================
+console.log("\n验收 21、39 · 联动收尾");
+// =============================================================
+
+const homeSrc = stripComments(fs2.readFileSync("src/app/(app)/page.tsx", "utf8"));
+check(
+  "首页「今天做什么」取 priority 最高的三条，用的是同一个 sortTasks",
+  homeSrc.includes("sortTasks(") && homeSrc.includes(".slice(0, 3)"),
+  "两处排序不一致的话首页就在骗人",
+);
+check(
+  "首页也把各方向 impact 分别列出，不给总和",
+  homeSrc.includes("function perTargetLine"),
+);
+check(
+  "首页概览卡加了「待办行动 N 条 · 预计 M 小时」",
+  homeSrc.includes('label="待办行动"') && homeSrc.includes("预计 ${board.totalHours} 小时"),
+);
+check(
+  "「今天做什么」点进去带 ?task=，落到具体那一条",
+  homeSrc.includes("/actions?task=${t.id}"),
+);
+
+check(
+  "行动清单读 ?task= 并高亮＋展开",
+  viewCode.includes('useSearchParams().get("task")') &&
+    viewCode.includes("useState(highlighted)") &&
+    viewCode.includes('outline: highlighted ? "2px solid var(--ink)"'),
+);
+
+const assessSrc = stripComments(
+  fs2.readFileSync("src/components/targets/AssessPanel.tsx", "utf8"),
+);
+check(
+  "Step 4 的「→ Step 5 会在这里生成对应行动」占位换成了真跳转",
+  !assessSrc.includes("Step 5 会在这里生成对应行动") &&
+    assessSrc.includes("→ 已生成行动「{link.title}」"),
+);
+check(
+  "还没生成行动时说清楚下一步，不是留一句占位",
+  assessSrc.includes("还没有对应行动，去行动清单生成一次"),
+);
+check(
+  "已放弃／已忽略的行动不往回指",
+  stripComments(fs2.readFileSync("src/lib/queries/tasks.ts", "utf8")).includes(
+    'if (t.status === "dropped" || t.dismissed_at) continue;',
+  ),
+);
+
+const sidebarSrc = stripComments(
+  fs2.readFileSync("src/components/layout/Sidebar.tsx", "utf8"),
+);
+check(
+  "侧栏「行动清单」徽标接真实待办数，0 时不显示",
+  sidebarSrc.includes('item.href === "/actions" && todoCount > 0'),
+);
+check(
+  "徽标数与清单同一个口径（排除已完成／已放弃／已忽略）",
+  stripComments(fs2.readFileSync("src/lib/queries/tasks.ts", "utf8")).includes(
+    'countOpenTasks',
+  ) &&
+    /countOpenTasks[\s\S]{0,400}\.is\("dismissed_at", null\)[\s\S]{0,120}\.in\("status", \["todo", "doing"\]\)/.test(
+      fs2.readFileSync("src/lib/queries/tasks.ts", "utf8"),
+    ),
+);
+
 console.log(`\n${fail === 0 ? "全过" : "有挂"}：${pass} / ${pass + fail}\n`);
 process.exit(fail === 0 ? 0 : 1);

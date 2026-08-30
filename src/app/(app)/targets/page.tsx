@@ -2,6 +2,7 @@ import { AssessPanel } from "@/components/targets/AssessPanel";
 import { JdSection } from "@/components/targets/JdSection";
 import { TargetsView } from "@/components/targets/TargetsView";
 import { getLatestAssessment } from "@/lib/queries/assessments";
+import { getGapTaskLinks } from "@/lib/queries/tasks";
 import { getJd, listJds } from "@/lib/queries/jds";
 import { listTargets } from "@/lib/queries/targets";
 import { resolveTarget } from "@/lib/targets/shape";
@@ -23,6 +24,8 @@ export default async function TargetsPage({
   const jdId = jds.find((j) => j.id === wantedJd)?.id ?? jds[0]?.id ?? null;
   const jd = jdId ? await getJd(jdId) : null;
   const assessment = jdId ? await getLatestAssessment(jdId) : null;
+  // 逐条对照里「→ 已生成行动」的跳转靠这张表
+  const taskLinks = assessment ? await getGapTaskLinks(assessment.id) : {};
 
   return (
     <div>
@@ -43,6 +46,7 @@ export default async function TargetsPage({
                 jdId={jd.id}
                 hasRequirements={jd.requirements.length > 0}
                 assessment={assessment}
+                taskLinks={taskLinks}
               />
             )
           }
