@@ -1,11 +1,8 @@
-// 占位页 —— 真实数据接入是 Step 1 的事。
-export default function ActionsPage() {
-  return (
-    <div>
-      <h1 className="font-display text-[26px] font-semibold tracking-tight">行动清单</h1>
-      <p className="mt-1.5 text-[14px]" style={{ color: "var(--slate)" }}>
-        全局任务池，不随方向切换
-      </p>
-    </div>
-  );
+import { ActionsView } from "@/components/actions/ActionsView";
+import { getTaskBoard } from "@/lib/queries/tasks";
+
+// 全局任务池，不随方向切换。方向选择器的置灰在 lib/nav.ts 里判定。
+export default async function ActionsPage() {
+  const board = await getTaskBoard();
+  return <ActionsView board={board} />;
 }

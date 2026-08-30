@@ -408,5 +408,56 @@ check(
   u.includes("G") && u.includes("A") && u.includes("S") && !u.includes("{{"),
 );
 
+// =============================================================
+console.log("\n验收 18–20 · 全局视图");
+// =============================================================
+
+const { isGlobalPath } = await import("../src/lib/nav");
+check("/actions 判为全局页 → 方向选择器置灰", isGlobalPath("/actions"));
+check("/actions/xxx 子路由同样是全局页", isGlobalPath("/actions/whatever"));
+check("/targets 仍是方向作用域页", !isGlobalPath("/targets"));
+
+const viewSrc = (await import("node:fs")).readFileSync(
+  "src/components/actions/ActionsView.tsx",
+  "utf8",
+);
+const viewCode = stripComments(viewSrc);
+check("页面顶部有「全局 · 所有方向共用」标记", viewCode.includes("全局 · 所有方向共用"));
+check("每条行动显示「服务 N 个方向」", viewCode.includes("服务 {t.targetCount} 个方向"));
+check(
+  "各方向 impact 分别列出，不是只给总和",
+  viewCode.includes("PerTargetImpact") && viewCode.includes("byTarget.set"),
+);
+check(
+  "读取层不接受方向参数（全局清单不能按方向过滤）",
+  !stripComments(
+    (await import("node:fs")).readFileSync("src/lib/queries/tasks.ts", "utf8"),
+  ).includes("eq(\"target_id\""),
+);
+check(
+  "改叙事类旁边挂了估算说明",
+  viewCode.includes("IMPACT_IS_ESTIMATED_NOTE") && viewCode.includes('rewrite_narrative"'),
+);
+
+// =============================================================
+console.log("\n类型标记配色（S7）");
+// =============================================================
+
+const { ACTION_COPY, EMPTY_COPY } = await import("../src/lib/planning/labels");
+check("取数 · 绿", ACTION_COPY.collect_data.label === "取数" && ACTION_COPY.collect_data.fg === "var(--proof)");
+check("造证据 · 紫", ACTION_COPY.build_evidence.label === "造证据" && ACTION_COPY.build_evidence.fg === "var(--ai)");
+check("改叙事 · 橙", ACTION_COPY.rewrite_narrative.label === "改叙事" && ACTION_COPY.rewrite_narrative.fg === "var(--warn)");
+check("学技能 · 灰", ACTION_COPY.learn.label === "学技能" && ACTION_COPY.learn.fg === "var(--slate)");
+check(
+  "空状态文案与方案 5.3 原文一致",
+  EMPTY_COPY === "还没有行动。先去评估一份 JD，我会告诉你差在哪。",
+  EMPTY_COPY,
+);
+check(
+  "界面文案用「行动」不用「任务」",
+  !viewCode.includes("任务") || viewCode.split("任务").length - 1 === 0,
+  "ActionsView 里还留着「任务」两个字",
+);
+
 console.log(`\n${fail === 0 ? "全过" : "有挂"}：${pass} / ${pass + fail}\n`);
 process.exit(fail === 0 ? 0 : 1);
