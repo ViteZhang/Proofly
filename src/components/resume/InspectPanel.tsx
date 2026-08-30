@@ -36,11 +36,14 @@ export function InspectPanel({
   onMove,
   canMoveUp,
   canMoveDown,
+  readOnly = false,
 }: {
   baseline: BaselineView | null;
   preview: SelectionPreview | null;
   block: BaselineBlockView | null;
   locked: boolean;
+  /** 投递版本详情页复用这块面板，那里一切只读。 */
+  readOnly?: boolean;
   onMove: (delta: number) => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
@@ -73,7 +76,7 @@ export function InspectPanel({
           block={block}
           why={why}
           checks={mine}
-          locked={locked}
+          locked={locked || readOnly}
           onMove={onMove}
           canMoveUp={canMoveUp}
           canMoveDown={canMoveDown}
@@ -90,6 +93,7 @@ export function InspectPanel({
         )
       )}
 
+      {!readOnly && (
       <Panel title="本版取舍">
         {tradeoffs.length === 0 ? (
           <p className="text-[12.5px]" style={{ color: "var(--mute)" }}>
@@ -112,7 +116,9 @@ export function InspectPanel({
           ))
         )}
       </Panel>
+      )}
 
+      {!readOnly && (
       <p className="text-[12px] leading-relaxed" style={{ color: "var(--mute)" }}>
         选材、互斥消解、技能过滤全部由代码判定，同样的策略配置生成十次得到同样的名单。
         模型只负责措辞。
@@ -120,6 +126,7 @@ export function InspectPanel({
           去改策略
         </Link>
       </p>
+      )}
     </div>
   );
 }

@@ -12,7 +12,8 @@ import { parsePendingMetrics, parseStringList } from "@/lib/domain";
 import { mergeStrategies, type StrategyRow } from "@/lib/targets/strategy";
 import { parseResults } from "@/lib/scoring/parse";
 import { listResumeChecks, type CheckRow } from "@/lib/resume/check-results";
-import { parseDeltas } from "@/lib/resume/delta";
+import { applyDeltas, parseDeltas, type DeltaType } from "@/lib/resume/delta";
+import { locateRef } from "@/lib/resume/unused";
 import type { GateAtom, GateFact } from "@/lib/resume/gate";
 import type { SelectableAtom, SelectableSkill, Tradeoff } from "@/lib/resume/select";
 import type {
@@ -568,4 +569,218 @@ export async function listVersions(targetId: string): Promise<{
         roleTitle: j.role_title ?? "未填岗位",
       })),
   };
+}
+
+// ---- 投递版本详情 ----
+
+export type DeltaView = {
+  id: string;
+  type: DeltaType;
+  targetBlockId: string;
+  blockTitle: string;
+  before: string;
+  after: string;
+  reason: string;
+  accepted: boolean;
+  manual: boolean;
+  /** 仅 bullet_add：来自哪条经历的哪一项。 */
+  sourceTitle: string | null;
+  sourceRef: string;
+  sourceWhere: string | null;
+};
+
+export type VersionDetail = {
+  id: string;
+  jdId: string;
+  company: string;
+  roleTitle: string;
+  targetId: string;
+  targetName: string;
+  matchScore: number | null;
+  deltaRatio: number;
+  affected: number;
+  totalBlocks: number;
+  overThresholdAck: boolean;
+  submittedAt: string | null;
+  locked: boolean;
+  warnings: string[];
+  unmatched: { requirementIndex: number; note: string }[];
+  deltas: DeltaView[];
+  /** 应用已接受的差异之后的完整简历。 */
+  headline: string;
+  blocks: BaselineBlockView[];
+  skills: string[];
+  checks: CheckRow[];
+  why: Record<string, string[]>;
+};
+
+export async function getVersion(versionId: string): Promise<VersionDetail | null> {
+  if (!UUID_RE.test(versionId)) return null;
+  const supabase = await createClient();
+
+  const { data: v } = await supabase
+    .from("resume_versions")
+    .select(
+      "id,jd_id,baseline_id,deltas,delta_ratio,over_threshold_ack,submitted_at,locked,warnings,unmatched",
+    )
+    .eq("id", versionId)
+    .maybeSingle();
+  if (!v) return null;
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id,target_id,headline,skills")
+    .eq("id", v.baseline_id)
+    .maybeSingle();
+  if (!baseline) return null;
+
+  const [base, { data: jd }, { data: assessments }] = await Promise.all([
+    getBaseline(baseline.target_id),
+    supabase.from("jds").select("id,company,role_title").eq("id", v.jd_id).maybeSingle(),
+    supabase
+      .from("assessments")
+      .select("match_score,created_at,id")
+      .eq("jd_id", v.jd_id)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1),
+  ]);
+  if (!base) return null;
+
+  const deltas = parseDeltas(v.deltas);
+  const applied = applyDeltas(
+    base.blocks.map((b) => ({
+      id: b.id,
+      section: b.section,
+      title: b.title,
+      meta: b.meta,
+      summary: b.summary,
+      bullets: b.bullets,
+    })),
+    base.headline,
+    deltas,
+  );
+
+  const byId = new Map(base.blocks.map((b) => [b.id, b]));
+  const blocks: BaselineBlockView[] = applied.blocks.map((b) => {
+    const src = byId.get(b.id)!;
+    return { ...src, title: b.title, summary: b.summary, bullets: b.bullets, section: b.section };
+  });
+
+  // bullet_add 的来源定位：模型只给逐字引用，下标是算出来的。
+  const input = await loadBaselineInput(baseline.target_id);
+  const sources = new Map(
+    (input?.atoms ?? []).map((a) => [
+      a.id,
+      {
+        id: a.id,
+        title: a.title,
+        evidenceLevel: a.evidenceLevel,
+        actions: a.actions,
+        metrics: a.metrics.map((m) => ({
+          name: m.name,
+          kind: m.kind,
+          value: [m.fromValue, m.toValue, m.delta].filter(Boolean).join(" "),
+          evidenceLevel: m.evidenceLevel,
+        })),
+      },
+    ]),
+  );
+
+  const deltaViews: DeltaView[] = deltas.map((d) => {
+    const atom = d.sourceAtomId ? sources.get(d.sourceAtomId) ?? null : null;
+    return {
+      id: d.id,
+      type: d.type,
+      targetBlockId: d.targetBlockId,
+      blockTitle: byId.get(d.targetBlockId)?.title ?? "个人定位段",
+      before: d.before,
+      after: d.after,
+      reason: d.reason,
+      accepted: d.accepted,
+      manual: d.manual === true,
+      sourceTitle: atom?.title ?? null,
+      sourceRef: d.sourceRef,
+      sourceWhere: atom && d.sourceRef ? locateRef(d.sourceRef, atom) : null,
+    };
+  });
+
+  const unmatched = Array.isArray(v.unmatched)
+    ? (v.unmatched as { requirement_index?: number; note?: string }[]).map((u) => ({
+        requirementIndex: typeof u.requirement_index === "number" ? u.requirement_index : 0,
+        note: typeof u.note === "string" ? u.note : "",
+      }))
+    : [];
+
+  return {
+    id: v.id,
+    jdId: v.jd_id,
+    company: jd?.company ?? "未填公司",
+    roleTitle: jd?.role_title ?? "未填岗位",
+    targetId: baseline.target_id,
+    targetName: base.targetName,
+    matchScore: assessments?.[0]?.match_score ?? null,
+    deltaRatio: Number(v.delta_ratio ?? 0),
+    affected: [...applied.affected].filter((x) => x !== "headline").length,
+    totalBlocks: base.blocks.length,
+    overThresholdAck: !!v.over_threshold_ack,
+    submittedAt: v.submitted_at,
+    locked: !!v.locked,
+    warnings: parseStringList(v.warnings),
+    unmatched,
+    deltas: deltaViews,
+    headline: applied.headline,
+    blocks,
+    skills: base.skills,
+    checks: base.checks,
+    why: base.why,
+  };
+}
+
+/** 首页「最近投递」卡片。跨方向，按更新时间倒序。 */
+export async function listRecentVersions(limit = 4): Promise<
+  {
+    id: string;
+    company: string;
+    roleTitle: string;
+    targetName: string;
+    deltaCount: number;
+    submittedAt: string | null;
+    updatedAt: string | null;
+  }[]
+> {
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from("resume_versions")
+    .select("id,jd_id,baseline_id,deltas,submitted_at,updated_at")
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit);
+  if (!rows || rows.length === 0) return [];
+
+  const [{ data: jds }, { data: baselines }, { data: targets }] = await Promise.all([
+    supabase.from("jds").select("id,company,role_title").in("id", rows.map((r) => r.jd_id)),
+    supabase
+      .from("resume_baselines")
+      .select("id,target_id")
+      .in("id", rows.map((r) => r.baseline_id)),
+    supabase.from("targets").select("id,name"),
+  ]);
+  const jdById = new Map((jds ?? []).map((j) => [j.id, j]));
+  const targetOfBaseline = new Map((baselines ?? []).map((b) => [b.id, b.target_id]));
+  const targetName = new Map((targets ?? []).map((t) => [t.id, t.name]));
+
+  return rows.map((r) => {
+    const jd = jdById.get(r.jd_id);
+    const tid = targetOfBaseline.get(r.baseline_id) ?? "";
+    return {
+      id: r.id,
+      company: jd?.company ?? "未填公司",
+      roleTitle: jd?.role_title ?? "未填岗位",
+      targetName: targetName.get(tid) ?? "未知方向",
+      deltaCount: parseDeltas(r.deltas).filter((d) => d.accepted).length,
+      submittedAt: r.submitted_at,
+      updatedAt: r.updated_at,
+    };
+  });
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import { JdForm } from "./JdForm";
+import { GenerateResumeButton } from "@/components/resume/GenerateResumeButton";
 import { RequirementList } from "./RequirementList";
 import { deleteJd, parseJd } from "@/app/(app)/targets/jd-actions";
 import { BIND_LABEL } from "@/lib/jd/labels";
@@ -147,6 +148,7 @@ export function JdSection({
                     ? "重新解析"
                     : "解析要求"}
               </Button>
+              <GenerateResumeButton jdId={jd.id} />
               <Button
                 variant="danger"
                 size="sm"

@@ -14,8 +14,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { ProofDot } from "@/components/library/ProofDot";
-import { ProofBar } from "./ProofBar";
+import { ResumePaper } from "./ResumePaper";
 import { InspectPanel } from "./InspectPanel";
 import { RENDER_WEIGHT_LABEL } from "@/lib/targets/strategy";
 import {
@@ -29,7 +28,7 @@ import {
   unlockBaseline,
 } from "@/app/(app)/resume/block-actions";
 import type { GateResult } from "@/lib/resume/gate";
-import type { BaselineBlockView, BaselineView } from "@/lib/queries/resume";
+import type { BaselineView } from "@/lib/queries/resume";
 
 type Phase = "idle" | "selecting" | "rendering" | "blocked";
 
@@ -223,52 +222,21 @@ export function BaselineWorkbench({
 
       <div className="mt-4 flex gap-6">
         {blocks.length > 0 && (
-          <article
-            className="rounded-card px-9 py-8"
-            style={{
-              background: "#fff",
-              border: "1px solid var(--line)",
-              boxShadow: "var(--shadow-1)",
-              width: 720,
-              // A4 比例：210 × 297。不是装饰，是让人对篇幅有真实的判断。
-              minHeight: Math.round((720 * 297) / 210),
+          <ResumePaper
+            headline={baseline?.headline ?? ""}
+            blocks={blocks}
+            skills={baseline?.skills ?? []}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            draggable={!locked}
+            reveal={shown}
+            onMenu={(id, x, y) => {
+              if (locked) return;
+              setSelectedId(id);
+              setMenu({ blockId: id, x, y });
             }}
-          >
-            <ProofBar
-              blocks={blocks.map((b) => ({
-                evidenceLevel: b.evidenceLevel,
-                weight: 1 + b.bullets.length + (b.summary ? 1 : 0),
-              }))}
-            />
-
-            {baseline?.headline && (
-              <p className="mt-5 text-[13.5px] leading-relaxed">{baseline.headline}</p>
-            )}
-
-            {blocks.slice(0, shown).map((b, i) => (
-              <BlockRow
-                key={b.id}
-                block={b}
-                first={i === 0}
-                newSection={i === 0 || blocks[i - 1].section !== b.section}
-                selected={b.id === selectedId}
-                locked={locked}
-                onSelect={() => setSelectedId(b.id)}
-                onMenu={(x, y) => {
-                  setSelectedId(b.id);
-                  setMenu({ blockId: b.id, x, y });
-                }}
-                onDrop={(fromId) => drop(fromId, b.id)}
-              />
-            ))}
-
-            {baseline && baseline.skills.length > 0 && shown >= blocks.length && (
-              <section className="mt-7">
-                <SectionTitle>技能</SectionTitle>
-                <p className="text-[13px] leading-relaxed">{baseline.skills.join("、")}</p>
-              </section>
-            )}
-          </article>
+            onDrop={(fromId, toId) => drop(fromId, toId)}
+          />
         )}
 
         <aside className="w-[300px] shrink-0">
@@ -309,114 +277,6 @@ export function BaselineWorkbench({
         />
       )}
     </div>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3
-      className="mb-2 border-b pb-1 text-[12px] font-medium tracking-wide"
-      style={{ color: "var(--mute)", borderColor: "var(--line-soft)" }}
-    >
-      {children}
-    </h3>
-  );
-}
-
-function BlockRow({
-  block,
-  first,
-  newSection,
-  selected,
-  locked,
-  onSelect,
-  onMenu,
-  onDrop,
-}: {
-  block: BaselineBlockView;
-  first: boolean;
-  newSection: boolean;
-  selected: boolean;
-  locked: boolean;
-  onSelect: () => void;
-  onMenu: (x: number, y: number) => void;
-  onDrop: (fromId: string) => void;
-}) {
-  const [over, setOver] = useState(false);
-
-  return (
-    <>
-      {newSection && (
-        <div className={first ? "mt-5" : "mt-7"}>
-          <SectionTitle>{block.section}</SectionTitle>
-        </div>
-      )}
-      <div
-        draggable={!locked}
-        onDragStart={(e) => e.dataTransfer.setData("text/plain", block.id)}
-        onDragOver={(e) => {
-          if (locked) return;
-          e.preventDefault();
-          setOver(true);
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          const id = e.dataTransfer.getData("text/plain");
-          if (id) onDrop(id);
-        }}
-        onClick={onSelect}
-        onContextMenu={(e) => {
-          if (locked) return;
-          e.preventDefault();
-          onMenu(e.clientX, e.clientY);
-        }}
-        role="button"
-        tabIndex={0}
-        aria-pressed={selected}
-        aria-label={`简历块 ${block.title}`}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onSelect();
-          }
-        }}
-        className={`${newSection ? "" : "mt-5"} cursor-pointer border-l-[3px] pl-3 transition-colors`}
-        style={{
-          borderColor: selected ? "var(--proof)" : over ? "var(--ai)" : "transparent",
-          marginLeft: -15,
-        }}
-      >
-        <div className="flex items-baseline gap-2">
-          <ProofDot level={block.evidenceLevel} size={9} className="translate-y-[1px]" />
-          <span className="text-[14px] font-medium">{block.title}</span>
-          {block.edited && (
-            <span className="text-[11px]" style={{ color: "var(--ai)" }}>
-              手工改过
-            </span>
-          )}
-          <span className="ml-auto text-[12px]" style={{ color: "var(--mute)" }}>
-            {block.meta}
-          </span>
-        </div>
-        {block.summary && (
-          <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
-            {block.summary}
-          </p>
-        )}
-        {block.bullets.length > 0 && (
-          <ul className="mt-1.5 space-y-1">
-            {block.bullets.map((line, j) => (
-              <li key={j} className="flex gap-2 text-[13px] leading-relaxed">
-                <span style={{ color: "var(--ghost)" }}>·</span>
-                <span>{line}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </>
   );
 }
 

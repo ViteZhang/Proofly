@@ -108,3 +108,21 @@ export function refExists(ref: string, atom: SourceAtom): boolean {
   if (ref.trim() === "") return false;
   return containment(ref, hay) >= 0.75;
 }
+
+/**
+ * source_ref 指向这条经历的哪一项。详情页要显示「来自 xxx 的 actions[2]」，
+ * 而模型只给了逐字引用，没给下标 —— 下标是这里算出来的。
+ */
+export function locateRef(ref: string, atom: SourceAtom): string | null {
+  let best: { where: string; score: number } | null = null;
+  atom.actions.forEach((a, i) => {
+    const s = containment(ref, a);
+    if (!best || s > best.score) best = { where: `actions[${i}]`, score: s };
+  });
+  atom.metrics.forEach((m, i) => {
+    const s = containment(ref, `${m.name} ${m.value}`);
+    if (!best || s > best.score) best = { where: `metrics[${i}]`, score: s };
+  });
+  const hit = best as { where: string; score: number } | null;
+  return hit && hit.score >= 0.6 ? hit.where : null;
+}

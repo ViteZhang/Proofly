@@ -362,3 +362,108 @@ function seedNote(seed: Delta[]): string {
   const lines = seed.map((d) => `- [${d.type}] ${d.before} → ${d.after}｜${d.reason}`);
   return `\n\n## 上一份同类岗位版本用过的调整（作为起点，不合适的不要照搬）\n\n${lines.join("\n")}`;
 }
+
+/**
+ * 逐条接受／拒绝一处调整。
+ *
+ * 拒绝只会让内容退回基线，不可能引入新的违规；重新接受则可能，
+ * 所以两个方向都重跑一遍门禁，过不了就不改。
+ */
+export async function toggleDelta(
+  versionId: string,
+  deltaId: string,
+  accepted: boolean,
+): Promise<ActionResult<{ deltaRatio: number; affected: number; totalBlocks: number }>> {
+  if (!z.uuid().safeParse(versionId).success) return fail("这份版本不存在");
+  const supabase = await createClient();
+
+  const { data: v } = await supabase
+    .from("resume_versions")
+    .select("id,baseline_id,deltas,locked")
+    .eq("id", versionId)
+    .maybeSingle();
+  if (!v) return fail("这份版本已经不在了");
+  if (v.locked) return fail("这份版本已经标记投递、内容冻结了。要改，用「复制一份」。");
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id,target_id,headline")
+    .eq("id", v.baseline_id)
+    .maybeSingle();
+  if (!baseline) return fail("基线已经不在了");
+
+  const { data: blockRows } = await supabase
+    .from("resume_blocks")
+    .select("id,atom_id,section,title,meta,summary,bullets,template_used,order_index")
+    .eq("baseline_id", baseline.id)
+    .order("order_index", { ascending: true });
+
+  const blocks: DeltaBlock[] = (blockRows ?? []).map((r) => ({
+    id: r.id,
+    section: r.section ?? "",
+    title: r.title ?? "",
+    meta: r.meta ?? "",
+    summary: r.summary ?? "",
+    bullets: parseStringList(r.bullets),
+  }));
+
+  const deltas = parseDeltas(v.deltas).map((d) =>
+    d.id === deltaId ? { ...d, accepted } : d,
+  );
+
+  const applied = applyDeltas(blocks, baseline.headline ?? "", deltas);
+
+  if (accepted) {
+    const input = await loadBaselineInput(baseline.target_id);
+    const atomOf = new Map((blockRows ?? []).map((r) => [r.id, r.atom_id as string | null]));
+    const templateOf = new Map(
+      (blockRows ?? []).map((r) => [r.id, (r.template_used ?? "absent") as EvidenceLevel]),
+    );
+    const touched = deltas.find((d) => d.id === deltaId)?.targetBlockId ?? "";
+    const b = applied.blocks.find((x) => x.id === touched);
+    if (b) {
+      const atomId = atomOf.get(b.id) ?? null;
+      const gb: GateBlock = {
+        id: b.id,
+        atomId,
+        section: b.section,
+        title: b.title,
+        meta: b.meta,
+        summary: b.summary,
+        bullets: b.bullets,
+        templateUsed: templateOf.get(b.id) ?? "absent",
+      };
+      const atom = atomId ? input?.atoms.find((a) => a.id === atomId) ?? null : null;
+      if (hasBlocking(checkBlock(gb, atom))) {
+        return fail("这一条接受之后过不了门禁，没有改动。");
+      }
+    }
+  }
+
+  const ratio = deltaRatio(applied.affected, blocks.length);
+  await supabase
+    .from("resume_versions")
+    .update({
+      deltas: deltas as unknown as Json,
+      delta_ratio: ratio,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", versionId);
+
+  refresh();
+  revalidatePath(`/resume/${versionId}`);
+  return ok({
+    deltaRatio: ratio,
+    affected: [...applied.affected].filter((x) => x !== "headline").length,
+    totalBlocks: blocks.length,
+  });
+}
+
+/** 「复制一份」：以某版本的差异为起点，为另一份 JD 再跑一次生成。 */
+export async function duplicateVersion(
+  fromVersionId: string,
+  toJdId: string,
+): Promise<ActionResult<VersionOutcome>> {
+  if (!z.uuid().safeParse(fromVersionId).success) return fail("源版本不存在");
+  return generateVersion(toJdId, fromVersionId);
+}

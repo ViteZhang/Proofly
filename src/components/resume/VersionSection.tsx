@@ -1,9 +1,12 @@
 "use client";
 
 // =============================================================
-// Proofly · 投递版本（S8-B 的入口，列表与详情在 6.5）
+// Proofly · 投递版本列表（S8-B 第一层）
 //
-// 基线没锁定，这里的生成入口一律禁用。这条不开后门：基线会飘的话，
+// 草稿在前，已投递在后。已投递的不可编辑、显示锁标记 ——
+// 投出去的那份是什么样，事后必须还查得到，那是面试前唯一能复习的东西。
+//
+// 基线没锁定，生成入口一律禁用。这条不开后门：基线会飘的话，
 // 「只生成差异」就没有意义了 —— 每份版本都在跟一个不一样的底稿做差异。
 // =============================================================
 
@@ -13,11 +16,14 @@ import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import {
   ackOverThreshold,
+  duplicateVersion,
   generateVersion,
   type VersionOutcome,
 } from "@/app/(app)/resume/version-actions";
 import { farOffCopy, overThresholdCopy } from "@/lib/resume/delta";
 import type { VersionSummary } from "@/lib/queries/resume";
+
+type Jd = { id: string; company: string; roleTitle: string };
 
 export function VersionSection({
   locked,
@@ -27,21 +33,27 @@ export function VersionSection({
 }: {
   locked: boolean;
   versions: VersionSummary[];
-  jdsWithoutVersion: { id: string; company: string; roleTitle: string }[];
+  jdsWithoutVersion: Jd[];
   hasBaseline: boolean;
 }) {
   const router = useRouter();
   const [outcome, setOutcome] = useState<VersionOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState<string | null>(null);
+  const [picker, setPicker] = useState<null | { mode: "new" } | { mode: "copy"; from: VersionSummary }>(
+    null,
+  );
   const [, start] = useTransition();
 
-  function run(jdId: string) {
+  function run(jdId: string, fromVersionId?: string) {
     setError(null);
     setOutcome(null);
+    setPicker(null);
     setRunning(jdId);
     start(async () => {
-      const r = await generateVersion(jdId);
+      const r = fromVersionId
+        ? await duplicateVersion(fromVersionId, jdId)
+        : await generateVersion(jdId);
       setRunning(null);
       if (!r.ok) {
         setError(r.error);
@@ -52,27 +64,22 @@ export function VersionSection({
     });
   }
 
-  const rows = [
-    ...versions.map((v) => ({
-      jdId: v.jdId,
-      company: v.company,
-      roleTitle: v.roleTitle,
-      version: v as VersionSummary | null,
-    })),
-    ...jdsWithoutVersion.map((j) => ({
-      jdId: j.id,
-      company: j.company,
-      roleTitle: j.roleTitle,
-      version: null as VersionSummary | null,
-    })),
-  ];
+  const canGenerate = hasBaseline && locked && running === null;
 
   return (
     <section className="mt-9">
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="flex items-baseline justify-between gap-4" style={{ maxWidth: 720 }}>
         <h2 className="text-[16px] font-semibold">
           投递版本 <span style={{ color: "var(--mute)" }}>{versions.length} 份</span>
         </h2>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!canGenerate || jdsWithoutVersion.length === 0}
+          onClick={() => setPicker({ mode: "new" })}
+        >
+          ＋ 为新 JD 生成
+        </Button>
       </div>
 
       {!hasBaseline ? (
@@ -83,7 +90,7 @@ export function VersionSection({
         <p className="mt-2 text-[13px]" style={{ color: "var(--warn)" }}>
           先锁定基线 —— 基线会飘的话，每份版本都在跟一个不一样的底稿做差异。
         </p>
-      ) : rows.length === 0 ? (
+      ) : versions.length === 0 && jdsWithoutVersion.length === 0 ? (
         <p className="mt-2 text-[13px]" style={{ color: "var(--mute)" }}>
           这个方向下还没有 JD。
           <Link href="/targets" className="ml-1 underline" style={{ color: "var(--ink)" }}>
@@ -92,44 +99,96 @@ export function VersionSection({
         </p>
       ) : null}
 
-      {rows.length > 0 && (
+      {(versions.length > 0 || jdsWithoutVersion.length > 0) && (
         <div
           className="mt-3 overflow-hidden rounded-card"
           style={{ background: "var(--card)", border: "1px solid var(--line)", maxWidth: 720 }}
         >
-          {rows.map((r, i) => (
+          {versions.map((v, i) => (
             <div
-              key={r.jdId}
+              key={v.id}
+              className="px-4 py-3"
+              style={{
+                borderTop: i === 0 ? undefined : "1px solid var(--line-soft)",
+                opacity: v.locked ? 0.72 : 1,
+              }}
+            >
+              <div className="flex items-baseline gap-3">
+                <p className="min-w-0 flex-1 truncate text-[13.5px] font-medium">
+                  {v.locked && <span aria-label="已锁定">🔒 </span>}
+                  {v.company} · {v.roleTitle}
+                </p>
+                {v.matchScore !== null && (
+                  <span className="text-[12.5px]" style={{ color: "var(--slate)" }}>
+                    匹配 {Math.round(v.matchScore)}
+                  </span>
+                )}
+                <span className="text-[12.5px]" style={{ color: "var(--slate)" }}>
+                  {v.deltaCount} 处调整
+                </span>
+              </div>
+              <div className="mt-1 flex items-center gap-3">
+                <span className="text-[12px]" style={{ color: "var(--mute)" }}>
+                  {when(v.updatedAt)} ·{" "}
+                  {v.submittedAt ? "已投递（已锁定）" : "草稿"}
+                </span>
+                {v.deltaRatio > 0.4 && (
+                  <span className="text-[12px]" style={{ color: "var(--caution)" }}>
+                    ⚠ 改动偏多 {Math.round(v.deltaRatio * 100)}%
+                  </span>
+                )}
+                <span className="ml-auto flex items-center gap-2">
+                  <Link
+                    href={`/resume/${v.id}`}
+                    className="text-[12.5px] hover:underline"
+                    style={{ color: "var(--ink)" }}
+                  >
+                    {v.locked ? "查看" : "继续编辑"}
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={!canGenerate || jdsWithoutVersion.length === 0}
+                    onClick={() => setPicker({ mode: "copy", from: v })}
+                    className="text-[12.5px] hover:underline disabled:opacity-40"
+                    style={{ color: "var(--mute)" }}
+                  >
+                    复制一份
+                  </button>
+                  {!v.locked && (
+                    <button
+                      type="button"
+                      disabled={!canGenerate}
+                      onClick={() => run(v.jdId)}
+                      className="text-[12.5px] hover:underline disabled:opacity-40"
+                      style={{ color: "var(--mute)" }}
+                    >
+                      {running === v.jdId ? "生成中…" : "重新生成"}
+                    </button>
+                  )}
+                </span>
+              </div>
+            </div>
+          ))}
+
+          {jdsWithoutVersion.map((j, i) => (
+            <div
+              key={j.id}
               className="flex items-center gap-3 px-4 py-3"
-              style={{ borderTop: i === 0 ? undefined : "1px solid var(--line-soft)" }}
+              style={{
+                borderTop:
+                  i === 0 && versions.length === 0 ? undefined : "1px solid var(--line-soft)",
+              }}
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13.5px] font-medium">
-                  {r.company} · {r.roleTitle}
-                  {r.version?.locked && (
-                    <span className="ml-2 text-[11.5px]" style={{ color: "var(--mute)" }}>
-                      已投递（已锁定）
-                    </span>
-                  )}
+                  {j.company} · {j.roleTitle}
                 </p>
                 <p className="mt-0.5 text-[12px]" style={{ color: "var(--mute)" }}>
-                  {r.version
-                    ? `${r.version.matchScore !== null ? `匹配 ${Math.round(r.version.matchScore)}　` : ""}${r.version.deltaCount} 处调整　${Math.round(r.version.deltaRatio * 100)}% 的块被改动`
-                    : "还没生成版本"}
-                  {r.version && r.version.deltaRatio > 0.4 && (
-                    <span className="ml-2" style={{ color: "var(--caution)" }}>
-                      ⚠ 改动偏多
-                    </span>
-                  )}
+                  还没生成版本
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!locked || running !== null || !!r.version?.locked}
-                onClick={() => run(r.jdId)}
-              >
-                {running === r.jdId ? "生成中…" : r.version ? "重新生成" : "生成简历"}
+              <Button size="sm" variant="secondary" disabled={!canGenerate} onClick={() => run(j.id)}>
+                {running === j.id ? "生成中…" : "生成简历"}
               </Button>
             </div>
           ))}
@@ -143,17 +202,104 @@ export function VersionSection({
       )}
 
       {outcome && <Outcome outcome={outcome} onClose={() => setOutcome(null)} />}
+
+      {picker && (
+        <JdPicker
+          jds={jdsWithoutVersion}
+          title={picker.mode === "copy" ? `以「${picker.from.company} · ${picker.from.roleTitle}」为起点` : "为哪份 JD 生成？"}
+          hint={
+            picker.mode === "copy"
+              ? "它这一版用过的调整会作为起点再跑一次，适合投同类岗位。"
+              : "新 JD 要先解析要求、评估匹配度，那条链路在求职方向页。"
+          }
+          onPick={(jdId) => run(jdId, picker.mode === "copy" ? picker.from.id : undefined)}
+          onClose={() => setPicker(null)}
+        />
+      )}
     </section>
   );
 }
 
-function Outcome({
-  outcome,
+function when(iso: string | null): string {
+  if (!iso) return "刚刚";
+  const d = new Date(iso);
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return "今天";
+  if (days === 1) return "昨天";
+  if (days < 7) return `${days} 天前`;
+  return d.toLocaleDateString("zh-CN");
+}
+
+function JdPicker({
+  jds,
+  title,
+  hint,
+  onPick,
   onClose,
 }: {
-  outcome: VersionOutcome;
+  jds: Jd[];
+  title: string;
+  hint: string;
+  onPick: (jdId: string) => void;
   onClose: () => void;
 }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-6"
+      style={{ background: "rgba(12,14,20,0.4)" }}
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[460px] rounded-card px-6 py-5"
+        style={{ background: "var(--card)", boxShadow: "var(--shadow-3)" }}
+      >
+        <h2 className="text-[15.5px] font-semibold">{title}</h2>
+        <p className="mt-1 text-[12.5px]" style={{ color: "var(--mute)" }}>
+          {hint}
+        </p>
+        <div className="mt-3 space-y-1.5">
+          {jds.length === 0 ? (
+            <p className="text-[13px]" style={{ color: "var(--mute)" }}>
+              这个方向下每份 JD 都已经有版本了。
+            </p>
+          ) : (
+            jds.map((j) => (
+              <button
+                key={j.id}
+                type="button"
+                onClick={() => onPick(j.id)}
+                className="block w-full rounded-btn px-3 py-2 text-left text-[13px] hover:bg-line-soft"
+                style={{ border: "1px solid var(--line)" }}
+              >
+                {j.company} · {j.roleTitle}
+              </button>
+            ))
+          )}
+        </div>
+        <div className="mt-4 flex items-center gap-3">
+          <Link href="/targets" className="text-[12.5px] hover:underline" style={{ color: "var(--ink)" }}>
+            去贴一份新 JD →
+          </Link>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto text-[12.5px] hover:underline"
+            style={{ color: "var(--mute)" }}
+          >
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Outcome({ outcome, onClose }: { outcome: VersionOutcome; onClose: () => void }) {
   const router = useRouter();
   const [dismissed, setDismissed] = useState(false);
   const [, start] = useTransition();
@@ -168,6 +314,13 @@ function Outcome({
         <p>
           生成了 {outcome.deltaCount} 处调整，动到 {outcome.affected}/{outcome.totalBlocks} 块（
           {Math.round(outcome.deltaRatio * 100)}%）。
+          <Link
+            href={`/resume/${outcome.versionId}`}
+            className="ml-2 underline"
+            style={{ color: "var(--ink)" }}
+          >
+            逐条看看
+          </Link>
         </p>
         {outcome.unmatched.length > 0 && (
           <div className="mt-2">

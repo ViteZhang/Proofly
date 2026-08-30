@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getOverviewStats, getProofSummary } from "@/lib/queries/atoms";
 import { getRiskCards } from "@/lib/queries/risk";
 import { getTaskBoard } from "@/lib/queries/tasks";
+import { listRecentVersions } from "@/lib/queries/resume";
 import { sortTasks } from "@/lib/planning/sort";
 import { ACTION_COPY } from "@/lib/planning/labels";
 import { EmptyLibrary } from "@/components/library/EmptyLibrary";
@@ -19,11 +20,12 @@ const BAR: Record<EvidenceLevel, string> = {
 };
 
 export default async function HomePage() {
-  const [summary, stats, risks, board] = await Promise.all([
+  const [summary, stats, risks, board, recentVersions] = await Promise.all([
     getProofSummary(),
     getOverviewStats(),
     getRiskCards(),
     getTaskBoard(),
+    listRecentVersions(),
   ]);
 
   // S2 区块三「今天做什么」：priority 最高的三条。
@@ -162,6 +164,44 @@ export default async function HomePage() {
                     <span style={{ color: "var(--ai)" }}>服务 {t.targetCount} 个方向</span>
                     <span style={{ color: "var(--slate)" }}>
                       {perTargetLine(t)}
+                    </span>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* 最近投递。三个生成入口之一 —— 从这里进的是已经生成过的版本，
+          点进去就是差异详情，不用先回到方向页再找一遍。 */}
+      {recentVersions.length > 0 && (
+        <section
+          className="mt-4 rounded-card px-5 py-4"
+          style={{ background: "var(--card)", border: "1px solid var(--line)" }}
+        >
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-[14px] font-semibold">最近投递</h2>
+            <Link href="/resume" className="text-[12.5px] hover:underline" style={{ color: "var(--slate)" }}>
+              全部版本 →
+            </Link>
+          </div>
+          <ul className="mt-2.5 space-y-2">
+            {recentVersions.map((v) => (
+              <li key={v.id}>
+                <Link
+                  href={`/resume/${v.id}`}
+                  className="block rounded-btn px-2.5 py-2 transition-colors hover:bg-[var(--line-soft)]"
+                >
+                  <div className="text-[13.5px] font-medium">
+                    {v.submittedAt && <span aria-label="已锁定">🔒 </span>}
+                    {v.company} · {v.roleTitle}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-[12px]">
+                    <span style={{ color: "var(--ai)" }}>{v.targetName}</span>
+                    <span style={{ color: "var(--slate)" }}>{v.deltaCount} 处调整</span>
+                    <span style={{ color: "var(--mute)" }}>
+                      {v.submittedAt ? "已投递" : "草稿"}
                     </span>
                   </div>
                 </Link>
