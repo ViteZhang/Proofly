@@ -992,6 +992,9 @@ export type Database = {
       };
       resume_baselines: {
         Row: {
+          tradeoffs: Json;
+          skills: Json;
+          generated_at: string | null;
           id: string;
           user_id: string;
           target_id: string;
@@ -1006,6 +1009,9 @@ export type Database = {
           id?: string;
           user_id?: string;
           target_id: string;
+          tradeoffs?: Json;
+          skills?: Json;
+          generated_at?: string | null;
           headline?: string | null;
           block_order?: Json;
           rendered_md?: string | null;
@@ -1017,6 +1023,9 @@ export type Database = {
           id?: string;
           user_id?: string;
           target_id?: string;
+          tradeoffs?: Json;
+          skills?: Json;
+          generated_at?: string | null;
           headline?: string | null;
           block_order?: Json;
           rendered_md?: string | null;
@@ -1035,6 +1044,8 @@ export type Database = {
       };
       resume_versions: {
         Row: {
+          unmatched: Json;
+          warnings: Json;
           id: string;
           user_id: string;
           baseline_id: string;
@@ -1054,6 +1065,8 @@ export type Database = {
           user_id?: string;
           baseline_id: string;
           jd_id: string;
+          unmatched?: Json;
+          warnings?: Json;
           deltas?: Json;
           delta_ratio?: number | null;
           over_threshold_ack?: boolean | null;
@@ -1069,6 +1082,8 @@ export type Database = {
           user_id?: string;
           baseline_id?: string;
           jd_id?: string;
+          unmatched?: Json;
+          warnings?: Json;
           deltas?: Json;
           delta_ratio?: number | null;
           over_threshold_ack?: boolean | null;
@@ -1096,6 +1111,13 @@ export type Database = {
       };
       resume_blocks: {
         Row: {
+          title: string | null;
+          meta: string | null;
+          summary: string | null;
+          bullets: Json;
+          must_say_covered: Json;
+          edited: boolean;
+          source_block_id: string | null;
           id: string;
           user_id: string;
           resume_version_id: string | null;
@@ -1111,6 +1133,13 @@ export type Database = {
         Insert: {
           id?: string;
           user_id?: string;
+          title?: string | null;
+          meta?: string | null;
+          summary?: string | null;
+          bullets?: Json;
+          must_say_covered?: Json;
+          edited?: boolean;
+          source_block_id?: string | null;
           resume_version_id?: string | null;
           baseline_id?: string | null;
           atom_id?: string | null;
@@ -1124,6 +1153,13 @@ export type Database = {
         Update: {
           id?: string;
           user_id?: string;
+          title?: string | null;
+          meta?: string | null;
+          summary?: string | null;
+          bullets?: Json;
+          must_say_covered?: Json;
+          edited?: boolean;
+          source_block_id?: string | null;
           resume_version_id?: string | null;
           baseline_id?: string | null;
           atom_id?: string | null;

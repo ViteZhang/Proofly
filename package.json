@@ -20,6 +20,7 @@
     "scoring:probe": "node --import ./scripts/ts-resolve.mjs scripts/scoring-probe.ts",
     "plan:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/plan-probe.ts",
     "planning:probe": "node --import ./scripts/ts-resolve.mjs scripts/planning-probe.ts",
+    "resume:probe": "node --import ./scripts/ts-resolve.mjs scripts/resume-probe.ts",
     "gate:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/resume/gate.test.ts",
     "assess:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/assess-probe.ts"
   },

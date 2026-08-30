@@ -65,6 +65,7 @@ export type GateAtom = {
     toValue: string | null;
     delta: string | null;
     method: string | null;
+    evidenceLevel: EvidenceLevel;
   }[];
   pendingMetricNames: string[];
   periodStart: string | null;

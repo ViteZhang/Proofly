@@ -39,8 +39,8 @@ function atom(over: Partial<GateAtom> = {}): GateAtom {
       "设计了 5 类意图分类体系，响应延迟目标 300ms",
     ],
     metrics: [
-      { name: "设计文档", kind: "output", fromValue: null, toValue: "4 份", delta: null, method: null },
-      { name: "优质作业筛选人效", kind: "outcome", fromValue: null, toValue: null, delta: "+75%", method: "对照组" },
+      { name: "设计文档", kind: "output", fromValue: null, toValue: "4 份", delta: null, method: null, evidenceLevel: "measured" },
+      { name: "优质作业筛选人效", kind: "outcome", fromValue: null, toValue: null, delta: "+75%", method: "对照组", evidenceLevel: "measured" },
     ],
     pendingMetricNames: [],
     periodStart: "2022-02-01",
