@@ -2,10 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { ProofDot } from "@/components/library/ProofDot";
 import { matchAndScore, recallAtoms } from "@/app/(app)/targets/assess-actions";
 import { parseJd } from "@/app/(app)/targets/jd-actions";
+import { countOpenGaps, generatePlan } from "@/app/(app)/actions/plan-actions";
 import { KIND_LABEL } from "@/lib/jd/labels";
 import { GAP_COPY, gapExplain, OTHER_COPY } from "@/lib/scoring/gap-copy";
 import { isStrong } from "@/lib/scoring";
@@ -29,6 +31,9 @@ export function AssessPanel({
   const [step, setStep] = useState<Step>(0);
   const [error, setError] = useState<string | null>(null);
   const [running, start] = useTransition();
+  // 评估完主动问一句要不要生成行动清单 —— 不自动静默生成，
+  // 清单是要人去执行的东西，得让人知道它什么时候变了。
+  const [openGaps, setOpenGaps] = useState<number | null>(null);
 
   // 三步分开调，进度才能真的一步步走完，而不是转一个看不出进展的圈。
   function run() {
@@ -61,6 +66,8 @@ export function AssessPanel({
       }
 
       setStep(0);
+      const c = await countOpenGaps();
+      setOpenGaps(c.ok ? c.data.count : null);
       router.refresh();
     });
   }
@@ -88,6 +95,10 @@ export function AssessPanel({
         </p>
       )}
 
+      {openGaps !== null && openGaps > 0 && (
+        <PlanPrompt count={openGaps} onDone={() => setOpenGaps(0)} />
+      )}
+
       {assessment && (
         <>
           <div className="mt-3 flex flex-wrap items-stretch gap-3">
@@ -96,6 +107,45 @@ export function AssessPanel({
           </div>
           <Comparison results={assessment.results} />
         </>
+      )}
+    </div>
+  );
+}
+
+/** 5.2 触发时机之一：评估完成后问一次。不点就什么都不发生。 */
+function PlanPrompt({ count, onDone }: { count: number; onDone: () => void }) {
+  const router = useRouter();
+  const [busy, start] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+
+  function run() {
+    start(async () => {
+      const r = await generatePlan();
+      if (!r.ok) {
+        setMsg(r.error);
+        return;
+      }
+      onDone();
+      router.push("/actions");
+    });
+  }
+
+  return (
+    <div
+      className="mt-3 flex flex-wrap items-center gap-3 rounded-card px-4 py-3"
+      style={{ background: "var(--ai-soft)", border: "1px solid var(--line)" }}
+    >
+      <span className="text-[13px]">发现 {count} 处缺口，要生成行动清单吗？</span>
+      <Button size="sm" onClick={run} disabled={busy}>
+        {busy ? "生成中…" : "生成行动清单"}
+      </Button>
+      <Link href="/actions" className="text-[12.5px] hover:underline" style={{ color: "var(--slate)" }}>
+        先去看看清单
+      </Link>
+      {msg && (
+        <span className="text-[12.5px]" style={{ color: "var(--danger)" }}>
+          {msg}
+        </span>
       )}
     </div>
   );
