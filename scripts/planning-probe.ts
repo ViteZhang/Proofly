@@ -589,5 +589,94 @@ check(
   pipelineSrc.includes("new Set(ranked.map((a) => a.id))"),
 );
 
+// =============================================================
+console.log("\n验收 29–34 · 连带影响与重评");
+// =============================================================
+
+const { STEP5_KINDS } = await import("../src/lib/ripple/types");
+check(
+  "策略层两个 kind 补齐",
+  STEP5_KINDS.join() === "match_score_change,task_auto_complete",
+);
+
+const rippleListSrc = stripComments(
+  fs2.readFileSync("src/components/notes/RippleList.tsx", "utf8"),
+);
+check(
+  "match_score_change 渲染成「C 端 68 → 79」，不是「某个求职方向」",
+  rippleListSrc.includes("${e.targetName || \"某个求职方向\"} 匹配度"),
+);
+check(
+  "task_auto_complete 有渲染分支",
+  rippleListSrc.includes('case "task_auto_complete"'),
+);
+
+const reassessSrc = stripComments(
+  fs2.readFileSync("src/lib/planning/reassess.ts", "utf8"),
+);
+const reassessActions = stripComments(
+  fs2.readFileSync("src/app/(app)/actions/reassess-actions.ts", "utf8"),
+);
+check(
+  "只重评受影响的评估（results 里命中了本次变更的经历）",
+  reassessSrc.includes("r.matchedAtomIds.some((x) => ids.has(x))"),
+);
+check(
+  "重评挂在 after() 里，不阻塞入库确认",
+  reassessActions.includes("after(async () => {") &&
+    reassessActions.includes("import { after } from \"next/server\";"),
+);
+check(
+  "一份挂了不影响另外几份，也不回滚已入库的数据",
+  /try \{[\s\S]{0,120}reassessOne\(jd\)[\s\S]{0,200}catch/.test(reassessActions) &&
+    !reassessActions.includes("rollback") &&
+    !reassessActions.includes("undoCard"),
+);
+check(
+  "轮询判据是「有没有更新的一次评估」，不是时间戳",
+  reassessActions.includes("latest.id === jd.assessmentId"),
+);
+check(
+  "缺口关闭与自动完成只在全部跑完之后结算一次",
+  /if \(pending === 0\) \{[\s\S]{0,200}closeResolvedGaps/.test(reassessActions),
+);
+check(
+  `缺口关闭门槛用 GAP_RESOLVED_THRESHOLD（${GAP_RESOLVED_THRESHOLD.toFixed(2)}），不是硬编码`,
+  reassessSrc.includes("level >= GAP_RESOLVED_THRESHOLD"),
+);
+check(
+  "resolved_at 与 dismissed_at 分开：补上了 ≠ 不打算补",
+  reassessSrc.includes("resolved_at: new Date().toISOString()") &&
+    reassessSrc.includes('.is("dismissed_at", null)'),
+);
+check(
+  "自动完成不编工时（actual_hours 留空），并标 auto_completed",
+  reassessSrc.includes("actual_hours: null") && reassessSrc.includes("auto_completed: true"),
+);
+check(
+  "没有关联缺口的行动不会被自动完成",
+  reassessSrc.includes("if (mine.length === 0) continue;"),
+);
+
+const noticeSrc = stripComments(
+  fs2.readFileSync("src/components/actions/ReassessNotice.tsx", "utf8"),
+);
+check(
+  "界面说「正在重新评估 N 份 JD…」，不是转圈",
+  noticeSrc.includes("正在重新评估 {pending} 份 JD…"),
+);
+check(
+  "重评失败显示「重新评估失败，可重试」，并说明已入库的不受影响",
+  noticeSrc.includes("重新评估失败，") &&
+    noticeSrc.includes("可重试") &&
+    noticeSrc.includes("已经入库的经历不受影响"),
+);
+check(
+  "随手记入库也会触发重评（不只是任务回流）",
+  stripComments(
+    fs2.readFileSync("src/app/(app)/notes/commit-actions.ts", "utf8"),
+  ).includes("await startReassess([atomId])"),
+);
+
 console.log(`\n${fail === 0 ? "全过" : "有挂"}：${pass} / ${pass + fail}\n`);
 process.exit(fail === 0 ? 0 : 1);

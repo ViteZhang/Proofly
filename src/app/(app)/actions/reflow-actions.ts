@@ -21,6 +21,7 @@ import { fail, ok, type ActionResult } from "@/lib/domain";
 import { runRecord, type TaskContext } from "@/lib/chat/pipeline";
 import { commitCard, type Choice } from "@/app/(app)/notes/commit-actions";
 import type { ChatMessageView } from "@/lib/chat/message-shape";
+import type { ReassessPlan } from "@/app/(app)/actions/reassess-actions";
 
 const uuid = z.uuid();
 const MAX_LEN = 2000;
@@ -92,7 +93,9 @@ export async function commitReflow(
   draftId: string,
   actualHours: number | null,
   choice?: Choice,
-): Promise<ActionResult<{ atomId: string; undoId: string; expiresAt: string }>> {
+): Promise<
+  ActionResult<{ atomId: string; undoId: string; expiresAt: string; reassess: ReassessPlan }>
+> {
   if (!uuid.safeParse(taskId).success) return fail("这条行动不存在");
 
   const res = await commitCard(draftId, choice);
@@ -105,6 +108,8 @@ export async function commitReflow(
     atomId: res.data.atomId,
     undoId: res.data.undoId,
     expiresAt: res.data.expiresAt,
+    // commitCard 已经把重评排上了，这里把计划透出去给面板轮询。
+    reassess: res.data.reassess,
   });
 }
 

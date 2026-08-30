@@ -22,6 +22,8 @@ import {
 import type { Choice } from "@/app/(app)/notes/commit-actions";
 import { confirmCard, type ChatMessageView } from "@/lib/chat/message-shape";
 import type { TaskView } from "@/lib/queries/tasks";
+import { ReassessNotice } from "./ReassessNotice";
+import type { ReassessPlan } from "@/app/(app)/actions/reassess-actions";
 
 type Mode = "describe" | "upload";
 
@@ -38,6 +40,8 @@ export function ReflowPanel({
   const [hours, setHours] = useState("");
   const [cards, setCards] = useState<ChatMessageView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // 入库之后不马上关掉：匹配度变化要等重评跑完，得让人看见它落地。
+  const [plan, setPlan] = useState<ReassessPlan | null>(null);
   const [busy, start] = useTransition();
 
   useEffect(() => {
@@ -74,7 +78,7 @@ export function ReflowPanel({
         setError(r.error);
         return;
       }
-      onClose();
+      setPlan(r.data.reassess);
       router.refresh();
     });
   }
@@ -112,7 +116,22 @@ export function ReflowPanel({
           {task.title}
         </p>
 
-        {cards.length === 0 ? (
+        {plan !== null ? (
+          <div className="mt-4">
+            <p className="text-[13.5px]" style={{ color: "var(--proof)" }}>
+              已入库，这条行动标成完成了。
+            </p>
+            <ReassessNotice plan={plan} />
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-4 text-[12.5px] hover:underline"
+              style={{ color: "var(--mute)" }}
+            >
+              知道了
+            </button>
+          </div>
+        ) : cards.length === 0 ? (
           <>
             <div className="mt-4 flex items-center gap-4 text-[13px]">
               <label className="flex cursor-pointer items-center gap-1.5">

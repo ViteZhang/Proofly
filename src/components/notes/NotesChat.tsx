@@ -41,6 +41,8 @@ import {
 } from "@/app/(app)/notes/commit-actions";
 import { AnswerLinks } from "./AnswerLinks";
 import { UndoToast } from "./UndoToast";
+import { ReassessNotice } from "@/components/actions/ReassessNotice";
+import type { ReassessPlan } from "@/app/(app)/actions/reassess-actions";
 import { AtomPicker, type PickerAtom } from "./AtomPicker";
 import { Composer } from "./Composer";
 
@@ -62,6 +64,7 @@ export function NotesChat({
   const [placeholder, setPlaceholder] = useState(PLACEHOLDER);
   const [picker, setPicker] = useState<PickerAtom[] | null>(null);
   const [undo, setUndo] = useState<{ id: string; text: string; expiresAt: string } | null>(null);
+  const [reassess, setReassess] = useState<ReassessPlan | null>(null);
   const [cardBusy, setCardBusy] = useState<string | null>(null);
   const [older, setOlder] = useState<"idle" | "loading" | "done">(
     initial.length === 0 ? "done" : "idle",
@@ -232,6 +235,9 @@ export function NotesChat({
           ripple: r.data.ripple,
         });
         setUndo({ id: r.data.undoId, text: r.data.toast, expiresAt: r.data.expiresAt });
+        // 5.6：入库立刻返回能算的部分，匹配度变化等重评跑完再推。
+        // 「渗透率 35%」说完匹配度当场变，才是这个产品跟记事本的区别。
+        setReassess(r.data.reassess.jds.length > 0 ? r.data.reassess : null);
       } catch {
         setError("没写进去，网络断了或者请求被掐断了。再点一次确认。");
       } finally {
@@ -340,6 +346,15 @@ export function NotesChat({
           <div ref={bottom} />
         </div>
       </div>
+
+      {reassess !== null && (
+        <div
+          className="fixed bottom-[88px] left-1/2 z-30 -translate-x-1/2 rounded-card px-4 py-2"
+          style={{ background: "var(--card)", boxShadow: "var(--shadow-2)", border: "1px solid var(--line)" }}
+        >
+          <ReassessNotice plan={reassess} />
+        </div>
+      )}
 
       {undo !== null && (
         <UndoToast

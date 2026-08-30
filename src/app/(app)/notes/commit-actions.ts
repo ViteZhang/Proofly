@@ -17,6 +17,7 @@ import { z } from "zod";
 import { obj } from "@/lib/chat/message-shape";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import { computeRipple, readRippleState, type RippleEffect } from "@/lib/ripple";
+import { startReassess, type ReassessPlan } from "@/app/(app)/actions/reassess-actions";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
 
@@ -30,6 +31,12 @@ export type CommitResult = {
   expiresAt: string;
   ripple: RippleEffect[];
   toast: string;
+  /**
+   * 这次变更牵动了哪几份 JD。界面拿它去轮询匹配度变化 ——
+   * 「渗透率 35%」这句话说完，匹配度应该当场跟着动，
+   * 那才是这个产品跟一个记事本的区别。
+   */
+  reassess: ReassessPlan;
 };
 
 export type Choice = { action: "CREATE" | "UPDATE" | "MERGE"; targetAtomId: string | null };
@@ -110,8 +117,12 @@ export async function commitCard(
     ripple: ripple as unknown as Json,
   });
 
+  // 重评异步跑，不阻塞这次返回。失败也不回滚 —— 经历已经在库里了。
+  const reassess = await startReassess([atomId]);
+
   return ok({
     atomId,
+    reassess: reassess.ok ? reassess.data : { jds: [] },
     undoId,
     expiresAt: undoRow?.expires_at ?? new Date(Date.now() + 6000).toISOString(),
     ripple,
