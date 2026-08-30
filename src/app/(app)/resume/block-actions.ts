@@ -20,6 +20,7 @@ import { loadBaselineInput, type ResumeAtom } from "@/lib/queries/resume";
 import { baselineSchema } from "@/lib/resume/schema";
 import { checkBlock, hasBlocking, type GateBlock, type GateResult } from "@/lib/resume/gate";
 import { refreshRenderedMd, rerunGate } from "@/lib/resume/persist";
+import { groupBySection } from "@/lib/resume/markdown";
 import type { Json, RenderWeight } from "@/types/database";
 
 function refresh() {
@@ -63,9 +64,21 @@ export async function reorderBlocks(
   if (!baseline) return fail("这份基线已经不在了");
   if (baseline.locked_at) return fail("基线已锁定，先解锁再调整顺序");
 
+  // 落库前先按 section 归拢：允许把一块拖到另一个 section 中间，
+  // 但存下来的顺序必须是渲染出来的那个顺序，否则「工作经历」这个标题
+  // 会在导出的简历里出现两次。
+  const { data: sections } = await supabase
+    .from("resume_blocks")
+    .select("id,section")
+    .eq("baseline_id", baselineId);
+  const sectionOf = new Map((sections ?? []).map((r) => [r.id, r.section ?? ""]));
+  const ordered = groupBySection(
+    parsed.data.orderedIds.map((id) => ({ id, section: sectionOf.get(id) ?? "" })),
+  ).map((x) => x.id);
+
   // 并发发出去。串行的话七个块就是七个来回，用户会觉得拖一下要卡两秒。
   await Promise.all(
-    parsed.data.orderedIds.map((id, i) =>
+    ordered.map((id, i) =>
       supabase
         .from("resume_blocks")
         .update({ order_index: i, updated_at: new Date().toISOString() })

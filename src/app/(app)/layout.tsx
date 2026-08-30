@@ -27,12 +27,17 @@ export default async function AppLayout({
 
   return (
     <div className="flex min-h-screen" style={{ background: "var(--bg)" }}>
-      <Sidebar email={user?.email ?? ""} todoCount={todoCount} />
+      {/* data-chrome：打印页要把外壳整个藏掉，靠这个标记，不靠猜类名 */}
+      <div data-chrome>
+        <Sidebar email={user?.email ?? ""} todoCount={todoCount} />
+      </div>
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Topbar 读 useSearchParams，包一层 Suspense 免得拖累外层渲染 */}
-        <Suspense fallback={<div style={{ height: 56, borderBottom: "1px solid var(--line)" }} />}>
-          <Topbar blockingCount={blockingCount} targets={targets} />
-        </Suspense>
+        <div data-chrome>
+          <Suspense fallback={<div style={{ height: 56, borderBottom: "1px solid var(--line)" }} />}>
+            <Topbar blockingCount={blockingCount} targets={targets} />
+          </Suspense>
+        </div>
         <main className="min-w-0 flex-1 px-8 py-7">{children}</main>
       </div>
     </div>

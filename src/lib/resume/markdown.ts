@@ -25,6 +25,26 @@ export type ResumeDoc = {
   skills: string[];
 };
 
+/**
+ * 同一个 section 的块排在一起，section 之间按第一次出现的先后。
+ *
+ * 拖拽排序允许把一块拖到另一个 section 中间去，渲染时如果照单全收，
+ * 「工作经历」这个标题就会在一份简历里出现两次 —— ATS 会把它当成
+ * 两段互不相干的经历，而人读起来只觉得排版坏了。
+ */
+export function groupBySection<T extends { section: string }>(blocks: T[]): T[] {
+  const order: string[] = [];
+  const buckets = new Map<string, T[]>();
+  for (const b of blocks) {
+    if (!buckets.has(b.section)) {
+      buckets.set(b.section, []);
+      order.push(b.section);
+    }
+    buckets.get(b.section)!.push(b);
+  }
+  return order.flatMap((s) => buckets.get(s)!);
+}
+
 export function renderMarkdown(doc: ResumeDoc): string {
   const out: string[] = [];
 
@@ -37,7 +57,7 @@ export function renderMarkdown(doc: ResumeDoc): string {
   }
 
   let section = "";
-  for (const b of doc.blocks) {
+  for (const b of groupBySection(doc.blocks)) {
     if (b.section !== section) {
       section = b.section;
       out.push("");

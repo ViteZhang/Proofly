@@ -16,7 +16,7 @@ import {
   type SelectableAtom,
   type SelectableSkill,
 } from "../src/lib/resume/select";
-import { renderMarkdown, exportFilename } from "../src/lib/resume/markdown";
+import { renderMarkdown, exportFilename, groupBySection } from "../src/lib/resume/markdown";
 import {
   applyDeltas,
   deltaRatio,
@@ -240,6 +240,28 @@ console.log("\n【导出渲染】");
   const f = exportFilename("张昭", "C 端 AI 产品经理", "md");
   check("导出文件名是 {姓名}-{岗位}-{日期}.md", /^张昭-C端AI产品经理-\d{8}\.md$/.test(f), f);
   check("文件名里的路径分隔符被清掉", !exportFilename("a/b", "c:d", "pdf").includes("/"));
+}
+
+console.log("\n【section 归拢】");
+{
+  const bs = [
+    { id: "a", section: "工作经历" },
+    { id: "b", section: "个人项目" },
+    { id: "c", section: "工作经历" },
+    { id: "d", section: "教育背景" },
+    { id: "e", section: "个人项目" },
+  ];
+  const g = groupBySection(bs).map((x) => x.id).join("");
+  check("同 section 的块排在一起", g === "acbed", g);
+  check("section 之间按第一次出现的先后", groupBySection(bs)[0].section === "工作经历");
+  check("组内相对顺序不变", g.indexOf("a") < g.indexOf("c") && g.indexOf("b") < g.indexOf("e"));
+
+  const md = renderMarkdown({
+    name: "张三", contact: [], headline: "",
+    blocks: bs.map((x) => ({ section: x.section, title: x.id, meta: "", summary: "", bullets: [] })),
+    skills: [],
+  });
+  check("导出里每个 section 标题只出现一次", (md.match(/^## 工作经历$/gm) ?? []).length === 1);
 }
 
 console.log("\n【未被基线使用的内容】");

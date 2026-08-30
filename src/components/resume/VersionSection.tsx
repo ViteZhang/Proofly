@@ -18,6 +18,7 @@ import {
   ackOverThreshold,
   duplicateVersion,
   generateVersion,
+  submitVersion,
   type VersionOutcome,
 } from "@/app/(app)/resume/version-actions";
 import { farOffCopy, overThresholdCopy } from "@/lib/resume/delta";
@@ -27,11 +28,13 @@ type Jd = { id: string; company: string; roleTitle: string };
 
 export function VersionSection({
   locked,
+  blockingCount,
   versions,
   jdsWithoutVersion,
   hasBaseline,
 }: {
   locked: boolean;
+  blockingCount: number;
   versions: VersionSummary[];
   jdsWithoutVersion: Jd[];
   hasBaseline: boolean;
@@ -43,6 +46,7 @@ export function VersionSection({
   const [picker, setPicker] = useState<null | { mode: "new" } | { mode: "copy"; from: VersionSummary }>(
     null,
   );
+  const [submitting, setSubmitting] = useState<VersionSummary | null>(null);
   const [, start] = useTransition();
 
   function run(jdId: string, fromVersionId?: string) {
@@ -154,6 +158,17 @@ export function VersionSection({
                   >
                     复制一份
                   </button>
+                  <ExportGroup versionId={v.id} blockingCount={blockingCount} />
+                  {!v.locked && (
+                    <button
+                      type="button"
+                      onClick={() => setSubmitting(v)}
+                      className="text-[12.5px] hover:underline"
+                      style={{ color: "var(--mute)" }}
+                    >
+                      标记已投递
+                    </button>
+                  )}
                   {!v.locked && (
                     <button
                       type="button"
@@ -202,6 +217,17 @@ export function VersionSection({
       )}
 
       {outcome && <Outcome outcome={outcome} onClose={() => setOutcome(null)} />}
+
+      {submitting && (
+        <SubmitDialog
+          version={submitting}
+          onClose={() => setSubmitting(null)}
+          onDone={() => {
+            setSubmitting(null);
+            router.refresh();
+          }}
+        />
+      )}
 
       {picker && (
         <JdPicker
@@ -400,5 +426,118 @@ function Outcome({ outcome, onClose }: { outcome: VersionOutcome; onClose: () =>
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * 导出入口。存在 blocking 问题时禁用，换成「⚠ 有 N 处问题必须先解决」。
+ * Step 8 的体检页做出来之前，「去看看」落在临时的问题列表页。
+ */
+function ExportGroup({
+  versionId,
+  blockingCount,
+}: {
+  versionId: string;
+  blockingCount: number;
+}) {
+  if (blockingCount > 0) {
+    return (
+      <span className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "var(--danger)" }}>
+        ⚠ 有 {blockingCount} 处问题必须先解决
+        <Link href="/resume/issues" className="underline" style={{ color: "var(--ink)" }}>
+          去看看
+        </Link>
+      </span>
+    );
+  }
+  return (
+    <>
+      <a
+        href={`/resume/${versionId}/export`}
+        className="text-[12.5px] hover:underline"
+        style={{ color: "var(--mute)" }}
+      >
+        导出 MD
+      </a>
+      <a
+        href={`/resume/${versionId}/print`}
+        target="_blank"
+        rel="noreferrer"
+        className="text-[12.5px] hover:underline"
+        style={{ color: "var(--mute)" }}
+      >
+        导出 PDF
+      </a>
+    </>
+  );
+}
+
+function SubmitDialog({
+  version,
+  onClose,
+  onDone,
+}: {
+  version: VersionSummary;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, start] = useTransition();
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-6"
+      style={{ background: "rgba(12,14,20,0.4)" }}
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="标记已投递"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[460px] rounded-card px-6 py-5"
+        style={{ background: "var(--card)", boxShadow: "var(--shadow-3)" }}
+      >
+        <h2 className="text-[15.5px] font-semibold">
+          标记「{version.company} · {version.roleTitle}」已投递？
+        </h2>
+        <p className="mt-2 text-[13.5px] leading-relaxed" style={{ color: "var(--slate)" }}>
+          这一版会固化成一份副本，从此不再跟着基线变 —— 投出去的那份是什么样，
+          面试前你还要照着复习。固化之后不能再编辑，但「复制一份」仍然可用。
+        </p>
+        {error && (
+          <p className="mt-3 text-[12.5px]" style={{ color: "var(--danger)" }}>
+            {error}
+          </p>
+        )}
+        <div className="mt-5 flex items-center gap-3">
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              start(async () => {
+                const r = await submitVersion(version.id);
+                if (!r.ok) {
+                  setError(r.error);
+                  return;
+                }
+                onDone();
+              })
+            }
+          >
+            {busy ? "固化中…" : "标记已投递"}
+          </Button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[12.5px] hover:underline"
+            style={{ color: "var(--mute)" }}
+          >
+            再想想
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

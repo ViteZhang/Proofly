@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { ProofDot } from "@/components/library/ProofDot";
 import { ProofBar } from "./ProofBar";
+import { groupBySection } from "@/lib/resume/markdown";
 import type { BaselineBlockView } from "@/lib/queries/resume";
 
 export function ResumePaper({
@@ -38,7 +39,9 @@ export function ResumePaper({
   /** 被差异改动过的块 id，详情页用它标出「这一版动过哪几块」。 */
   highlight?: Set<string>;
 }) {
-  const shown = reveal === undefined ? blocks.length : reveal;
+  // 同 section 的块渲染时排在一起，免得「工作经历」这个标题出现两次。
+  const ordered = groupBySection(blocks);
+  const shown = reveal === undefined ? ordered.length : reveal;
 
   return (
     <article
@@ -53,7 +56,7 @@ export function ResumePaper({
       }}
     >
       <ProofBar
-        blocks={blocks.map((b) => ({
+        blocks={ordered.map((b) => ({
           evidenceLevel: b.evidenceLevel,
           weight: 1 + b.bullets.length + (b.summary ? 1 : 0),
         }))}
@@ -61,12 +64,12 @@ export function ResumePaper({
 
       {headline && <p className="mt-5 text-[13.5px] leading-relaxed">{headline}</p>}
 
-      {blocks.slice(0, shown).map((b, i) => (
+      {ordered.slice(0, shown).map((b, i) => (
         <BlockRow
           key={b.id}
           block={b}
           first={i === 0}
-          newSection={i === 0 || blocks[i - 1].section !== b.section}
+          newSection={i === 0 || ordered[i - 1].section !== b.section}
           selected={b.id === selectedId}
           changed={highlight?.has(b.id) ?? false}
           draggable={draggable}
@@ -76,7 +79,7 @@ export function ResumePaper({
         />
       ))}
 
-      {skills.length > 0 && shown >= blocks.length && (
+      {skills.length > 0 && shown >= ordered.length && (
         <section className="mt-7">
           <SectionTitle>技能</SectionTitle>
           <p className="text-[13px] leading-relaxed">{skills.join("、")}</p>

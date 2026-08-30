@@ -1046,6 +1046,7 @@ export type Database = {
         Row: {
           unmatched: Json;
           warnings: Json;
+          headline: string | null;
           id: string;
           user_id: string;
           baseline_id: string;
@@ -1067,6 +1068,7 @@ export type Database = {
           jd_id: string;
           unmatched?: Json;
           warnings?: Json;
+          headline?: string | null;
           deltas?: Json;
           delta_ratio?: number | null;
           over_threshold_ack?: boolean | null;
@@ -1084,6 +1086,7 @@ export type Database = {
           jd_id?: string;
           unmatched?: Json;
           warnings?: Json;
+          headline?: string | null;
           deltas?: Json;
           delta_ratio?: number | null;
           over_threshold_ack?: boolean | null;

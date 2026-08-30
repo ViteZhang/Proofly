@@ -13,6 +13,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { ResumePaper } from "./ResumePaper";
 import { InspectPanel } from "./InspectPanel";
@@ -174,6 +175,36 @@ export function BaselineWorkbench({
             {locked ? "解锁修改" : "锁定基线"}
           </Button>
         )}
+        {blocks.length > 0 &&
+          (baseline && baseline.checks.some((c) => c.level === "blocking") ? (
+            <span className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "var(--danger)" }}>
+              ⚠ 有 {baseline.checks.filter((c) => c.level === "blocking").length} 处问题必须先解决
+              <Link href="/resume/issues" className="underline" style={{ color: "var(--ink)" }}>
+                去看看
+              </Link>
+            </span>
+          ) : (
+            baseline && (
+              <>
+                <a
+                  href={`/resume/${baseline.id}/export`}
+                  className="text-[12.5px] hover:underline"
+                  style={{ color: "var(--mute)" }}
+                >
+                  导出 MD
+                </a>
+                <a
+                  href={`/resume/${baseline.id}/print`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[12.5px] hover:underline"
+                  style={{ color: "var(--mute)" }}
+                >
+                  导出 PDF
+                </a>
+              </>
+            )
+          ))}
         {baseline?.generatedAt && !busy && (
           <span className="text-[12px]" style={{ color: "var(--ghost)" }}>
             {new Date(baseline.generatedAt).toLocaleString("zh-CN")} 生成

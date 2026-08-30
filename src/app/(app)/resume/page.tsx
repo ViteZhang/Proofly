@@ -76,6 +76,7 @@ export default async function ResumePage({
       <VersionSection
         hasBaseline={!!baseline && baseline.blocks.length > 0}
         locked={versions.locked}
+        blockingCount={versions.blockingCount}
         versions={versions.versions}
         jdsWithoutVersion={versions.jdsWithoutVersion}
       />

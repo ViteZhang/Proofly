@@ -481,10 +481,18 @@ export type VersionSummary = {
 export async function listVersions(targetId: string): Promise<{
   baselineId: string | null;
   locked: boolean;
+  /** 这份基线上必须先解决的问题数。> 0 时所有导出入口禁用。 */
+  blockingCount: number;
   versions: VersionSummary[];
   jdsWithoutVersion: { id: string; company: string; roleTitle: string }[];
 }> {
-  const empty = { baselineId: null, locked: false, versions: [], jdsWithoutVersion: [] };
+  const empty = {
+    baselineId: null,
+    locked: false,
+    blockingCount: 0,
+    versions: [],
+    jdsWithoutVersion: [],
+  };
   if (!UUID_RE.test(targetId)) return empty;
   const supabase = await createClient();
 
@@ -511,10 +519,16 @@ export async function listVersions(targetId: string): Promise<{
     };
   }
 
-  const { data: rows } = await supabase
-    .from("resume_versions")
-    .select("id,jd_id,deltas,delta_ratio,over_threshold_ack,submitted_at,locked,updated_at,warnings,unmatched")
-    .eq("baseline_id", baseline.id);
+  const [{ data: rows }, checks] = await Promise.all([
+    supabase
+      .from("resume_versions")
+      .select(
+        "id,jd_id,deltas,delta_ratio,over_threshold_ack,submitted_at,locked,updated_at,warnings,unmatched",
+      )
+      .eq("baseline_id", baseline.id),
+    listResumeChecks({ kind: "baseline", id: baseline.id }),
+  ]);
+  const blockingCount = checks.filter((c) => c.level === "blocking").length;
 
   const jdIds = (jds ?? []).map((j) => j.id);
   const scoreByJd = new Map<string, number>();
@@ -561,6 +575,7 @@ export async function listVersions(targetId: string): Promise<{
   return {
     baselineId: baseline.id,
     locked: !!baseline.locked_at,
+    blockingCount,
     versions,
     jdsWithoutVersion: (jds ?? [])
       .filter((j) => !have.has(j.id))
@@ -622,7 +637,7 @@ export async function getVersion(versionId: string): Promise<VersionDetail | nul
   const { data: v } = await supabase
     .from("resume_versions")
     .select(
-      "id,jd_id,baseline_id,deltas,delta_ratio,over_threshold_ack,submitted_at,locked,warnings,unmatched",
+      "id,jd_id,baseline_id,deltas,delta_ratio,over_threshold_ack,submitted_at,locked,warnings,unmatched,headline",
     )
     .eq("id", versionId)
     .maybeSingle();
@@ -663,10 +678,44 @@ export async function getVersion(versionId: string): Promise<VersionDetail | nul
   );
 
   const byId = new Map(base.blocks.map((b) => [b.id, b]));
-  const blocks: BaselineBlockView[] = applied.blocks.map((b) => {
+  let headline = applied.headline;
+  let blocks: BaselineBlockView[] = applied.blocks.map((b) => {
     const src = byId.get(b.id)!;
     return { ...src, title: b.title, summary: b.summary, bullets: b.bullets, section: b.section };
   });
+
+  // 已投递的版本读自己那份副本，不再跟着基线算 —— 冻结的意义就在这里。
+  if (v.locked) {
+    const { data: frozen } = await supabase
+      .from("resume_blocks")
+      .select(
+        "id,atom_id,section,title,meta,summary,bullets,template_used,edited,order_index,atoms(title,evidence_level)",
+      )
+      .eq("resume_version_id", v.id)
+      .order("order_index", { ascending: true });
+    if (frozen && frozen.length > 0) {
+      headline = v.headline ?? applied.headline;
+      blocks = frozen.map((r) => {
+        const atom = r.atoms as { title: string; evidence_level: EvidenceLevel } | null;
+        const template = (r.template_used ?? "absent") as EvidenceLevel;
+        return {
+          id: r.id,
+          atomId: r.atom_id,
+          atomTitle: atom?.title ?? "（来源经历已删除）",
+          evidenceLevel: atom?.evidence_level ?? template,
+          section: r.section ?? "",
+          title: r.title ?? "",
+          meta: r.meta ?? "",
+          summary: r.summary ?? "",
+          bullets: parseStringList(r.bullets),
+          templateUsed: template,
+          mustSayCovered: [],
+          edited: r.edited,
+          orderIndex: r.order_index ?? 0,
+        };
+      });
+    }
+  }
 
   // bullet_add 的来源定位：模型只给逐字引用，下标是算出来的。
   const input = await loadBaselineInput(baseline.target_id);
@@ -730,7 +779,7 @@ export async function getVersion(versionId: string): Promise<VersionDetail | nul
     warnings: parseStringList(v.warnings),
     unmatched,
     deltas: deltaViews,
-    headline: applied.headline,
+    headline,
     blocks,
     skills: base.skills,
     checks: base.checks,
@@ -823,4 +872,104 @@ export async function getEvolutionSignals(targetId: string): Promise<{
     { blockTitle: (id) => titleById.get(id) ?? "这一块" },
   );
   return { baselineId: baseline.id, signals };
+}
+
+// ---- 导出与打印 ----
+
+export type PrintDoc = {
+  kind: "version" | "baseline";
+  id: string;
+  name: string;
+  contact: string[];
+  headline: string;
+  blocks: BaselineBlockView[];
+  skills: string[];
+  /** 文件名里的岗位：投递版本用 JD 岗位，基线用方向名。 */
+  roleLabel: string;
+  targetId: string;
+  /** 必须先解决的问题数。> 0 时导出入口禁用。 */
+  blockingCount: number;
+};
+
+/**
+ * 打印页与导出共用的一份文档。
+ *
+ * id 可以是投递版本，也可以是基线 —— 两者都要能导出，而它们在
+ * 「一份可以打印的简历」这件事上没有区别。
+ */
+export async function getPrintDoc(id: string): Promise<PrintDoc | null> {
+  if (!UUID_RE.test(id)) return null;
+  const supabase = await createClient();
+
+  const { data: facts } = await supabase.from("profile_facts").select("key,value");
+  const value = (k: string) => {
+    const v = (facts ?? []).find((f) => f.key === k)?.value;
+    return v && v.trim() !== "" ? v.trim() : null;
+  };
+  const contact = ["email", "phone", "location"]
+    .map(value)
+    .filter((s): s is string => !!s);
+
+  const version = await getVersion(id);
+  if (version) {
+    const checks = await listResumeChecks({ kind: "baseline", id: version.id });
+    return {
+      kind: "version",
+      id: version.id,
+      name: value("name") ?? "",
+      contact,
+      headline: version.headline,
+      blocks: version.blocks,
+      skills: version.skills,
+      roleLabel: version.roleTitle,
+      targetId: version.targetId,
+      blockingCount:
+        version.checks.filter((c) => c.level === "blocking").length +
+        checks.filter((c) => c.level === "blocking").length,
+    };
+  }
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id,target_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!baseline) return null;
+  const base = await getBaseline(baseline.target_id);
+  if (!base) return null;
+
+  return {
+    kind: "baseline",
+    id: base.id,
+    name: value("name") ?? "",
+    contact,
+    headline: base.headline,
+    blocks: base.blocks,
+    skills: base.skills,
+    roleLabel: base.targetName,
+    targetId: base.targetId,
+    blockingCount: base.checks.filter((c) => c.level === "blocking").length,
+  };
+}
+
+/** 体检页做出来之前，「去看看」落在这里。 */
+export async function listBlockingIssues(): Promise<
+  { id: string; code: string | null; title: string; detail: string | null; owner: string }[]
+> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("check_results")
+    .select("id,code,title,detail,ref_ids,level")
+    .eq("scope", "resume")
+    .eq("level", "blocking")
+    .is("ignored_at", null)
+    .is("resolved_at", null)
+    .order("created_at", { ascending: true });
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    code: r.code,
+    title: r.title,
+    detail: r.detail,
+    owner: ((r.ref_ids ?? {}) as { owner?: string }).owner ?? "",
+  }));
 }

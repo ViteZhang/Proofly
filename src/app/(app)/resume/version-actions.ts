@@ -35,6 +35,7 @@ import {
 import { refExists, unusedContent, containment, type SourceAtom } from "@/lib/resume/unused";
 import { checkBlock, hasBlocking, type GateAtom, type GateBlock } from "@/lib/resume/gate";
 import { parseResults } from "@/lib/scoring/parse";
+import { renderMarkdown } from "@/lib/resume/markdown";
 import type { EvidenceLevel, Json } from "@/types/database";
 
 function refresh() {
@@ -466,4 +467,98 @@ export async function duplicateVersion(
 ): Promise<ActionResult<VersionOutcome>> {
   if (!z.uuid().safeParse(fromVersionId).success) return fail("源版本不存在");
   return generateVersion(toJdId, fromVersionId);
+}
+
+/**
+ * 标记已投递：内容固化，从此不跟着基线动。
+ *
+ * 投出去的那份是什么样，事后必须还查得到 —— 那是面试前唯一能复习的
+ * 东西。所以这一刻把应用完差异的块写成一份副本（source_block_id 指回
+ * 基线块，溯源还在），之后基线怎么改都不影响它。
+ */
+export async function submitVersion(versionId: string): Promise<ActionResult<null>> {
+  if (!z.uuid().safeParse(versionId).success) return fail("这份版本不存在");
+  const supabase = await createClient();
+
+  const { data: v } = await supabase
+    .from("resume_versions")
+    .select("id,baseline_id,deltas,locked")
+    .eq("id", versionId)
+    .maybeSingle();
+  if (!v) return fail("这份版本已经不在了");
+  if (v.locked) return ok(null);
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id,headline,skills")
+    .eq("id", v.baseline_id)
+    .maybeSingle();
+  if (!baseline) return fail("基线已经不在了");
+
+  const { data: rows } = await supabase
+    .from("resume_blocks")
+    .select("id,atom_id,section,title,meta,summary,bullets,template_used,order_index")
+    .eq("baseline_id", baseline.id)
+    .order("order_index", { ascending: true });
+
+  const blocks: DeltaBlock[] = (rows ?? []).map((r) => ({
+    id: r.id,
+    section: r.section ?? "",
+    title: r.title ?? "",
+    meta: r.meta ?? "",
+    summary: r.summary ?? "",
+    bullets: parseStringList(r.bullets),
+  }));
+  const applied = applyDeltas(blocks, baseline.headline ?? "", parseDeltas(v.deltas));
+
+  const byId = new Map((rows ?? []).map((r) => [r.id, r]));
+  // 重来一次要幂等：先清掉这份版本可能残留的副本。
+  await supabase.from("resume_blocks").delete().eq("resume_version_id", versionId);
+  await supabase.from("resume_blocks").insert(
+    applied.blocks.map((b, i) => {
+      const src = byId.get(b.id);
+      return {
+        resume_version_id: versionId,
+        source_block_id: b.id,
+        atom_id: src?.atom_id ?? null,
+        section: b.section,
+        title: b.title,
+        meta: b.meta,
+        summary: b.summary,
+        bullets: b.bullets as unknown as Json,
+        template_used: src?.template_used ?? null,
+        rendered_text: [b.title, b.meta, b.summary, ...b.bullets].filter(Boolean).join("\n"),
+        order_index: i,
+      };
+    }),
+  );
+
+  const { data: facts } = await supabase.from("profile_facts").select("key,value");
+  const value = (k: string) => {
+    const s = (facts ?? []).find((f) => f.key === k)?.value;
+    return s && s.trim() !== "" ? s.trim() : null;
+  };
+
+  const md = renderMarkdown({
+    name: value("name") ?? "",
+    contact: ["email", "phone", "location"].map(value).filter((s): s is string => !!s),
+    headline: applied.headline,
+    blocks: applied.blocks,
+    skills: parseStringList(baseline.skills),
+  });
+
+  await supabase
+    .from("resume_versions")
+    .update({
+      submitted_at: new Date().toISOString(),
+      locked: true,
+      headline: applied.headline,
+      rendered_md: md,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", versionId);
+
+  refresh();
+  revalidatePath(`/resume/${versionId}`);
+  return ok(null);
 }
