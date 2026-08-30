@@ -29,6 +29,10 @@
   /* 状态 */
   --warn: #ff9500;
   --warn-soft: #fff4e5;
+  /* 缺口四类要红/橙/黄/灰四色，黄这一档原来没有。
+     取深黄而不是亮黄：亮黄在白底上当文字看不清。 */
+  --caution: #8a6d00;
+  --caution-soft: #fbf3d0;
   --danger: #ff4a4a;
   --danger-soft: #ffecec;
 
@@ -73,6 +77,8 @@
 
   --color-warn: var(--warn);
   --color-warn-soft: var(--warn-soft);
+  --color-caution: var(--caution);
+  --color-caution-soft: var(--caution-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
 

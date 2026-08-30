@@ -1,12 +1,41 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { isGlobalPath } from "@/lib/nav";
 
-export function Topbar({ blockingCount }: { blockingCount: number }) {
+export type TargetOption = { id: string; name: string };
+
+const SELECT_CLASS = "h-8 rounded-btn px-2.5 text-[13px]";
+const SELECT_STYLE = {
+  background: "var(--card)",
+  border: "1px solid var(--line)",
+  color: "var(--ink)",
+} as const;
+
+export function Topbar({
+  blockingCount,
+  targets,
+}: {
+  blockingCount: number;
+  targets: TargetOption[];
+}) {
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const global = isGlobalPath(pathname);
+
+  // ?target= 认不出来（换了账号、方向删了）就退回第一个，跟 resolveTarget 同一套规则。
+  const wanted = searchParams.get("target");
+  const current = targets.find((t) => t.id === wanted) ?? targets[0] ?? null;
+
+  function onChange(value: string) {
+    if (value === "__new__") {
+      router.push("/targets?new=1");
+      return;
+    }
+    router.replace(`${pathname}?target=${value}`, { scroll: false });
+  }
 
   return (
     <header
@@ -17,35 +46,32 @@ export function Topbar({ blockingCount }: { blockingCount: number }) {
         borderBottom: "1px solid var(--line)",
       }}
     >
-      {/* 方向选择器：全局页面置灰并显示「全局」 */}
+      {/* 方向选择器：全局页面置灰并显示「全局」。
+          首页 / 经历库 / 导入 / 随手记 / 行动清单 / 体检都是全局视图——
+          经历本身不属于任何方向，只有讲法属于。 */}
       {global ? (
         <select
           disabled
           value="__global__"
           aria-label="求职方向"
-          className="h-8 rounded-btn px-2.5 text-[13px]"
-          style={{
-            opacity: 0.5,
-            background: "var(--card)",
-            border: "1px solid var(--line)",
-            color: "var(--ink)",
-          }}
+          className={SELECT_CLASS}
+          style={{ ...SELECT_STYLE, opacity: 0.5 }}
         >
           <option value="__global__">全局</option>
         </select>
       ) : (
         <select
-          defaultValue="c-ai"
+          value={current?.id ?? "__new__"}
+          onChange={(e) => onChange(e.target.value)}
           aria-label="求职方向"
-          className="h-8 rounded-btn px-2.5 text-[13px] focus:outline-2 focus:outline-offset-2 focus:outline-ink"
-          style={{
-            background: "var(--card)",
-            border: "1px solid var(--line)",
-            color: "var(--ink)",
-          }}
+          className={`${SELECT_CLASS} focus:outline-2 focus:outline-offset-2 focus:outline-ink`}
+          style={SELECT_STYLE}
         >
-          <option value="c-ai">C 端 AI 应用</option>
-          <option value="agent">AI Agent 平台</option>
+          {targets.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
           <option value="__new__">＋ 新建方向</option>
         </select>
       )}

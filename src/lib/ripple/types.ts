@@ -13,13 +13,20 @@ export type RippleEffect =
   | { kind: "global_proof_change"; from: number; to: number }
   | { kind: "pending_resolved"; atomId: string; metricName: string }
   | { kind: "skill_strength_change"; skillId: string; label: string; from: string; to: string }
-  // ↓ Step 5 补充，本步返回空数组即可，不要删掉类型定义
-  | { kind: "match_score_change"; targetId: string; from: number; to: number }
+  // ↓ Step 5 补上。targetName 是 Step 5 方案 5.6 里写明的字段，
+  //   界面要显示「C 端 68 → 79」，只有 id 没法显示。
+  | {
+      kind: "match_score_change";
+      targetId: string;
+      targetName: string;
+      from: number;
+      to: number;
+    }
   | { kind: "task_auto_complete"; taskId: string; title: string };
 
 export type RippleKind = RippleEffect["kind"];
 
-/** Step 5 才会产生的 kind。本步一个都不会出现，列在这里是为了让人一眼看出边界。 */
+/** 策略层的两个 kind。事实层入库那一刻算不出来，要等重评跑完才有。 */
 export const STEP5_KINDS: RippleKind[] = ["match_score_change", "task_auto_complete"];
 
 // ---- 快照 ----

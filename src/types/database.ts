@@ -29,6 +29,7 @@ export type DraftIntent = "CREATE" | "UPDATE" | "ASK";
 export type DraftReviewStatus = "pending" | "accepted" | "edited" | "rejected";
 export type ChatRole = "user" | "assistant" | "system";
 export type ChatKind = "text" | "image" | "confirm_card" | "query_answer" | "clarify";
+export type NudgeRule = "R1" | "R2" | "R3";
 export type LlmTier = "light" | "strong" | "vision" | "embedding";
 export type RenderWeight = "expand" | "brief" | "one_line" | "omit";
 export type RequirementKind = "hard" | "implicit" | "nice_to_have";
@@ -40,6 +41,7 @@ export type TaskActionType =
   | "rewrite_narrative"
   | "learn";
 export type TaskStatus = "todo" | "doing" | "done" | "dropped";
+export type TaskSource = "ai_generated" | "manual";
 export type InterviewKind = "project_probe" | "product_case" | "ai_tech" | "data_case";
 export type CheckScope = "facts" | "skills" | "resume" | "cross_doc";
 export type CheckLevel = "blocking" | "warning" | "pass";
@@ -696,6 +698,10 @@ export type Database = {
           jd_id: string;
           text: string;
           kind: RequirementKind;
+          idx: number | null;
+          raw_phrase: string | null;
+          is_structural: boolean;
+          derived_from: string | null;
           weight: number | null;
           mapped_skill_id: string | null;
           created_at: string | null;
@@ -707,6 +713,10 @@ export type Database = {
           jd_id: string;
           text: string;
           kind?: RequirementKind;
+          idx?: number | null;
+          raw_phrase?: string | null;
+          is_structural?: boolean;
+          derived_from?: string | null;
           weight?: number | null;
           mapped_skill_id?: string | null;
           created_at?: string | null;
@@ -718,6 +728,10 @@ export type Database = {
           jd_id?: string;
           text?: string;
           kind?: RequirementKind;
+          idx?: number | null;
+          raw_phrase?: string | null;
+          is_structural?: boolean;
+          derived_from?: string | null;
           weight?: number | null;
           mapped_skill_id?: string | null;
           created_at?: string | null;
@@ -746,6 +760,7 @@ export type Database = {
           jd_id: string;
           match_score: number | null;
           strengths: Json;
+          results: Json;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -756,6 +771,7 @@ export type Database = {
           jd_id: string;
           match_score?: number | null;
           strengths?: Json;
+          results?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -766,6 +782,7 @@ export type Database = {
           jd_id?: string;
           match_score?: number | null;
           strengths?: Json;
+          results?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -793,7 +810,10 @@ export type Database = {
           gap_type: GapType;
           severity: GapSeverity;
           score_impact: number | null;
+          requirement_index: number | null;
+          detail: Json;
           resolved_at: string | null;
+          dismissed_at: string | null;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -805,7 +825,10 @@ export type Database = {
           gap_type: GapType;
           severity?: GapSeverity;
           score_impact?: number | null;
+          requirement_index?: number | null;
+          detail?: Json;
           resolved_at?: string | null;
+          dismissed_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -817,7 +840,10 @@ export type Database = {
           gap_type?: GapType;
           severity?: GapSeverity;
           score_impact?: number | null;
+          requirement_index?: number | null;
+          detail?: Json;
           resolved_at?: string | null;
+          dismissed_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -849,6 +875,12 @@ export type Database = {
           produces_atom_id: string | null;
           deliverable: string | null;
           pinned: boolean | null;
+          source: TaskSource;
+          anchor_atom_id: string | null;
+          dismissed_at: string | null;
+          completed_at: string | null;
+          edited: boolean;
+          auto_completed: boolean;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -864,6 +896,12 @@ export type Database = {
           produces_atom_id?: string | null;
           deliverable?: string | null;
           pinned?: boolean | null;
+          source?: TaskSource;
+          anchor_atom_id?: string | null;
+          dismissed_at?: string | null;
+          completed_at?: string | null;
+          edited?: boolean;
+          auto_completed?: boolean;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -879,6 +917,12 @@ export type Database = {
           produces_atom_id?: string | null;
           deliverable?: string | null;
           pinned?: boolean | null;
+          source?: TaskSource;
+          anchor_atom_id?: string | null;
+          dismissed_at?: string | null;
+          completed_at?: string | null;
+          edited?: boolean;
+          auto_completed?: boolean;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -899,6 +943,7 @@ export type Database = {
           target_id: string;
           gap_id: string | null;
           impact: number | null;
+          impact_basis: Json;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -909,6 +954,7 @@ export type Database = {
           target_id: string;
           gap_id?: string | null;
           impact?: number | null;
+          impact_basis?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -919,6 +965,7 @@ export type Database = {
           target_id?: string;
           gap_id?: string | null;
           impact?: number | null;
+          impact_basis?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -945,6 +992,9 @@ export type Database = {
       };
       resume_baselines: {
         Row: {
+          tradeoffs: Json;
+          skills: Json;
+          generated_at: string | null;
           id: string;
           user_id: string;
           target_id: string;
@@ -959,6 +1009,9 @@ export type Database = {
           id?: string;
           user_id?: string;
           target_id: string;
+          tradeoffs?: Json;
+          skills?: Json;
+          generated_at?: string | null;
           headline?: string | null;
           block_order?: Json;
           rendered_md?: string | null;
@@ -970,6 +1023,9 @@ export type Database = {
           id?: string;
           user_id?: string;
           target_id?: string;
+          tradeoffs?: Json;
+          skills?: Json;
+          generated_at?: string | null;
           headline?: string | null;
           block_order?: Json;
           rendered_md?: string | null;
@@ -988,6 +1044,9 @@ export type Database = {
       };
       resume_versions: {
         Row: {
+          unmatched: Json;
+          warnings: Json;
+          headline: string | null;
           id: string;
           user_id: string;
           baseline_id: string;
@@ -1007,6 +1066,9 @@ export type Database = {
           user_id?: string;
           baseline_id: string;
           jd_id: string;
+          unmatched?: Json;
+          warnings?: Json;
+          headline?: string | null;
           deltas?: Json;
           delta_ratio?: number | null;
           over_threshold_ack?: boolean | null;
@@ -1022,6 +1084,9 @@ export type Database = {
           user_id?: string;
           baseline_id?: string;
           jd_id?: string;
+          unmatched?: Json;
+          warnings?: Json;
+          headline?: string | null;
           deltas?: Json;
           delta_ratio?: number | null;
           over_threshold_ack?: boolean | null;
@@ -1049,6 +1114,13 @@ export type Database = {
       };
       resume_blocks: {
         Row: {
+          title: string | null;
+          meta: string | null;
+          summary: string | null;
+          bullets: Json;
+          must_say_covered: Json;
+          edited: boolean;
+          source_block_id: string | null;
           id: string;
           user_id: string;
           resume_version_id: string | null;
@@ -1064,6 +1136,13 @@ export type Database = {
         Insert: {
           id?: string;
           user_id?: string;
+          title?: string | null;
+          meta?: string | null;
+          summary?: string | null;
+          bullets?: Json;
+          must_say_covered?: Json;
+          edited?: boolean;
+          source_block_id?: string | null;
           resume_version_id?: string | null;
           baseline_id?: string | null;
           atom_id?: string | null;
@@ -1077,6 +1156,13 @@ export type Database = {
         Update: {
           id?: string;
           user_id?: string;
+          title?: string | null;
+          meta?: string | null;
+          summary?: string | null;
+          bullets?: Json;
+          must_say_covered?: Json;
+          edited?: boolean;
+          source_block_id?: string | null;
           resume_version_id?: string | null;
           baseline_id?: string | null;
           atom_id?: string | null;
@@ -1150,6 +1236,46 @@ export type Database = {
             foreignKeyName: "interview_kits_jd_id_fkey";
             columns: ["jd_id"];
             referencedRelation: "jds";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      baseline_evolution_log: {
+        Row: {
+          id: string;
+          user_id: string;
+          baseline_id: string;
+          signature: string;
+          decision: "accepted" | "rejected";
+          decided_at: string;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          baseline_id: string;
+          signature: string;
+          decision: "accepted" | "rejected";
+          decided_at?: string;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          baseline_id?: string;
+          signature?: string;
+          decision?: "accepted" | "rejected";
+          decided_at?: string;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "baseline_evolution_log_baseline_id_fkey";
+            columns: ["baseline_id"];
+            referencedRelation: "resume_baselines";
             referencedColumns: ["id"];
           },
         ];
@@ -1245,6 +1371,58 @@ export type Database = {
           },
         ];
       };
+      nudge_log: {
+        Row: {
+          id: string;
+          user_id: string;
+          rule: NudgeRule;
+          atom_id: string | null;
+          chat_message_id: string | null;
+          sent_at: string;
+          sent_on: string;
+          responded: boolean;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          rule: NudgeRule;
+          atom_id?: string | null;
+          chat_message_id?: string | null;
+          sent_at?: string;
+          sent_on?: string;
+          responded?: boolean;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          rule?: NudgeRule;
+          atom_id?: string | null;
+          chat_message_id?: string | null;
+          sent_at?: string;
+          sent_on?: string;
+          responded?: boolean;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "nudge_log_atom_id_fkey";
+            columns: ["atom_id"];
+            referencedRelation: "atoms";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "nudge_log_chat_message_id_fkey";
+            columns: ["chat_message_id"];
+            referencedRelation: "chat_messages";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       undo_log: {
         Row: {
           id: string;
@@ -1327,6 +1505,21 @@ export type Database = {
           p_edited?: boolean;
         };
         Returns: string;
+      };
+      commit_chat_draft: {
+        Args: {
+          p_draft_id: string;
+          p_atom: Json;
+          p_intent: string;
+          p_target: string | null;
+          p_parent: string | null;
+          p_chat_message_id: string | null;
+        };
+        Returns: Json;
+      };
+      undo_chat: {
+        Args: { p_undo_id: string };
+        Returns: boolean;
       };
       match_atoms: {
         Args: { query_embedding: string; match_count?: number };

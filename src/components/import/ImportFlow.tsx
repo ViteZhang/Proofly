@@ -9,7 +9,14 @@ import { startJob, type JobProgress } from "@/app/(app)/import/job-actions";
 import type { UploadSummary } from "@/app/(app)/import/actions";
 import { Button } from "@/components/ui/Button";
 
-export function ImportFlow({ resumeJobId }: { resumeJobId: string | null }) {
+export function ImportFlow({
+  resumeJobId,
+  taskId = null,
+}: {
+  resumeJobId: string | null;
+  /** 从行动清单的回流面板过来时带着的行动 id，入库后要标它完成。 */
+  taskId?: string | null;
+}) {
   const router = useRouter();
   const [jobId, setJobId] = useState<string | null>(resumeJobId);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +47,7 @@ export function ImportFlow({ resumeJobId }: { resumeJobId: string | null }) {
         {done && (
           <div className="mt-4 flex items-center gap-2">
             {done.draftCount > 0 ? (
-              <Button onClick={() => router.push(`/import/review/${jobId}`)}>
+              <Button onClick={() => router.push(`/import/review/${jobId}${taskId ? `?task=${taskId}` : ""}`)}>
                 去确认这 {done.draftCount} 条
               </Button>
             ) : (

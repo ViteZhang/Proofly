@@ -129,6 +129,11 @@ export type ConfirmCardView = {
   imagePath: string | null;
   unit: CardUnit | null;
   ripple: RippleEffect[];
+  /** 卡片的处置状态。写在消息里而不是只留在内存里——刷新之后卡还得是这个样子。 */
+  committed: boolean;
+  undone: boolean;
+  rejected: boolean;
+  undoId: string | null;
 };
 
 export function confirmCard(payload: Json): ConfirmCardView | null {
@@ -170,6 +175,10 @@ export function confirmCard(payload: Json): ConfirmCardView | null {
     imagePath: nullableStr(o.image_path),
     unit: cardUnit(o.unit),
     ripple: rippleEffects(o.ripple),
+    committed: o.committed === true,
+    undone: o.undone === true,
+    rejected: o.rejected === true,
+    undoId: nullableStr(o.undo_id),
   };
 }
 
@@ -210,7 +219,13 @@ export function rippleEffects(v: Json | undefined): RippleEffect[] {
         break;
       case "match_score_change":
         if (typeof o.from === "number" && typeof o.to === "number") {
-          out.push({ kind: "match_score_change", targetId: str(o.targetId), from: o.from, to: o.to });
+          out.push({
+            kind: "match_score_change",
+            targetId: str(o.targetId),
+            targetName: str(o.targetName),
+            from: o.from,
+            to: o.to,
+          });
         }
         break;
       case "task_auto_complete":

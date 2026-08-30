@@ -57,9 +57,8 @@ function line(e: RippleEffect, titles: Record<string, string>): string {
     case "skill_strength_change":
       return `技能「${e.label}」的证据强度：${strength(e.from)} → ${strength(e.to)}`;
 
-    // ↓ Step 5 才会有数据。分支现在就留好，那时候只补数据不动结构。
     case "match_score_change":
-      return `与某个求职方向的匹配度：${e.from} → ${e.to}`;
+      return `${e.targetName || "某个求职方向"} 匹配度：${Math.round(e.from)} → ${Math.round(e.to)}`;
 
     case "task_auto_complete":
       return `行动清单里的「${e.title}」自动完成了`;

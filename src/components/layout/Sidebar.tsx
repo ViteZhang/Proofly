@@ -7,7 +7,14 @@ import { NAV_GROUPS } from "@/lib/nav";
 import { LogoWordmark } from "@/components/layout/Logo";
 import { createClient } from "@/lib/supabase/client";
 
-export function Sidebar({ email }: { email: string }) {
+export function Sidebar({
+  email,
+  todoCount = 0,
+}: {
+  email: string;
+  /** 行动清单的待办数。0 时不显示徽标 —— 一个「0」比没有徽标更吵。 */
+  todoCount?: number;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -67,6 +74,14 @@ export function Sidebar({ email }: { email: string }) {
                     />
                   )}
                   {item.label}
+                  {item.href === "/actions" && todoCount > 0 && (
+                    <span
+                      className="ml-auto rounded-pill px-1.5 text-[11px]"
+                      style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}
+                    >
+                      {todoCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}

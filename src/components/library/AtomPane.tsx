@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createAtom } from "@/app/(app)/library/actions";
 import { useSettle } from "@/lib/useSettle";
 import type { AtomDetail as Detail } from "@/lib/queries/atoms";
+import type { AtomStrategyRow } from "@/lib/queries/strategy";
 import { AtomEditForm } from "./AtomEditForm";
 import { AtomReadView } from "./AtomReadView";
 
@@ -13,9 +14,11 @@ import { AtomReadView } from "./AtomReadView";
 export function AtomPane({
   detail,
   projects,
+  strategies,
 }: {
   detail: Detail;
   projects: { id: string; title: string }[];
+  strategies: AtomStrategyRow[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -82,6 +85,7 @@ export function AtomPane({
     <>
       <AtomReadView
         atom={detail}
+        strategies={strategies}
         onEdit={() => setEditing(true)}
         onAddSlice={addSlice}
         addingSlice={adding}

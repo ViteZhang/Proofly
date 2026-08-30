@@ -14,6 +14,7 @@ import { runRecord } from "@/lib/chat/pipeline";
 import { answerQuery, renderQueryAnswer } from "@/lib/chat/query-answer";
 import { formatTurns } from "@/lib/chat/turns";
 import { fail, ok, type ActionResult } from "@/lib/domain";
+import { markNudgeResponded, maybeNudge } from "@/lib/nudge";
 import { loadMessages, signImages } from "@/lib/queries/chat";
 import { createClient } from "@/lib/supabase/server";
 import type { ChatKind, Json } from "@/types/database";
@@ -80,6 +81,19 @@ export async function pollChat(
   });
 }
 
+/**
+ * 进随手记时看看该不该主动问一句（方案 3.7）。
+ *
+ * 放在 Server Action 而不是页面渲染里：它会写库（抢当天名额、落一条消息），
+ * 而渲染可能被重跑 —— 一次刷新问两遍，正是这个功能最不能出的错。
+ */
+export async function checkNudge(): Promise<ActionResult<ChatMessageView | null>> {
+  const m = await maybeNudge();
+  if (m === null) return ok(null);
+  const [signed] = await signImages([m]);
+  return ok(signed);
+}
+
 /** 「更新某个项目」的经历选择器。只要能认出是哪条的最少几个字段。 */
 export async function pickerAtoms(): Promise<
   ActionResult<{ id: string; title: string; org: string; status: string }[]>
@@ -130,6 +144,8 @@ export async function sendMessage(
   if (error || !data) return fail(`没能把这条记下来：${error?.message ?? "未知错误"}`);
 
   const mine = toMessageView(data);
+  // 人开口了，就算回应了刚才那次追问 —— 没回应的追问 7 天内不再用同一规则
+  await markNudgeResponded();
   const replies = await process(mine.id, body, mine.imagePath);
   if (!replies.ok) {
     return ok({ messages: await signImages([mine]), modelError: replies.error });

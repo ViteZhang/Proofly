@@ -1,0 +1,975 @@
+// =============================================================
+// Proofly · 简历读取层
+//
+// 基线生成要的东西比前面任何一步都全：整份经历库 + 这个方向的策略 +
+// 护栏 + 技能 + 基本事实 + 这个方向所有 JD 的要求原文。
+// 一次查完，因为选材是确定性的 —— 中途再补一次查询就有可能拿到
+// 已经变了的数据，生成结果跟「本版取舍」对不上。
+// =============================================================
+
+import { createClient } from "@/lib/supabase/server";
+import { parsePendingMetrics, parseStringList } from "@/lib/domain";
+import { mergeStrategies, type StrategyRow } from "@/lib/targets/strategy";
+import { parseResults } from "@/lib/scoring/parse";
+import { listResumeChecks, type CheckRow } from "@/lib/resume/check-results";
+import { applyDeltas, parseDeltas, type DeltaType } from "@/lib/resume/delta";
+import { locateRef } from "@/lib/resume/unused";
+import { detectSignals, WINDOW, type Signal } from "@/lib/resume/evolution";
+import type { GateAtom, GateFact } from "@/lib/resume/gate";
+import type { SelectableAtom, SelectableSkill, Tradeoff } from "@/lib/resume/select";
+import type {
+  AtomContext,
+  AtomLevel,
+  AtomStatus,
+  EvidenceLevel,
+  Json,
+  RenderWeight,
+} from "@/types/database";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 门禁要的字段 + 选材要的字段 + 喂模型要的字段，一条经历一份。 */
+export type ResumeAtom = GateAtom & {
+  level: AtomLevel;
+  context: AtomContext;
+  status: AtomStatus;
+  parentId: string | null;
+  renderWeight: RenderWeight;
+  exclusiveGroup: string | null;
+  sortOrder: number;
+  skills: string[];
+};
+
+export type BaselineInput = {
+  target: { id: string; name: string; narrative: string };
+  /** 项目级经历，能力点已并进各自的父经历。未做互斥消解。 */
+  atoms: ResumeAtom[];
+  skills: SelectableSkill[];
+  facts: GateFact[];
+  /** 这个方向下所有 JD 的要求原文，用于关键词对齐与技能排序。 */
+  rawPhrases: string[];
+};
+
+export function toSelectable(a: ResumeAtom): SelectableAtom {
+  return {
+    id: a.id,
+    title: a.title,
+    evidenceLevel: a.evidenceLevel,
+    periodStart: a.periodStart,
+    periodEnd: a.periodEnd,
+    renderWeight: a.renderWeight,
+    exclusiveGroup: a.exclusiveGroup,
+    sortOrder: a.sortOrder,
+  };
+}
+
+export async function loadBaselineInput(targetId: string): Promise<BaselineInput | null> {
+  if (!UUID_RE.test(targetId)) return null;
+  const supabase = await createClient();
+
+  const { data: target } = await supabase
+    .from("targets")
+    .select("id,name,narrative")
+    .eq("id", targetId)
+    .maybeSingle();
+  if (!target) return null;
+
+  const [atomRes, strategyRes, metricRes, guardRes, skillRes, linkRes, factRes, jdRes] =
+    await Promise.all([
+      supabase
+        .from("atoms")
+        .select(
+          "id,parent_id,level,context,org,role,title,period_start,period_end,status,evidence_level,situation,task,actions,pending_metrics,sort_order",
+        )
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("atom_target_strategy")
+        .select("atom_id,target_id,render_weight,exclusive_group")
+        .eq("target_id", targetId),
+      supabase
+        .from("metrics")
+        .select("atom_id,name,kind,from_value,to_value,delta,method,evidence_level"),
+      supabase.from("guards").select("atom_id,must_say,never_say,role_framing"),
+      supabase.from("skills").select("id,label,category,evidence_strength"),
+      supabase.from("atom_skills").select("atom_id,skills(label)"),
+      supabase.from("profile_facts").select("key,value,status"),
+      supabase.from("jds").select("id").eq("target_id", targetId),
+    ]);
+
+  const rows = atomRes.data ?? [];
+  const strategies = mergeStrategies(
+    rows.map((a) => a.id),
+    [targetId],
+    (strategyRes.data ?? []) as StrategyRow[],
+  );
+  const strategyByAtom = new Map(strategies.map((s) => [s.atomId, s]));
+
+  const metricsByAtom = new Map<string, ResumeAtom["metrics"]>();
+  for (const m of metricRes.data ?? []) {
+    const list = metricsByAtom.get(m.atom_id) ?? [];
+    list.push({
+      name: m.name,
+      kind: m.kind,
+      fromValue: m.from_value,
+      toValue: m.to_value,
+      delta: m.delta,
+      method: m.method,
+      evidenceLevel: m.evidence_level,
+    });
+    metricsByAtom.set(m.atom_id, list);
+  }
+
+  const guardByAtom = new Map((guardRes.data ?? []).map((g) => [g.atom_id, g]));
+
+  const skillsByAtom = new Map<string, string[]>();
+  for (const l of linkRes.data ?? []) {
+    const label = (l.skills as { label: string } | null)?.label;
+    if (!label) continue;
+    const list = skillsByAtom.get(l.atom_id) ?? [];
+    list.push(label);
+    skillsByAtom.set(l.atom_id, list);
+  }
+
+  const jdIds = (jdRes.data ?? []).map((j) => j.id);
+  let rawPhrases: string[] = [];
+  if (jdIds.length > 0) {
+    const { data: reqs } = await supabase
+      .from("requirements")
+      .select("raw_phrase,text")
+      .in("jd_id", jdIds);
+    rawPhrases = [
+      ...new Set(
+        (reqs ?? [])
+          .map((r) => (r.raw_phrase ?? r.text ?? "").trim())
+          .filter((s) => s !== ""),
+      ),
+    ];
+  }
+
+  const build = (a: (typeof rows)[number]): ResumeAtom => {
+    const s = strategyByAtom.get(a.id);
+    const g = guardByAtom.get(a.id);
+    return {
+      id: a.id,
+      title: a.title,
+      evidenceLevel: a.evidence_level,
+      org: a.org,
+      role: a.role,
+      situation: a.situation,
+      task: a.task,
+      actions: parseStringList(a.actions),
+      metrics: metricsByAtom.get(a.id) ?? [],
+      pendingMetricNames: parsePendingMetrics(a.pending_metrics).map((m) => m.name),
+      periodStart: a.period_start,
+      periodEnd: a.period_end,
+      mustSay: parseStringList(g?.must_say),
+      neverSay: parseStringList(g?.never_say),
+      roleFraming: g?.role_framing ?? null,
+      level: a.level,
+      context: a.context,
+      status: a.status,
+      parentId: a.parent_id,
+      renderWeight: s?.renderWeight ?? "brief",
+      exclusiveGroup: s?.exclusiveGroup ?? null,
+      sortOrder: a.sort_order ?? 0,
+      skills: skillsByAtom.get(a.id) ?? [],
+    };
+  };
+
+  const all = rows.map(build);
+  const byId = new Map(all.map((a) => [a.id, a]));
+
+  // 一个块 = 一条项目级经历。能力点是项目的细节，并进父经历的
+  // actions 与 metrics 里 —— 它们单独成块的话，简历上会出现一段
+  // 没有上下文的能力描述，读的人不知道那是在哪做的。
+  //
+  // 能力点自己被设成「省略」的，连内容一起不并 —— 那是用户明确说过
+  // 这个方向下不要提它。
+  const projects = all.filter((a) => a.parentId === null);
+  for (const a of all) {
+    if (a.parentId === null) continue;
+    if (a.renderWeight === "omit") continue;
+    const parent = byId.get(a.parentId);
+    if (!parent) continue;
+    parent.actions.push(...a.actions.map((x) => `［${a.title}］${x}`));
+    parent.metrics.push(...a.metrics);
+    parent.mustSay.push(...a.mustSay);
+    parent.neverSay.push(...a.neverSay);
+    parent.skills.push(...a.skills);
+  }
+
+  return {
+    target: { id: target.id, name: target.name, narrative: target.narrative ?? "" },
+    atoms: projects,
+    skills: (skillRes.data ?? []).map((s) => ({
+      id: s.id,
+      label: s.label,
+      strength: s.evidence_strength,
+      category: s.category,
+    })),
+    facts: (factRes.data ?? []).map((f) => ({
+      key: f.key,
+      value: f.value,
+      status: f.status,
+    })),
+    rawPhrases,
+  };
+}
+
+// ---- 基线读取 ----
+
+
+export type BaselineBlockView = {
+  id: string;
+  atomId: string | null;
+  atomTitle: string;
+  /** 来源经历的证明度。块上的 ProofDot 继承它。 */
+  evidenceLevel: EvidenceLevel;
+  section: string;
+  title: string;
+  meta: string;
+  summary: string;
+  bullets: string[];
+  templateUsed: EvidenceLevel;
+  mustSayCovered: string[];
+  edited: boolean;
+  orderIndex: number;
+};
+
+export type BaselineView = {
+  id: string;
+  targetId: string;
+  targetName: string;
+  headline: string;
+  lockedAt: string | null;
+  generatedAt: string | null;
+  blocks: BaselineBlockView[];
+  tradeoffs: Tradeoff[];
+  skills: string[];
+  checks: CheckRow[];
+  /** 「为啥选它」：每条经历命中了这个方向下哪几条 JD 要求。 */
+  why: Record<string, string[]>;
+  /** 未投递的草稿版本数。解锁时要提示「它们的差异会重新计算」。 */
+  draftCount: number;
+  versionCount: number;
+};
+
+export type BaselineSummary = {
+  targetId: string;
+  targetName: string;
+  baselineId: string | null;
+  lockedAt: string | null;
+  blockCount: number;
+  versionCount: number;
+  blockingCount: number;
+};
+
+function parseTradeoffs(v: Json | null): Tradeoff[] {
+  if (!Array.isArray(v)) return [];
+  const out: Tradeoff[] = [];
+  for (const raw of v) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const o = raw as Record<string, Json | undefined>;
+    const kind = o.kind;
+    if (kind !== "omit" && kind !== "exclusive" && kind !== "skill") continue;
+    out.push({
+      kind,
+      atomId: typeof o.atomId === "string" ? o.atomId : null,
+      title: typeof o.title === "string" ? o.title : "",
+      detail: typeof o.detail === "string" ? o.detail : "",
+    });
+  }
+  return out;
+}
+
+/** 每个方向一行：有没有基线、锁没锁、几个块、几份投递版本、几处必须先解决的问题。 */
+export async function listBaselines(): Promise<BaselineSummary[]> {
+  const supabase = await createClient();
+
+  const [{ data: targets }, { data: baselines }] = await Promise.all([
+    supabase
+      .from("targets")
+      .select("id,name,sort_order,created_at")
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    supabase.from("resume_baselines").select("id,target_id,locked_at"),
+  ]);
+  if (!targets || targets.length === 0) return [];
+
+  const ids = (baselines ?? []).map((b) => b.id);
+  const [{ data: blocks }, { data: versions }, { data: checks }] = await Promise.all([
+    ids.length
+      ? supabase.from("resume_blocks").select("baseline_id").in("baseline_id", ids)
+      : Promise.resolve({ data: [] as { baseline_id: string | null }[] }),
+    ids.length
+      ? supabase.from("resume_versions").select("baseline_id").in("baseline_id", ids)
+      : Promise.resolve({ data: [] as { baseline_id: string }[] }),
+    supabase
+      .from("check_results")
+      .select("level,ref_ids")
+      .eq("scope", "resume")
+      .eq("level", "blocking")
+      .is("ignored_at", null)
+      .is("resolved_at", null),
+  ]);
+
+  const byTarget = new Map((baselines ?? []).map((b) => [b.target_id, b]));
+  const blockCount = new Map<string, number>();
+  for (const b of blocks ?? []) {
+    if (!b.baseline_id) continue;
+    blockCount.set(b.baseline_id, (blockCount.get(b.baseline_id) ?? 0) + 1);
+  }
+  const versionCount = new Map<string, number>();
+  for (const v of versions ?? []) {
+    versionCount.set(v.baseline_id, (versionCount.get(v.baseline_id) ?? 0) + 1);
+  }
+  const blockingCount = new Map<string, number>();
+  for (const c of checks ?? []) {
+    const owner = (c.ref_ids as { owner?: string } | null)?.owner;
+    if (typeof owner !== "string") continue;
+    blockingCount.set(owner, (blockingCount.get(owner) ?? 0) + 1);
+  }
+
+  return targets.map((t) => {
+    const b = byTarget.get(t.id);
+    return {
+      targetId: t.id,
+      targetName: t.name,
+      baselineId: b?.id ?? null,
+      lockedAt: b?.locked_at ?? null,
+      blockCount: b ? blockCount.get(b.id) ?? 0 : 0,
+      versionCount: b ? versionCount.get(b.id) ?? 0 : 0,
+      blockingCount: b ? blockingCount.get(`baseline:${b.id}`) ?? 0 : 0,
+    };
+  });
+}
+
+export async function getBaseline(targetId: string): Promise<BaselineView | null> {
+  if (!UUID_RE.test(targetId)) return null;
+  const supabase = await createClient();
+
+  const { data: target } = await supabase
+    .from("targets")
+    .select("id,name")
+    .eq("id", targetId)
+    .maybeSingle();
+  if (!target) return null;
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id,headline,locked_at,generated_at,tradeoffs,skills,block_order")
+    .eq("target_id", targetId)
+    .maybeSingle();
+  if (!baseline) return null;
+
+  const [{ data: rows }, { data: versions }, checks, why] = await Promise.all([
+    supabase
+      .from("resume_blocks")
+      .select(
+        "id,atom_id,section,title,meta,summary,bullets,template_used,must_say_covered,edited,order_index,atoms(title,evidence_level)",
+      )
+      .eq("baseline_id", baseline.id)
+      .order("order_index", { ascending: true }),
+    supabase.from("resume_versions").select("id,submitted_at").eq("baseline_id", baseline.id),
+    listResumeChecks({ kind: "baseline", id: baseline.id }),
+    whySelected(targetId),
+  ]);
+
+  const blocks: BaselineBlockView[] = (rows ?? []).map((r) => {
+    const atom = r.atoms as { title: string; evidence_level: EvidenceLevel } | null;
+    const template = (r.template_used ?? "absent") as EvidenceLevel;
+    return {
+      id: r.id,
+      atomId: r.atom_id,
+      atomTitle: atom?.title ?? "（来源经历已删除）",
+      evidenceLevel: atom?.evidence_level ?? template,
+      section: r.section ?? "",
+      title: r.title ?? "",
+      meta: r.meta ?? "",
+      summary: r.summary ?? "",
+      bullets: parseStringList(r.bullets),
+      templateUsed: template,
+      mustSayCovered: parseStringList(r.must_say_covered),
+      edited: r.edited,
+      orderIndex: r.order_index ?? 0,
+    };
+  });
+
+  return {
+    id: baseline.id,
+    targetId: target.id,
+    targetName: target.name,
+    headline: baseline.headline ?? "",
+    lockedAt: baseline.locked_at,
+    generatedAt: baseline.generated_at,
+    blocks,
+    tradeoffs: parseTradeoffs(baseline.tradeoffs),
+    skills: parseStringList(baseline.skills),
+    checks,
+    why,
+    draftCount: (versions ?? []).filter((v) => !v.submitted_at).length,
+    versionCount: (versions ?? []).length,
+  };
+}
+
+/**
+ * 每条经历命中了这个方向下哪几条 JD 要求。
+ *
+ * 只看每份 JD 最新那次评估 —— 历史评估是快照，拿旧快照说「命中第 2 条」，
+ * 而那条要求早就被编辑过了，说出来的话是错的。
+ */
+async function whySelected(targetId: string): Promise<Record<string, string[]>> {
+  const supabase = await createClient();
+
+  const { data: jds } = await supabase
+    .from("jds")
+    .select("id,company,role_title")
+    .eq("target_id", targetId);
+  if (!jds || jds.length === 0) return {};
+
+  const { data: rows } = await supabase
+    .from("assessments")
+    .select("id,jd_id,results,created_at")
+    .in("jd_id", jds.map((j) => j.id))
+    // created_at 是事务时间，同一事务插的多条会撞，补 id 兜底。
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+  if (!rows || rows.length === 0) return {};
+
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) if (!latest.has(r.jd_id)) latest.set(r.jd_id, r);
+
+  const label = new Map(
+    jds.map((j) => [j.id, [j.company, j.role_title].filter(Boolean).join(" · ") || "这份 JD"]),
+  );
+
+  const out: Record<string, string[]> = {};
+  for (const a of latest.values()) {
+    for (const r of parseResults(a.results as Json)) {
+      const phrase = (r.rawPhrase ?? r.text ?? "").trim();
+      for (const id of r.matchedAtomIds) {
+        const line = `命中「${label.get(a.jd_id)}」第 ${r.requirementIndex + 1} 条「${phrase.slice(0, 28)}」`;
+        (out[id] ??= []).push(line);
+      }
+    }
+  }
+  for (const k of Object.keys(out)) out[k] = [...new Set(out[k])].slice(0, 4);
+  return out;
+}
+
+// ---- 投递版本 ----
+
+export type VersionSummary = {
+  id: string;
+  jdId: string;
+  company: string;
+  roleTitle: string;
+  /** 这份 JD 最新一次评估的匹配度。没评估过是 null。 */
+  matchScore: number | null;
+  deltaCount: number;
+  deltaRatio: number;
+  overThresholdAck: boolean;
+  submittedAt: string | null;
+  locked: boolean;
+  updatedAt: string | null;
+  warnings: string[];
+  unmatchedCount: number;
+};
+
+/** 这个方向下每份 JD 一行：有没有版本、几处调整、投没投。 */
+export async function listVersions(targetId: string): Promise<{
+  baselineId: string | null;
+  locked: boolean;
+  /** 这份基线上必须先解决的问题数。> 0 时所有导出入口禁用。 */
+  blockingCount: number;
+  versions: VersionSummary[];
+  jdsWithoutVersion: { id: string; company: string; roleTitle: string }[];
+}> {
+  const empty = {
+    baselineId: null,
+    locked: false,
+    blockingCount: 0,
+    versions: [],
+    jdsWithoutVersion: [],
+  };
+  if (!UUID_RE.test(targetId)) return empty;
+  const supabase = await createClient();
+
+  const [{ data: baseline }, { data: jds }] = await Promise.all([
+    supabase
+      .from("resume_baselines")
+      .select("id,locked_at")
+      .eq("target_id", targetId)
+      .maybeSingle(),
+    supabase
+      .from("jds")
+      .select("id,company,role_title,created_at")
+      .eq("target_id", targetId)
+      .order("created_at", { ascending: false }),
+  ]);
+  if (!baseline) {
+    return {
+      ...empty,
+      jdsWithoutVersion: (jds ?? []).map((j) => ({
+        id: j.id,
+        company: j.company ?? "未填公司",
+        roleTitle: j.role_title ?? "未填岗位",
+      })),
+    };
+  }
+
+  const [{ data: rows }, checks] = await Promise.all([
+    supabase
+      .from("resume_versions")
+      .select(
+        "id,jd_id,deltas,delta_ratio,over_threshold_ack,submitted_at,locked,updated_at,warnings,unmatched",
+      )
+      .eq("baseline_id", baseline.id),
+    listResumeChecks({ kind: "baseline", id: baseline.id }),
+  ]);
+  const blockingCount = checks.filter((c) => c.level === "blocking").length;
+
+  const jdIds = (jds ?? []).map((j) => j.id);
+  const scoreByJd = new Map<string, number>();
+  if (jdIds.length > 0) {
+    const { data: assessments } = await supabase
+      .from("assessments")
+      .select("jd_id,match_score,created_at,id")
+      .in("jd_id", jdIds)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
+    for (const a of assessments ?? []) {
+      if (!scoreByJd.has(a.jd_id)) scoreByJd.set(a.jd_id, a.match_score ?? 0);
+    }
+  }
+
+  const jdById = new Map((jds ?? []).map((j) => [j.id, j]));
+  const versions: VersionSummary[] = (rows ?? []).map((v) => {
+    const jd = jdById.get(v.jd_id);
+    const deltas = parseDeltas(v.deltas);
+    return {
+      id: v.id,
+      jdId: v.jd_id,
+      company: jd?.company ?? "未填公司",
+      roleTitle: jd?.role_title ?? "未填岗位",
+      matchScore: scoreByJd.get(v.jd_id) ?? null,
+      deltaCount: deltas.filter((d) => d.accepted).length,
+      deltaRatio: Number(v.delta_ratio ?? 0),
+      overThresholdAck: !!v.over_threshold_ack,
+      submittedAt: v.submitted_at,
+      locked: !!v.locked,
+      updatedAt: v.updated_at,
+      warnings: parseStringList(v.warnings),
+      unmatchedCount: Array.isArray(v.unmatched) ? v.unmatched.length : 0,
+    };
+  });
+
+  // 草稿在前，已投递在后；同组按更新时间倒序。
+  versions.sort((a, b) => {
+    if (!!a.submittedAt !== !!b.submittedAt) return a.submittedAt ? 1 : -1;
+    return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+  });
+
+  const have = new Set(versions.map((v) => v.jdId));
+  return {
+    baselineId: baseline.id,
+    locked: !!baseline.locked_at,
+    blockingCount,
+    versions,
+    jdsWithoutVersion: (jds ?? [])
+      .filter((j) => !have.has(j.id))
+      .map((j) => ({
+        id: j.id,
+        company: j.company ?? "未填公司",
+        roleTitle: j.role_title ?? "未填岗位",
+      })),
+  };
+}
+
+// ---- 投递版本详情 ----
+
+export type DeltaView = {
+  id: string;
+  type: DeltaType;
+  targetBlockId: string;
+  blockTitle: string;
+  before: string;
+  after: string;
+  reason: string;
+  accepted: boolean;
+  manual: boolean;
+  /** 仅 bullet_add：来自哪条经历的哪一项。 */
+  sourceTitle: string | null;
+  sourceRef: string;
+  sourceWhere: string | null;
+};
+
+export type VersionDetail = {
+  id: string;
+  jdId: string;
+  company: string;
+  roleTitle: string;
+  targetId: string;
+  targetName: string;
+  matchScore: number | null;
+  deltaRatio: number;
+  affected: number;
+  totalBlocks: number;
+  overThresholdAck: boolean;
+  submittedAt: string | null;
+  locked: boolean;
+  warnings: string[];
+  unmatched: { requirementIndex: number; note: string }[];
+  deltas: DeltaView[];
+  /** 应用已接受的差异之后的完整简历。 */
+  headline: string;
+  blocks: BaselineBlockView[];
+  skills: string[];
+  checks: CheckRow[];
+  why: Record<string, string[]>;
+};
+
+export async function getVersion(versionId: string): Promise<VersionDetail | null> {
+  if (!UUID_RE.test(versionId)) return null;
+  const supabase = await createClient();
+
+  const { data: v } = await supabase
+    .from("resume_versions")
+    .select(
+      "id,jd_id,baseline_id,deltas,delta_ratio,over_threshold_ack,submitted_at,locked,warnings,unmatched,headline",
+    )
+    .eq("id", versionId)
+    .maybeSingle();
+  if (!v) return null;
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id,target_id,headline,skills")
+    .eq("id", v.baseline_id)
+    .maybeSingle();
+  if (!baseline) return null;
+
+  const [base, { data: jd }, { data: assessments }] = await Promise.all([
+    getBaseline(baseline.target_id),
+    supabase.from("jds").select("id,company,role_title").eq("id", v.jd_id).maybeSingle(),
+    supabase
+      .from("assessments")
+      .select("match_score,created_at,id")
+      .eq("jd_id", v.jd_id)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1),
+  ]);
+  if (!base) return null;
+
+  const deltas = parseDeltas(v.deltas);
+  const applied = applyDeltas(
+    base.blocks.map((b) => ({
+      id: b.id,
+      section: b.section,
+      title: b.title,
+      meta: b.meta,
+      summary: b.summary,
+      bullets: b.bullets,
+    })),
+    base.headline,
+    deltas,
+  );
+
+  const byId = new Map(base.blocks.map((b) => [b.id, b]));
+  let headline = applied.headline;
+  let blocks: BaselineBlockView[] = applied.blocks.map((b) => {
+    const src = byId.get(b.id)!;
+    return { ...src, title: b.title, summary: b.summary, bullets: b.bullets, section: b.section };
+  });
+
+  // 已投递的版本读自己那份副本，不再跟着基线算 —— 冻结的意义就在这里。
+  if (v.locked) {
+    const { data: frozen } = await supabase
+      .from("resume_blocks")
+      .select(
+        "id,atom_id,section,title,meta,summary,bullets,template_used,edited,order_index,atoms(title,evidence_level)",
+      )
+      .eq("resume_version_id", v.id)
+      .order("order_index", { ascending: true });
+    if (frozen && frozen.length > 0) {
+      headline = v.headline ?? applied.headline;
+      blocks = frozen.map((r) => {
+        const atom = r.atoms as { title: string; evidence_level: EvidenceLevel } | null;
+        const template = (r.template_used ?? "absent") as EvidenceLevel;
+        return {
+          id: r.id,
+          atomId: r.atom_id,
+          atomTitle: atom?.title ?? "（来源经历已删除）",
+          evidenceLevel: atom?.evidence_level ?? template,
+          section: r.section ?? "",
+          title: r.title ?? "",
+          meta: r.meta ?? "",
+          summary: r.summary ?? "",
+          bullets: parseStringList(r.bullets),
+          templateUsed: template,
+          mustSayCovered: [],
+          edited: r.edited,
+          orderIndex: r.order_index ?? 0,
+        };
+      });
+    }
+  }
+
+  // bullet_add 的来源定位：模型只给逐字引用，下标是算出来的。
+  const input = await loadBaselineInput(baseline.target_id);
+  const sources = new Map(
+    (input?.atoms ?? []).map((a) => [
+      a.id,
+      {
+        id: a.id,
+        title: a.title,
+        evidenceLevel: a.evidenceLevel,
+        actions: a.actions,
+        metrics: a.metrics.map((m) => ({
+          name: m.name,
+          kind: m.kind,
+          value: [m.fromValue, m.toValue, m.delta].filter(Boolean).join(" "),
+          evidenceLevel: m.evidenceLevel,
+        })),
+      },
+    ]),
+  );
+
+  const deltaViews: DeltaView[] = deltas.map((d) => {
+    const atom = d.sourceAtomId ? sources.get(d.sourceAtomId) ?? null : null;
+    return {
+      id: d.id,
+      type: d.type,
+      targetBlockId: d.targetBlockId,
+      blockTitle: byId.get(d.targetBlockId)?.title ?? "个人定位段",
+      before: d.before,
+      after: d.after,
+      reason: d.reason,
+      accepted: d.accepted,
+      manual: d.manual === true,
+      sourceTitle: atom?.title ?? null,
+      sourceRef: d.sourceRef,
+      sourceWhere: atom && d.sourceRef ? locateRef(d.sourceRef, atom) : null,
+    };
+  });
+
+  const unmatched = Array.isArray(v.unmatched)
+    ? (v.unmatched as { requirement_index?: number; note?: string }[]).map((u) => ({
+        requirementIndex: typeof u.requirement_index === "number" ? u.requirement_index : 0,
+        note: typeof u.note === "string" ? u.note : "",
+      }))
+    : [];
+
+  return {
+    id: v.id,
+    jdId: v.jd_id,
+    company: jd?.company ?? "未填公司",
+    roleTitle: jd?.role_title ?? "未填岗位",
+    targetId: baseline.target_id,
+    targetName: base.targetName,
+    matchScore: assessments?.[0]?.match_score ?? null,
+    deltaRatio: Number(v.delta_ratio ?? 0),
+    affected: [...applied.affected].filter((x) => x !== "headline").length,
+    totalBlocks: base.blocks.length,
+    overThresholdAck: !!v.over_threshold_ack,
+    submittedAt: v.submitted_at,
+    locked: !!v.locked,
+    warnings: parseStringList(v.warnings),
+    unmatched,
+    deltas: deltaViews,
+    headline,
+    blocks,
+    skills: base.skills,
+    checks: base.checks,
+    why: base.why,
+  };
+}
+
+/** 首页「最近投递」卡片。跨方向，按更新时间倒序。 */
+export async function listRecentVersions(limit = 4): Promise<
+  {
+    id: string;
+    company: string;
+    roleTitle: string;
+    targetName: string;
+    deltaCount: number;
+    submittedAt: string | null;
+    updatedAt: string | null;
+  }[]
+> {
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from("resume_versions")
+    .select("id,jd_id,baseline_id,deltas,submitted_at,updated_at")
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit);
+  if (!rows || rows.length === 0) return [];
+
+  const [{ data: jds }, { data: baselines }, { data: targets }] = await Promise.all([
+    supabase.from("jds").select("id,company,role_title").in("id", rows.map((r) => r.jd_id)),
+    supabase
+      .from("resume_baselines")
+      .select("id,target_id")
+      .in("id", rows.map((r) => r.baseline_id)),
+    supabase.from("targets").select("id,name"),
+  ]);
+  const jdById = new Map((jds ?? []).map((j) => [j.id, j]));
+  const targetOfBaseline = new Map((baselines ?? []).map((b) => [b.id, b.target_id]));
+  const targetName = new Map((targets ?? []).map((t) => [t.id, t.name]));
+
+  return rows.map((r) => {
+    const jd = jdById.get(r.jd_id);
+    const tid = targetOfBaseline.get(r.baseline_id) ?? "";
+    return {
+      id: r.id,
+      company: jd?.company ?? "未填公司",
+      roleTitle: jd?.role_title ?? "未填岗位",
+      targetName: targetName.get(tid) ?? "未知方向",
+      deltaCount: parseDeltas(r.deltas).filter((d) => d.accepted).length,
+      submittedAt: r.submitted_at,
+      updatedAt: r.updated_at,
+    };
+  });
+}
+
+// ---- 重复 delta 检测 ----
+
+export async function getEvolutionSignals(targetId: string): Promise<{
+  baselineId: string | null;
+  signals: Signal[];
+}> {
+  if (!UUID_RE.test(targetId)) return { baselineId: null, signals: [] };
+  const supabase = await createClient();
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id")
+    .eq("target_id", targetId)
+    .maybeSingle();
+  if (!baseline) return { baselineId: null, signals: [] };
+
+  const [{ data: versions }, { data: decided }, { data: blocks }] = await Promise.all([
+    supabase
+      .from("resume_versions")
+      .select("id,deltas,updated_at")
+      .eq("baseline_id", baseline.id)
+      .order("updated_at", { ascending: false })
+      .limit(WINDOW),
+    supabase
+      .from("baseline_evolution_log")
+      .select("signature")
+      .eq("baseline_id", baseline.id),
+    supabase.from("resume_blocks").select("id,title").eq("baseline_id", baseline.id),
+  ]);
+
+  const titleById = new Map((blocks ?? []).map((b) => [b.id, b.title ?? ""]));
+  const signals = detectSignals(
+    (versions ?? []).map((v) => ({ id: v.id, deltas: parseDeltas(v.deltas) })),
+    new Set((decided ?? []).map((d) => d.signature)),
+    { blockTitle: (id) => titleById.get(id) ?? "这一块" },
+  );
+  return { baselineId: baseline.id, signals };
+}
+
+// ---- 导出与打印 ----
+
+export type PrintDoc = {
+  kind: "version" | "baseline";
+  id: string;
+  name: string;
+  contact: string[];
+  headline: string;
+  blocks: BaselineBlockView[];
+  skills: string[];
+  /** 文件名里的岗位：投递版本用 JD 岗位，基线用方向名。 */
+  roleLabel: string;
+  targetId: string;
+  /** 必须先解决的问题数。> 0 时导出入口禁用。 */
+  blockingCount: number;
+};
+
+/**
+ * 打印页与导出共用的一份文档。
+ *
+ * id 可以是投递版本，也可以是基线 —— 两者都要能导出，而它们在
+ * 「一份可以打印的简历」这件事上没有区别。
+ */
+export async function getPrintDoc(id: string): Promise<PrintDoc | null> {
+  if (!UUID_RE.test(id)) return null;
+  const supabase = await createClient();
+
+  const { data: facts } = await supabase.from("profile_facts").select("key,value");
+  const value = (k: string) => {
+    const v = (facts ?? []).find((f) => f.key === k)?.value;
+    return v && v.trim() !== "" ? v.trim() : null;
+  };
+  const contact = ["email", "phone", "location"]
+    .map(value)
+    .filter((s): s is string => !!s);
+
+  const version = await getVersion(id);
+  if (version) {
+    const checks = await listResumeChecks({ kind: "baseline", id: version.id });
+    return {
+      kind: "version",
+      id: version.id,
+      name: value("name") ?? "",
+      contact,
+      headline: version.headline,
+      blocks: version.blocks,
+      skills: version.skills,
+      roleLabel: version.roleTitle,
+      targetId: version.targetId,
+      blockingCount:
+        version.checks.filter((c) => c.level === "blocking").length +
+        checks.filter((c) => c.level === "blocking").length,
+    };
+  }
+
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("id,target_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!baseline) return null;
+  const base = await getBaseline(baseline.target_id);
+  if (!base) return null;
+
+  return {
+    kind: "baseline",
+    id: base.id,
+    name: value("name") ?? "",
+    contact,
+    headline: base.headline,
+    blocks: base.blocks,
+    skills: base.skills,
+    roleLabel: base.targetName,
+    targetId: base.targetId,
+    blockingCount: base.checks.filter((c) => c.level === "blocking").length,
+  };
+}
+
+/** 体检页做出来之前，「去看看」落在这里。 */
+export async function listBlockingIssues(): Promise<
+  { id: string; code: string | null; title: string; detail: string | null; owner: string }[]
+> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("check_results")
+    .select("id,code,title,detail,ref_ids,level")
+    .eq("scope", "resume")
+    .eq("level", "blocking")
+    .is("ignored_at", null)
+    .is("resolved_at", null)
+    .order("created_at", { ascending: true });
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    code: r.code,
+    title: r.title,
+    detail: r.detail,
+    owner: ((r.ref_ids ?? {}) as { owner?: string }).owner ?? "",
+  }));
+}

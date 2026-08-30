@@ -38,11 +38,25 @@ export type RecordResult = {
   units: number;
 };
 
+/**
+ * 回流时带上的任务上下文（Step 5 · 5.5）。
+ *
+ * 有它，Stage C 的判定准确率会明显不一样：这段内容本来就是围着某个项目做的，
+ * 把那条经历顶到候选第一位、并在 user 里点明来源，UPDATE 才判得对；
+ * 否则模型很容易把「给知识宇宙做了评测」判成一条新经历，档案里长出重复。
+ */
+export type TaskContext = {
+  taskTitle: string;
+  anchorAtomId: string | null;
+  anchorTitle: string | null;
+};
+
 export async function runRecord(v: {
   userMessage: string;
   recentTurns: string;
   imagePath: string | null;
   imageOcrText: string;
+  taskContext?: TaskContext | null;
 }): Promise<ActionResult<RecordResult>> {
   const supabase = await createClient();
 
@@ -140,7 +154,7 @@ async function locateOne(
   jobId: string,
   unit: ChangeUnit,
   index: number,
-  v: { userMessage: string; imagePath: string | null },
+  v: { userMessage: string; imagePath: string | null; taskContext?: TaskContext | null },
   splitProvider: string,
 ): Promise<Placed | { error: string }> {
   const probe = [unit.subject_hint, unit.user_words].filter((s) => s.trim() !== "").join(" ");
@@ -148,20 +162,27 @@ async function locateOne(
     probe === "" ? v.userMessage : probe,
     RECALL_N,
   );
-  const candidates = await withEvidence(atoms);
+  // 回流：挂靠项目顶到候选第一位。召回没捞到它也补进来 —— 这段内容
+  // 本来就是围着它做的，它不在候选里，UPDATE 根本无从判起。
+  const ranked = await pinAnchor(atoms, v.taskContext?.anchorAtomId ?? null);
+  const candidates = await withEvidence(ranked);
 
-  const verdict = await callLLM({
-    tier: "strong",
-    purpose: "chat_stage_c",
-    system: STAGE_C_SYSTEM,
-    user: stageCUser({
+  // 提示词本身逐字不动，只在 user 末尾附一句来源说明。
+  const stageCUserText =
+    stageCUser({
       unitJson: JSON.stringify(unit, null, 2),
       userMessage: v.userMessage,
       candidatesJson:
         candidates.length === 0
           ? "（使用者的经历库是空的，或者没有相似的条目）"
           : JSON.stringify(candidates, null, 2),
-    }),
+    }) + taskContextLine(v.taskContext ?? null);
+
+  const verdict = await callLLM({
+    tier: "strong",
+    purpose: "chat_stage_c",
+    system: STAGE_C_SYSTEM,
+    user: stageCUserText,
     jsonSchema: stageCSchema,
   });
   if (!verdict.ok) return { error: verdict.error };
@@ -169,7 +190,7 @@ async function locateOne(
   const c = verdict.data;
 
   // 目标 id 必须真的在候选里——模型偶尔会编一个 uuid 出来
-  const known = new Set(atoms.map((a) => a.id));
+  const known = new Set(ranked.map((a) => a.id));
   const target = c.target_atom_id && known.has(c.target_atom_id) ? c.target_atom_id : null;
   const parent = c.parent_atom_id && known.has(c.parent_atom_id) ? c.parent_atom_id : null;
 
@@ -206,7 +227,7 @@ async function locateOne(
 
   const title =
     intent === "UPDATE"
-      ? (atoms.find((a) => a.id === target)?.title ?? unit.subject_hint)
+      ? (ranked.find((a) => a.id === target)?.title ?? unit.subject_hint)
       : unit.subject_hint;
 
   return {
@@ -216,7 +237,7 @@ async function locateOne(
       intent,
       target_atom_id: target,
       parent_atom_id: parent,
-      target_title: atoms.find((a) => a.id === target)?.title ?? "",
+      target_title: ranked.find((a) => a.id === target)?.title ?? "",
       confidence: c.confidence,
       ai_note: c.ai_note,
       unit: unit as unknown as Json,
@@ -244,6 +265,47 @@ function headline(intent: "CREATE" | "UPDATE" | "ASK", title: string): string {
  * 而 Pass 3 的提示词里写死了「每条候选包含」哪几项。往那边多塞两个字段，
  * 等于在没改提示词的情况下改了它看到的东西。
  */
+/** 挂靠项目置顶；召回没带上就补一条进来。 */
+async function pinAnchor(
+  atoms: SimilarAtom[],
+  anchorId: string | null,
+): Promise<SimilarAtom[]> {
+  if (!anchorId) return atoms;
+
+  const hit = atoms.find((a) => a.id === anchorId);
+  if (hit) return [hit, ...atoms.filter((a) => a.id !== anchorId)];
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("atoms")
+    .select("id, title, org, role, level, status, period_start, period_end, situation")
+    .eq("id", anchorId)
+    .maybeSingle();
+  if (!data) return atoms;
+
+  // similarity 填 1：它不是召回来的，是任务指名的，理应排在最前。
+  const pinned: SimilarAtom = {
+    id: data.id,
+    title: data.title,
+    org: data.org,
+    role: data.role,
+    level: data.level,
+    status: data.status,
+    period: `${data.period_start ?? "?"} ~ ${data.period_end ?? "至今"}`,
+    situation: data.situation ?? "",
+    metricNames: [],
+    pendingNames: [],
+    similarity: 1,
+  };
+  return [pinned, ...atoms];
+}
+
+function taskContextLine(ctx: TaskContext | null): string {
+  if (!ctx) return "";
+  const anchor = ctx.anchorTitle ? `，挂靠项目为 ${ctx.anchorTitle}` : "";
+  return `\n\n这段内容来自一项针对『${ctx.taskTitle}』的工作${anchor}。`;
+}
+
 async function withEvidence(atoms: SimilarAtom[]): Promise<Record<string, unknown>[]> {
   if (atoms.length === 0) return [];
   const supabase = await createClient();
