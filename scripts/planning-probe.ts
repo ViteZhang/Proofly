@@ -459,5 +459,64 @@ check(
   "ActionsView 里还留着「任务」两个字",
 );
 
+// =============================================================
+console.log("\n5.4 · 手动管理");
+// =============================================================
+
+const fs2 = await import("node:fs");
+const taskActionsSrc = stripComments(
+  fs2.readFileSync("src/app/(app)/actions/task-actions.ts", "utf8"),
+);
+check(
+  "手动新增的 source 置为 manual",
+  taskActionsSrc.includes('source: "manual"'),
+);
+check(
+  "手动任务的 impact 也走 computeImpact，没有手填入口",
+  taskActionsSrc.includes("computeImpact(ACTION_FOR_GAP[g.gapType]") &&
+    !taskActionsSrc.includes("impact: z.number"),
+);
+check(
+  "编辑后打 edited 标记，source 不变",
+  taskActionsSrc.includes("edited: true") &&
+    !taskActionsSrc.includes('source: "ai_generated"'),
+);
+check("放弃写 status = dropped", taskActionsSrc.includes('status: "dropped"'));
+check(
+  "忽略缺口写 gaps.dismissed_at 并摘掉关联行",
+  taskActionsSrc.includes("dismissed_at: new Date().toISOString()") &&
+    taskActionsSrc.includes('.delete().eq("gap_id", gapId)'),
+);
+check(
+  "手填工时也受 learn 下限约束",
+  taskActionsSrc.includes("Math.max(LEARN_MIN_HOURS, h)"),
+);
+
+const planSrc = stripComments(
+  fs2.readFileSync("src/app/(app)/actions/plan-actions.ts", "utf8"),
+);
+check(
+  "重新生成命中去重时只碰 updated_at，不覆盖标题／说明／工时",
+  /async function touchTask[\s\S]*?\.update\(\{\s*updated_at:[^}]*\}\)/.test(planSrc),
+);
+
+check(
+  "界面上标出失去关联方向的行动（验收 38）",
+  viewCode.includes("已失去关联方向"),
+);
+check(
+  "详情就地展开，不跳页（用 aria-expanded，没有指向详情页的 Link）",
+  viewCode.includes("aria-expanded={open}") &&
+    !/<Link\s+href="\/actions\//.test(viewCode),
+);
+check(
+  "放弃有二次确认",
+  viewCode.includes("confirmDrop") && viewCode.includes("确认放弃"),
+);
+check(
+  "关联缺口全被忽略时问一句要不要一并放弃",
+  viewCode.includes("关联缺口都被忽略了，要一并放弃吗"),
+);
+
 console.log(`\n${fail === 0 ? "全过" : "有挂"}：${pass} / ${pass + fail}\n`);
 process.exit(fail === 0 ? 0 : 1);
