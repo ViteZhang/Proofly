@@ -25,6 +25,7 @@ import { caseSetSchema, probeSetSchema } from "@/lib/interview/schema";
 import {
   buildCaseQuestions,
   buildProbeQuestions,
+  techVocabulary,
   type BuildResult,
   type BuiltQuestion,
   type PlanAtom,
@@ -216,7 +217,15 @@ async function runCases(
     jsonSchema: caseSetSchema,
   });
   if (!res.ok) return res.error;
-  return buildCaseQuestions(res.data.questions, atoms, startOrder);
+
+  // 技术词表 = 技能标签 + 经历正文 + JD 原文。三边都没有的技术名，
+  // 就是模型自己想出来的。
+  const vocab = techVocabulary([
+    ...input.skills.map((s) => s.label),
+    ...input.atoms.flatMap((a) => [a.title, ...a.skills, ...a.actions, a.situation ?? "", a.task ?? ""]),
+    ...input.requirements.flatMap((r) => [r.text, r.rawPhrase]),
+  ]);
+  return buildCaseQuestions(res.data.questions, atoms, startOrder, vocab);
 }
 
 async function writeKit(

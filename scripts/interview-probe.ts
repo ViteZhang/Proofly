@@ -28,6 +28,8 @@ import {
   neverSayHits,
   preferredType,
   quotaFor,
+  techVocabulary,
+  unknownTech,
   weakDontDo,
   type PlanAtom,
 } from "../src/lib/interview/plan";
@@ -383,6 +385,61 @@ const caseGuard = buildCaseQuestions(
   0,
 );
 check("18c · 案例题也守 never_say", caseGuard.questions.length === 0);
+
+// ---- ai_tech 的技术边界（验收 25） ----
+
+console.log("\n【技术边界】");
+
+const vocab = techVocabulary([
+  "RAG",
+  "LangChain 编排",
+  "做了一个 Agent 工作流",
+  "JD 要求熟悉 Milvus 向量库",
+]);
+check("25 · 简历与 JD 里出现过的技术不报", unknownTech("RAG 和微调怎么选？", vocab).length === 0);
+check("25b · JD 里点名的技术也算数", unknownTech("Milvus 的索引怎么选？", vocab).length === 0);
+check(
+  "25c · 两边都没有的技术被报出来",
+  unknownTech("你会怎么用 Kubernetes 做弹性伸缩？", vocab).join(",") === "Kubernetes",
+);
+check(
+  "25d · AI / AB / LLM 这类通用词不报",
+  unknownTech("AI 功能的 AB 实验怎么设计？LLM 成本怎么控？", vocab).length === 0,
+);
+const alien = buildCaseQuestions(
+  [caseQ({ kind: "ai_tech", question: "Kubernetes 的调度策略怎么定？" })],
+  [atom()],
+  0,
+  vocab,
+);
+check("25e · 越界只记 warning，不丢题", alien.questions.length === 1);
+check(
+  "25f · warning 说清楚了是哪个技术",
+  alien.warnings.some((w) => w.includes("Kubernetes")),
+  alien.warnings.join(" | "),
+);
+check(
+  "25g · 只查 ai_tech，产品设计题不查",
+  buildCaseQuestions(
+    [caseQ({ kind: "product_case", question: "给 Kubernetes 用户设计一个功能" })],
+    [atom()],
+    0,
+    vocab,
+  ).warnings.length === 0,
+);
+
+const skewed = buildCaseQuestions(
+  Array.from({ length: 6 }, (_, i) =>
+    caseQ({ question: `常规题 ${i}`, difficulty: "standard" }),
+  ),
+  [atom()],
+  0,
+);
+check(
+  "28c · 一道 deep 都没有 → 记 warning",
+  skewed.warnings.some((w) => w.includes("deep")),
+  skewed.warnings.join(" | "),
+);
 
 console.log(`\n${pass} 通过 / ${fail} 失败\n`);
 process.exit(fail === 0 ? 0 : 1);

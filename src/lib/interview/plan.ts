@@ -132,6 +132,45 @@ export function questionProblems(
   return problems;
 }
 
+// ---- ai_tech 的技术边界（验收 25） ----
+
+/**
+ * 不算「技术栈」的通用词。它们在任何 AI 产品岗的题目里都会出现，
+ * 拿它们报越界只会让这条检查变成噪音。
+ */
+const GENERIC_TOKENS = new Set([
+  "ai", "ab", "api", "app", "pm", "kpi", "roi", "ui", "ux", "b", "c", "to",
+  "llm", "gpt", "mvp", "okr", "saas", "pmf", "dau", "mau", "gmv", "cvr",
+]);
+
+const LATIN_TOKEN = /[A-Za-z][A-Za-z0-9.+#-]{1,}/g;
+
+/**
+ * 用户自己的技术词表：技能标签 + 经历正文 + JD 原文。
+ *
+ * JD 也算进来，因为提示词说的是「从 JD 的技术要求出发，交叉简历上
+ * 出现过的技术栈」—— JD 里点名的技术是合法出题依据，只有两边都没有
+ * 的才是模型自己想出来的。
+ */
+export function techVocabulary(sources: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const raw of sources.join("\n").matchAll(LATIN_TOKEN)) {
+    out.add(raw[0].toLowerCase());
+  }
+  return out;
+}
+
+/** 题目里出现、但用户简历与 JD 里都找不到的技术名。 */
+export function unknownTech(question: string, vocab: Set<string>): string[] {
+  const out: string[] = [];
+  for (const raw of question.matchAll(LATIN_TOKEN)) {
+    const t = raw[0].toLowerCase();
+    if (GENERIC_TOKENS.has(t) || vocab.has(t)) continue;
+    out.push(raw[0]);
+  }
+  return [...new Set(out)];
+}
+
 // ---- 配额 ----
 
 /**
@@ -314,6 +353,8 @@ export function buildCaseQuestions(
   planned: PlannedCase[],
   atoms: PlanAtom[],
   startOrder: number,
+  /** 用户自己的技术词表。不给就跳过 ai_tech 的技术边界检查。 */
+  vocab?: Set<string>,
 ): BuildResult {
   const known = new Set(atoms.map((a) => a.id));
   const warnings: string[] = [];
@@ -353,6 +394,16 @@ export function buildCaseQuestions(
       warnings.push(`「${text}」引用了本次简历里没有的经历，已剔除该引用`);
     }
 
+    // 「他写了什么，就会被问什么」。简历与 JD 里都没有的技术，
+    // 出出来只会让人去准备一件不会被问的事 —— 报出来，但不丢题：
+    // 词表是按拉丁字母切的，判错的代价不该是少一道题。
+    if (kind === "ai_tech" && vocab) {
+      const alien = unknownTech(text, vocab);
+      if (alien.length > 0) {
+        warnings.push(`「${text}」问到了简历与 JD 里都没出现的技术：${alien.join("、")}`);
+      }
+    }
+
     seen.add(key);
     questions.push({
       kind,
@@ -372,6 +423,14 @@ export function buildCaseQuestions(
       sortOrder: startOrder + questions.length,
     });
   });
+
+  // 三档比例约 3:5:2。差得远不丢题，但要说 —— 全是常规题的一套题包，
+  // 拉不开差距也压不住门槛。
+  for (const d of ["basic", "standard", "deep"] as const) {
+    if (questions.length >= 6 && !questions.some((q) => q.difficulty === d)) {
+      warnings.push(`案例题里一道 ${d} 档都没有，三档比例失衡`);
+    }
+  }
 
   return { questions, warnings, rejected };
 }
