@@ -37,7 +37,22 @@ const CSS = `
   font-size: 13pt;
   line-height: 1.75;
 }
-.cheat-page { max-width: 150mm; margin: 0 auto; padding: 12mm 10mm 20mm; }
+/* 这一页只有小抄。应用外壳（顶栏的搜索框）在 390px 的手机上会把
+   文档撑到 452px，读的时候要左右划 —— 外壳被 .cheat-root 整个盖住，
+   它的横向溢出对这一页没有任何意义，直接锁掉。 */
+html, body { overflow-x: hidden; }
+.cheat-root * { box-sizing: border-box; }
+/* box-sizing 必须是 border-box：默认的 content-box 会让 padding 加在
+   宽度之外，390px 的手机上整页横向溢出 62px —— 那就得左右划着读了。 */
+.cheat-page {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 150mm;
+  margin: 0 auto;
+  padding: 12mm 5mm 20mm;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 480px) { .cheat-page { padding-left: 10mm; padding-right: 10mm; } }
 .cheat-note {
   margin: 0 0 8mm;
   padding: 10px 12px;
