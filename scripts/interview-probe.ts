@@ -33,7 +33,19 @@ import {
   weakDontDo,
   type PlanAtom,
 } from "../src/lib/interview/plan";
+import {
+  MATCH_THRESHOLD,
+  inheritPractice,
+  similarity,
+  type PriorQuestion,
+} from "../src/lib/interview/inherit";
+import {
+  buildCheatSheet,
+  cheatSheetFilename,
+  renderCheatSheetMd,
+} from "../src/lib/interview/cheatsheet";
 import type { PlannedCase, PlannedProbe } from "../src/lib/interview/schema";
+import type { QuestionView } from "../src/lib/queries/interview";
 import type { AtomStatus, EvidenceLevel } from "../src/types/database";
 
 let pass = 0;
@@ -439,6 +451,195 @@ check(
   "28c · 一道 deep 都没有 → 记 warning",
   skewed.warnings.some((w) => w.includes("deep")),
   skewed.warnings.join(" | "),
+);
+
+// ---- 练习状态继承（验收 32、33） ----
+
+console.log("\n【重新生成】");
+
+function prior(over: Partial<PriorQuestion> = {}): PriorQuestion {
+  return {
+    id: over.id ?? "p-1",
+    kind: over.kind ?? "project_probe",
+    question: over.question ?? "这个功能的效果怎么证明？",
+    probeType: over.probeType ?? "effect",
+    difficulty: over.difficulty ?? null,
+    fromAtomId: over.fromAtomId ?? "a-1",
+    fromExistingProbe: over.fromExistingProbe ?? false,
+    riskLevel: over.riskLevel ?? "high",
+    riskReason: over.riskReason ?? "这条经历还没有实测数据，被问效果时容易卡住",
+    answerOutline: over.answerOutline ?? [{ label: "先承认", content: "没有稳定数据" }],
+    dontDo: over.dontDo ?? "不要编数字",
+    dataGapHint: over.dataGapHint ?? null,
+    gapMetricId: over.gapMetricId ?? null,
+    relatedAtomIds: over.relatedAtomIds ?? [],
+    whyThisQuestion: over.whyThisQuestion ?? null,
+    practiceStatus: over.practiceStatus ?? "struggling",
+    practiceNote: over.practiceNote ?? "卡在归因说不清",
+  };
+}
+
+check("32a · 同一道题换个标点仍算同一道", similarity("效果怎么证明？", "效果怎么证明") === 1);
+check(
+  "32b · 措辞小改仍在阈值以上",
+  similarity("这个功能的效果怎么证明？", "这个功能的效果怎么证明有用？") >= MATCH_THRESHOLD,
+  String(similarity("这个功能的效果怎么证明？", "这个功能的效果怎么证明有用？")),
+);
+check(
+  "32c · 两道不同的题在阈值以下",
+  similarity("这个功能的效果怎么证明？", "为什么选 Multi-Agent 而不是单 Agent？") < MATCH_THRESHOLD,
+);
+
+const freshQs = buildProbeQuestions(
+  [
+    probe({ question: "这个功能的效果怎么证明有用？" }),
+    probe({ question: "为什么这么设计，考虑过别的方案吗？", probe_type: "decision" }),
+  ],
+  [atom({ evidenceLevel: "designed_only" })],
+).questions;
+
+const merged = inheritPractice(freshQs, [
+  prior({ id: "p-1", question: "这个功能的效果怎么证明？", practiceStatus: "struggling" }),
+  prior({
+    id: "p-2",
+    question: "上一版才有的题：数据口径是怎么定的？",
+    practiceStatus: "struggling",
+    practiceNote: "分母说不清",
+  }),
+  prior({ id: "p-3", question: "已经练熟的一道题", practiceStatus: "practiced" }),
+]);
+
+check(
+  "32 · 命中的新题继承了状态与备注",
+  merged.questions[0]?.practiceStatus === "struggling" &&
+    merged.questions[0]?.practiceNote === "卡在归因说不清",
+  JSON.stringify(merged.questions[0]?.practiceStatus),
+);
+check("32d · 没命中的新题保持未练", merged.questions[1]?.practiceStatus === "untouched");
+check("32e · 继承计数正确", merged.inherited === 1, String(merged.inherited));
+check(
+  "33 · 未被命中的 struggling 旧题被保留并标注",
+  merged.carried === 1 &&
+    merged.questions.some((q) => q.carriedOver && q.question.includes("上一版才有的题")),
+  JSON.stringify(merged.questions.map((q) => [q.question.slice(0, 12), q.carriedOver])),
+);
+check(
+  "33b · 保留下来的旧题带着原备注",
+  merged.questions.find((q) => q.carriedOver)?.practiceNote === "分母说不清",
+);
+check(
+  "33c · 已练熟但没被命中的旧题不搬过来",
+  !merged.questions.some((q) => q.question === "已经练熟的一道题"),
+);
+check(
+  "32f · 一道旧题只被认领一次",
+  inheritPractice(
+    buildProbeQuestions(
+      [probe({ question: "效果怎么证明？" }), probe({ question: "效果怎么证明有用？" })],
+      [atom({ evidenceLevel: "designed_only" })],
+    ).questions,
+    [prior({ id: "p-9", question: "效果怎么证明？" })],
+  ).inherited === 1,
+);
+check(
+  "32g · 类别不同不认领（案例题不会去继承深挖题的状态）",
+  inheritPractice(
+    buildCaseQuestions([caseQ({ question: "效果怎么证明？" })], [atom()], 0).questions,
+    [prior({ id: "p-8", question: "效果怎么证明？", kind: "project_probe" })],
+  ).inherited === 0,
+);
+
+// ---- 小抄（验收 35、36） ----
+
+console.log("\n【面试小抄】");
+
+function view(over: Partial<QuestionView> = {}): QuestionView {
+  return {
+    id: over.id ?? "q-1",
+    kind: over.kind ?? "project_probe",
+    question: over.question ?? "效果怎么证明？",
+    probeType: over.probeType ?? "effect",
+    difficulty: over.difficulty ?? null,
+    fromAtomId: over.fromAtomId ?? "a-1",
+    fromAtomTitle: over.fromAtomTitle ?? "AI 学习助手",
+    fromAtomEvidence: over.fromAtomEvidence ?? "designed_only",
+    fromExistingProbe: over.fromExistingProbe ?? false,
+    riskLevel: over.riskLevel ?? "low",
+    riskReason: over.riskReason ?? null,
+    answerOutline: over.answerOutline ?? [{ label: "先承认", content: "没有稳定数据" }],
+    dontDo: over.dontDo ?? null,
+    dataGapHint: over.dataGapHint ?? null,
+    gapMetricId: over.gapMetricId ?? null,
+    relatedAtomIds: over.relatedAtomIds ?? [],
+    relatedAtomTitles: over.relatedAtomTitles ?? [],
+    whyThisQuestion: over.whyThisQuestion ?? null,
+    practiceStatus: over.practiceStatus ?? "untouched",
+    practiceNote: over.practiceNote ?? null,
+    carriedOver: over.carriedOver ?? false,
+    sortOrder: over.sortOrder ?? 0,
+  };
+}
+
+const sheet = buildCheatSheet({
+  company: "星岚科技",
+  roleTitle: "AI 产品经理",
+  questions: [
+    view({ id: "q-1", question: "低风险的一道题" }),
+    view({
+      id: "q-2",
+      question: "高风险的一道题",
+      riskLevel: "high",
+      riskReason: "有数字但没记口径，被问怎么算的时候答不上来",
+      dontDo: "不要用「预计提升 30%」这类没依据的数字填空",
+    }),
+    view({ id: "q-3", question: "答不好的一道题", practiceStatus: "struggling", practiceNote: "分母说不清" }),
+    view({ id: "q-4", question: "已经练熟的一道题", practiceStatus: "practiced" }),
+    view({
+      id: "q-5",
+      question: "又高风险又答不好的一道题",
+      riskLevel: "high",
+      riskReason: "这条经历还没有实测数据，被问效果时容易卡住",
+      practiceStatus: "struggling",
+      dontDo: "不要说灰度已经验证过",
+    }),
+  ],
+  numbers: [
+    { atomTitle: "C端测评产品", name: "C端营收", value: "1200 万", method: "财年口径，含续费" },
+    { atomTitle: "优志愿APP", name: "APP下载量", value: "300 万", method: null },
+  ],
+  today: new Date("2026-08-31T00:00:00Z"),
+});
+
+check("35 · 高风险题排在最前那一块", sheet.mustThink.map((q) => q.id).join(",") === "q-2,q-5");
+check("35b · 标了答不好的排第二块", sheet.struggling.map((q) => q.id).join(",") === "q-3");
+check("35c · 又高风险又答不好的只出现一次", sheet.struggling.every((q) => q.id !== "q-5"));
+check("35d · 已练熟的不再列题干", !sheet.rest.some((q) => q.id === "q-4"));
+check("35e · 其余题目只剩低风险未练的", sheet.rest.map((q) => q.id).join(",") === "q-1");
+
+const md = renderCheatSheetMd(sheet);
+check("35f · 必须提前想清楚的在自己标了答不好的前面", md.indexOf("必须提前想清楚") < md.indexOf("自己标了答不好"));
+check("35g · 高风险题带上了「别做的事」", md.includes("⛔ 别做的事") && md.includes("预计提升 30%"));
+check("35h · 答不好的题带上了备注", md.includes("卡在：分母说不清"));
+check("36 · 核心数字速记列出了指标与口径", md.includes("C端营收") && md.includes("财年口径，含续费"));
+check(
+  "36b · 没口径的指标如实说没有，不留空",
+  md.includes("没记口径 —— 被问怎么算的就如实说没有记录"),
+);
+check("36c · 其余题目只列题干，不展开应答", md.includes("- [项目深挖] 低风险的一道题"));
+check(
+  "36d · 文件名是 面试小抄-{公司}-{日期}",
+  cheatSheetFilename("星岚科技", sheet.date, "md") === "面试小抄-星岚科技-2026-08-31.md",
+  cheatSheetFilename("星岚科技", sheet.date, "md"),
+);
+check(
+  "36e · 公司名里的非法字符被剔掉",
+  cheatSheetFilename("星岚/科技:A", "2026-08-31", "md") === "面试小抄-星岚科技A-2026-08-31.md",
+);
+check(
+  "36f · 没有实测指标时说清楚该怎么办",
+  renderCheatSheetMd(
+    buildCheatSheet({ company: "X", roleTitle: "Y", questions: [], numbers: [] }),
+  ).includes("被问数字时直接说没有，不要估"),
 );
 
 console.log(`\n${pass} 通过 / ${fail} 失败\n`);
