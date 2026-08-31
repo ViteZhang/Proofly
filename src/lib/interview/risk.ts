@@ -51,6 +51,20 @@ export const RISK_REASON = {
   inDevOverstated: "项目还在开发中，但简历上的表述接近已完成，容易被追进度",
 } as const;
 
+/**
+ * 高风险题没给「别做的事」时的兜底文案。
+ *
+ * 《Step 7》要求高风险题必须写「别做的事」，且具体到句式层面。模型会漏
+ * ——实测 14 道高风险题里漏了 4 道。漏了就补：这两句是从风险判据本身
+ * 推出来的，不是编的，说的正是「这条经历为什么危险」。
+ */
+export const DONT_DO_FALLBACK: Record<string, string> = {
+  [RISK_REASON.noData]:
+    "不要给这条经历安任何效果数字 ——「预计提升 XX%」这类填空，经历库里没有对应实测数据，追问一轮就露馅",
+  [RISK_REASON.noMethod]:
+    "不要现场编一个口径 —— 这条指标的算法、分母、时间窗口都没有记录，被追问就如实说没记，别顺着对方的问法圆一个出来",
+};
+
 export type RiskVerdict = {
   level: RiskLevel;
   /** 低风险为 null。界面上高风险必须显示它，不能只挂一个标签。 */

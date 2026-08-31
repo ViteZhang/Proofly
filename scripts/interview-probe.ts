@@ -9,6 +9,7 @@
 // =============================================================
 
 import {
+  DONT_DO_FALLBACK,
   RISK_REASON,
   hasDataGap,
   isExpanded,
@@ -47,6 +48,8 @@ import {
 import type { PlannedCase, PlannedProbe } from "../src/lib/interview/schema";
 import type { QuestionView } from "../src/lib/queries/interview";
 import type { AtomStatus, EvidenceLevel } from "../src/types/database";
+
+const RISK_REASON_FALLBACK_NO_DATA = DONT_DO_FALLBACK[RISK_REASON.noData];
 
 let pass = 0;
 let fail = 0;
@@ -263,9 +266,31 @@ const weakHigh = buildProbeQuestions(
   [atom({ evidenceLevel: "designed_only" })],
 );
 check(
-  "20c · 高风险题的「别做的事」太空泛 → 记 warning",
-  weakHigh.warnings.some((w) => w.includes("空泛")),
+  "20c · 高风险题的「别做的事」模型没写好 → 记 warning",
+  weakHigh.warnings.some((w) => w.includes("别做的事")),
   weakHigh.warnings.join(" | "),
+);
+check(
+  "20d · 漏写时按风险原因兜底补上，不留空",
+  weakHigh.questions[0]?.dontDo === RISK_REASON_FALLBACK_NO_DATA,
+  String(weakHigh.questions[0]?.dontDo),
+);
+check(
+  "20e · 兜底文案具体到句式，不是「不要夸大」",
+  !weakDontDo(weakHigh.questions[0]?.dontDo ?? ""),
+);
+const emptyHigh = buildProbeQuestions([probe({ dont_do: "" })], [noMethod]);
+check(
+  "20f · 没口径那一档用的是另一句兜底",
+  emptyHigh.questions[0]?.dontDo?.includes("现场编一个口径") === true,
+  String(emptyHigh.questions[0]?.dontDo),
+);
+const lowNoDont = buildProbeQuestions([probe({ dont_do: "" })], [withMethod]);
+check(
+  "20g · 低风险题漏写不补也不报",
+  lowNoDont.questions[0]?.dontDo === null &&
+    !lowNoDont.warnings.some((w) => w.includes("别做的事")),
+  lowNoDont.warnings.join(" | "),
 );
 
 // ---- 配额与来源（验收 7–13） ----

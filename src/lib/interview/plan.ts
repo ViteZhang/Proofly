@@ -10,7 +10,13 @@
 // =============================================================
 
 import { hasSource, knownNumbers } from "@/lib/resume/gate";
-import { methodlessMetrics, judgeRisk, hasDataGap, locateGapMetric } from "@/lib/interview/risk";
+import {
+  DONT_DO_FALLBACK,
+  hasDataGap,
+  judgeRisk,
+  locateGapMetric,
+  methodlessMetrics,
+} from "@/lib/interview/risk";
 import type { RiskAtom } from "@/lib/interview/risk";
 import {
   normalizeCaseKind,
@@ -312,9 +318,12 @@ export function buildProbeQuestions(planned: PlannedProbe[], atoms: PlanAtom[]):
     // 模型自称「来自人工预案」，但这条经历根本没写过预案。
     const claimsProbe = r.q.from_existing_probe && atom.probes.length > 0;
 
-    const dontDo = r.q.dont_do.trim();
+    // 高风险题必须有「别做的事」。模型漏了就用风险判据本身兜底 ——
+    // 那句话是从「这条经历为什么危险」推出来的，不是编的。
+    let dontDo = r.q.dont_do.trim();
     if (verdict.level === "high" && weakDontDo(dontDo)) {
-      warnings.push(`高风险题「${r.q.question.trim()}」的「别做的事」太空泛`);
+      warnings.push(`高风险题「${r.q.question.trim()}」的「别做的事」模型没写好，已按风险原因补上`);
+      dontDo = (verdict.reason && DONT_DO_FALLBACK[verdict.reason]) || dontDo;
     }
     const missing = missingMustSay(r.q.answer_outline, atom.mustSay);
     if (missing.length > 0) {
