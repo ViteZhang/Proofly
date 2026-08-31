@@ -145,7 +145,7 @@ export function atomText(a: GateAtom): string {
  * 小数整体与它的每一段都收进来 —— 「2015-07-01」要能支撑块里写的
  * 「2015.07」，靠的就是「2015」和「07」这两段。
  */
-function knownNumbers(text: string): Set<string> {
+export function knownNumbers(text: string): Set<string> {
   const out = new Set<string>();
   const clean = text.replace(/,/g, "");
   for (const raw of clean.matchAll(NUMBER_TOKEN)) {
@@ -167,7 +167,7 @@ function knownNumbers(text: string): Set<string> {
  * 收紧的代价是每一份带时间标注的简历都被拦。后者每次都发生，前者要
  * 刻意构造，所以选了前者。
  */
-function hasSource(token: string, known: Set<string>): boolean {
+export function hasSource(token: string, known: Set<string>): boolean {
   if (known.has(String(Number(token)))) return true;
   const parts = token.split(".").filter((p) => p !== "");
   return parts.length > 1 && parts.every((p) => known.has(String(Number(p))));

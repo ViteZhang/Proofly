@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import {
   createMetric,
@@ -26,7 +27,19 @@ export function MetricsBlock({
   noticeKey: number;
   onSaved: (change: EvidenceChange) => void;
 }) {
-  const [open, setOpen] = useState<string | null>(null); // 指标 id，或 "new"
+  // 面试题的「去补」带着 ?metric=<id> 过来，直接把那条指标展开成编辑态 ——
+  // 缺的是口径，落到经历库门口还得自己找，等于没跳。
+  const searchParams = useSearchParams();
+  const wanted = searchParams.get("metric");
+  const [open, setOpen] = useState<string | null>(
+    wanted && metrics.some((m) => m.id === wanted) ? wanted : null,
+  ); // 指标 id，或 "new"
+  const jumpRef = useRef<HTMLLIElement | null>(null);
+
+  useEffect(() => {
+    jumpRef.current?.scrollIntoView({ block: "center" });
+    // 只在挂载时跳一次：之后用户自己滚到哪就是哪。
+  }, []);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -93,7 +106,7 @@ export function MetricsBlock({
 
       <ul className="-mx-1">
         {metrics.map((m) => (
-          <li key={m.id}>
+          <li key={m.id} ref={m.id === wanted ? jumpRef : undefined}>
             {open === m.id ? (
               <div className="px-1 py-1.5">
                 <MetricForm
