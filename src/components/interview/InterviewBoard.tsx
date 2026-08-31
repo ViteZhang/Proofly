@@ -54,10 +54,15 @@ export function InterviewBoard({
   const router = useRouter();
   const [, start] = useTransition();
   const [running, setRunning] = useState(false);
-  // 正在跑的作业 id。为 null 时不轮询。
+  // 挂着进度面板的作业 id。为 null 时面板不显示，也不轮询。
+  // 失败的作业也要挂着 —— 那句「案例题这次没出上」和「重跑一次」按钮，
+  // 是用户唯一能据以决定下一步的东西，被一句「出了 33 道题」盖掉就等于没报错。
   const [jobKitId, setJobKitId] = useState<string | null>(
-    job && !job.settled ? job.kitId : null,
+    job && (!job.settled || job.status === "failed") ? job.kitId : null,
   );
+  // 面板挂着的这个作业是不是已经失败了。不能读 job.status —— 那是服务端
+  // 渲染那一刻的值，作业是在轮询里跑完的，它不会跟着变。
+  const [jobFailed, setJobFailed] = useState(job?.status === "failed");
   const [outcome, setOutcome] = useState<KitJobProgress | null>(
     job && job.settled && (job.warnings.length > 0 || job.rejected.length > 0) ? job : null,
   );
@@ -74,6 +79,7 @@ export function InterviewBoard({
     if (!selected) return;
     setError(null);
     setOutcome(null);
+    setJobFailed(false);
     setRunning(true);
     start(async () => {
       const r = await startKitJob(selected.id);
@@ -90,7 +96,9 @@ export function InterviewBoard({
   // 前者是为了让刚出的十几道题立刻能看，后者是为了把案例题也带出来。
   function onProgress(p: KitJobProgress) {
     if (p.settled) {
-      setJobKitId(null);
+      // 成功就把面板收掉，失败留着 —— 错误原因和「重跑一次」得看得见。
+      setJobFailed(p.status === "failed");
+      if (p.status !== "failed") setJobKitId(null);
       if (p.warnings.length > 0 || p.rejected.length > 0) setOutcome(p);
     }
     router.refresh();
@@ -143,8 +151,13 @@ export function InterviewBoard({
           {picking ? "收起" : "换一份 ▾"}
         </Button>
         {kit && (
-          <Button size="sm" variant="secondary" disabled={running || jobKitId !== null} onClick={run}>
-            {jobKitId ? "正在出题…" : "重新出题"}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={running || (jobKitId !== null && !jobFailed)}
+            onClick={run}
+          >
+            {jobKitId && !jobFailed ? "正在出题…" : "重新出题"}
           </Button>
         )}
         {kit && (
@@ -195,7 +208,9 @@ export function InterviewBoard({
 
       {jobKitId && <KitJobPanel kitId={jobKitId} onSettled={onProgress} />}
 
-      {!jobKitId && outcome && <Outcome outcome={outcome} />}
+      {/* 作业跑完（成功或失败）才有 outcome，所以跟进度面板不会同时是
+          「正在跑」的状态；失败时两个一起显示，一个说为什么停，一个说丢了什么。 */}
+      {outcome && <Outcome outcome={outcome} />}
 
       {/* 作业刚起、题还没落库时，题包行已经存在但里面是空的 ——
           那还是空状态，不该显示四个 0 的标签页。 */}
@@ -210,10 +225,10 @@ export function InterviewBoard({
           <Button
             size="sm"
             className="mt-3"
-            disabled={running || jobKitId !== null || !selected}
+            disabled={running || (jobKitId !== null && !jobFailed) || !selected}
             onClick={run}
           >
-            {jobKitId ? "正在出题…" : "出一套题"}
+            {jobKitId && !jobFailed ? "正在出题…" : "出一套题"}
           </Button>
         </Empty>
       ) : (
