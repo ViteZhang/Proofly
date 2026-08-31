@@ -43,6 +43,16 @@ export type TaskActionType =
 export type TaskStatus = "todo" | "doing" | "done" | "dropped";
 export type TaskSource = "ai_generated" | "manual";
 export type InterviewKind = "project_probe" | "product_case" | "ai_tech" | "data_case";
+export type ProbeType =
+  | "effect"
+  | "attribution"
+  | "decision"
+  | "boundary"
+  | "role"
+  | "progress";
+export type QuestionDifficulty = "basic" | "standard" | "deep";
+export type RiskLevel = "high" | "medium" | "low";
+export type PracticeStatus = "untouched" | "practiced" | "struggling";
 export type CheckScope = "facts" | "skills" | "resume" | "cross_doc";
 export type CheckLevel = "blocking" | "warning" | "pass";
 
@@ -1200,8 +1210,10 @@ export type Database = {
           user_id: string;
           target_id: string;
           jd_id: string | null;
-          kind: InterviewKind;
+          kind: InterviewKind | null;
           items: Json;
+          resume_version_id: string | null;
+          generated_at: string | null;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -1210,8 +1222,10 @@ export type Database = {
           user_id?: string;
           target_id: string;
           jd_id?: string | null;
-          kind: InterviewKind;
+          kind?: InterviewKind | null;
           items?: Json;
+          resume_version_id?: string | null;
+          generated_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -1220,8 +1234,10 @@ export type Database = {
           user_id?: string;
           target_id?: string;
           jd_id?: string | null;
-          kind?: InterviewKind;
+          kind?: InterviewKind | null;
           items?: Json;
+          resume_version_id?: string | null;
+          generated_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -1236,6 +1252,109 @@ export type Database = {
             foreignKeyName: "interview_kits_jd_id_fkey";
             columns: ["jd_id"];
             referencedRelation: "jds";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "interview_kits_resume_version_id_fkey";
+            columns: ["resume_version_id"];
+            referencedRelation: "resume_versions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      interview_questions: {
+        Row: {
+          id: string;
+          user_id: string;
+          kit_id: string;
+          kind: InterviewKind;
+          question: string;
+          probe_type: ProbeType | null;
+          difficulty: QuestionDifficulty | null;
+          from_atom_id: string | null;
+          from_existing_probe: boolean | null;
+          risk_level: RiskLevel;
+          risk_reason: string | null;
+          answer_outline: Json;
+          dont_do: string | null;
+          data_gap_hint: string | null;
+          gap_metric_id: string | null;
+          related_atom_ids: Json;
+          why_this_question: string | null;
+          practice_status: PracticeStatus;
+          practice_note: string | null;
+          carried_over: boolean;
+          sort_order: number;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          kit_id: string;
+          kind: InterviewKind;
+          question: string;
+          probe_type?: ProbeType | null;
+          difficulty?: QuestionDifficulty | null;
+          from_atom_id?: string | null;
+          from_existing_probe?: boolean | null;
+          risk_level?: RiskLevel;
+          risk_reason?: string | null;
+          answer_outline?: Json;
+          dont_do?: string | null;
+          data_gap_hint?: string | null;
+          gap_metric_id?: string | null;
+          related_atom_ids?: Json;
+          why_this_question?: string | null;
+          practice_status?: PracticeStatus;
+          practice_note?: string | null;
+          carried_over?: boolean;
+          sort_order?: number;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          kit_id?: string;
+          kind?: InterviewKind;
+          question?: string;
+          probe_type?: ProbeType | null;
+          difficulty?: QuestionDifficulty | null;
+          from_atom_id?: string | null;
+          from_existing_probe?: boolean | null;
+          risk_level?: RiskLevel;
+          risk_reason?: string | null;
+          answer_outline?: Json;
+          dont_do?: string | null;
+          data_gap_hint?: string | null;
+          gap_metric_id?: string | null;
+          related_atom_ids?: Json;
+          why_this_question?: string | null;
+          practice_status?: PracticeStatus;
+          practice_note?: string | null;
+          carried_over?: boolean;
+          sort_order?: number;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "interview_questions_kit_id_fkey";
+            columns: ["kit_id"];
+            referencedRelation: "interview_kits";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "interview_questions_from_atom_id_fkey";
+            columns: ["from_atom_id"];
+            referencedRelation: "atoms";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "interview_questions_gap_metric_id_fkey";
+            columns: ["gap_metric_id"];
+            referencedRelation: "metrics";
             referencedColumns: ["id"];
           },
         ];
