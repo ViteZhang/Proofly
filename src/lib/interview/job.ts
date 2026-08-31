@@ -1,16 +1,28 @@
-"use server";
-
 // =============================================================
-// Proofly · 面试题包生成
+// Proofly · 面试题包生成作业
+//
+// 为什么是后台作业：实测一次出题 10–35 分钟（三次真调 1175s / 1209s /
+// 2092s）。提示词要「总数 15–20 题」，每道带 3–4 个应答要点，一次生成
+// 1.3–1.6 万 completion token；三家供应商里只有一家能稳定在 200s 左右
+// 跑完，另两家经常挂到时限再失败。挂在 Server Action 上等于要求用户
+// 开着页面干等半小时，关掉就白跑。
+//
+// 所以照 Step 2 抽取作业那套：活跑在 after() 里，进度落库，页面轮询。
+// 三个设计决定：
+// 1. 深挖题跑完立刻落库，不等案例题 —— 前 18 道题是最该先看的那些，
+//    没道理陪着后一半一起等。
+// 2. 按题型分开写：inheritPractice 本来就不跨题型认领，所以深挖题那批
+//    单独继承、单独落库，案例题失败也不会把已出的深挖题冲掉。
+// 3. 心跳单开一个定时器。这里跟抽取作业不一样 —— 那边是几十条小调用，
+//    自然有机会打点；这里整段时间都卡在一次 await 上，不单开就没人报活。
 //
 // 分两次模型调用不是为了省钱，是为了质量：项目深挖题要吃经历的全部
 // 细节，案例题只要 JD 与技能概览。混在一次里，模型会拿经历去套案例题，
 // 也会因为上下文太杂而把深挖题写得泛泛。
 //
-// 风险等级在这里之后由代码判。模型输出里的风险标记一律不读。
+// 风险等级由代码判。模型输出里的风险标记一律不读。
 // =============================================================
 
-import { revalidatePath } from "next/cache";
 import { callLLM } from "@/lib/llm";
 import {
   CASE_SYSTEM,
@@ -19,7 +31,7 @@ import {
   probeUser,
 } from "@/lib/llm/interview-prompts";
 import { createClient } from "@/lib/supabase/server";
-import { fail, ok, parseStringList, type ActionResult } from "@/lib/domain";
+import { parseStringList } from "@/lib/domain";
 import {
   loadKitInput,
   parseOutline,
@@ -37,22 +49,9 @@ import {
   type BuiltQuestion,
   type PlanAtom,
 } from "@/lib/interview/plan";
-import type { Json } from "@/types/database";
+import type { Database, InterviewKind, Json, KitJobStage } from "@/types/database";
 
-export type KitOutcome = {
-  kitId: string;
-  total: number;
-  probes: number;
-  cases: number;
-  warnings: string[];
-  /** 因为编造 / 踩护栏被丢掉的题。用户有权知道丢了什么。 */
-  rejected: { question: string; problems: string[] }[];
-};
-
-function refresh() {
-  revalidatePath("/interview");
-  revalidatePath("/resume");
-}
+export type RejectedQuestion = { question: string; problems: string[] };
 
 function periodLabel(a: KitAtom): string {
   const s = a.periodStart?.slice(0, 7).replace("-", ".") ?? "";
@@ -260,45 +259,29 @@ async function runCases(
   return buildCaseQuestions(res.data.questions, atoms, startOrder, vocab);
 }
 
-async function writeKit(
-  input: KitInput,
-  questions: BuiltQuestion[],
-): Promise<{ kitId: string; inherited: number; carried: number } | null> {
+// ---- 落库 ----
+
+/**
+ * 写一批题，并把上一版的练习状态接过来。
+ *
+ * 按题型分批写：inheritPractice 不跨题型认领，所以深挖题那批可以在
+ * 案例题还没跑完时就落库。案例题那次失败，已经出好的深挖题也不会被冲掉。
+ */
+async function writeKind(
+  kitId: string,
+  kinds: InterviewKind[],
+  fresh: BuiltQuestion[],
+  startOrder: number,
+): Promise<{ inherited: number; carried: number; written: number } | null> {
   const supabase = await createClient();
 
-  const { data: existing } = await supabase
-    .from("interview_kits")
-    .select("id")
-    .eq("resume_version_id", input.versionId)
-    .maybeSingle();
-
-  let kitId = existing?.id ?? null;
-  if (kitId) {
-    await supabase
-      .from("interview_kits")
-      .update({ generated_at: new Date().toISOString(), jd_id: input.jdId })
-      .eq("id", kitId);
-  } else {
-    const { data: created } = await supabase
-      .from("interview_kits")
-      .insert({
-        target_id: input.targetId,
-        jd_id: input.jdId,
-        resume_version_id: input.versionId,
-        generated_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-    kitId = created?.id ?? null;
-  }
-  if (!kitId) return null;
-
   // 先把上一版标过的题读出来，再删。练习状态是用户花时间试出来的，
-  // 一次重新生成抹掉它，下次他就不知道自己卡在哪了。
+  // 一次重新生成抹掉它，他下次就不知道自己卡在哪了。
   const { data: priorRows } = await supabase
     .from("interview_questions")
     .select("*")
     .eq("kit_id", kitId)
+    .in("kind", kinds)
     .neq("practice_status", "untouched");
 
   const prior: PriorQuestion[] = (priorRows ?? []).map((r) => ({
@@ -321,12 +304,12 @@ async function writeKit(
     practiceNote: r.practice_note,
   }));
 
-  const merged = inheritPractice(questions, prior);
+  const merged = inheritPractice(fresh, prior);
 
-  await supabase.from("interview_questions").delete().eq("kit_id", kitId);
+  await supabase.from("interview_questions").delete().eq("kit_id", kitId).in("kind", kinds);
 
   const { error } = await supabase.from("interview_questions").insert(
-    merged.questions.map((q) => ({
+    merged.questions.map((q, i) => ({
       kit_id: kitId,
       kind: q.kind,
       question: q.question,
@@ -345,55 +328,156 @@ async function writeKit(
       practice_status: q.practiceStatus,
       practice_note: q.practiceNote,
       carried_over: q.carriedOver,
-      sort_order: q.sortOrder,
+      sort_order: startOrder + i,
     })),
   );
   if (error) return null;
-  return { kitId, inherited: merged.inherited, carried: merged.carried };
+  return { inherited: merged.inherited, carried: merged.carried, written: merged.questions.length };
 }
 
-/** 为一份投递版本生成题包。 */
-export async function generateKit(
-  versionId: string,
-): Promise<ActionResult<KitOutcome>> {
-  const input = await loadKitInput(versionId);
-  if (!input) return fail("找不到这份投递版本");
-  if (input.atoms.length === 0) {
-    return fail("这份简历里没有可出题的经历，先去基线里选几条经历");
-  }
+// ---- 作业 ----
 
-  const atoms = input.atoms.map(toPlanAtom);
+/** 干活期间多久报一次「我还活着」。要明显小于界面判定断线的阈值。 */
+const HEARTBEAT_MS = 30_000;
 
-  const probeResult = await runProbes(input, atoms);
-  if (typeof probeResult === "string") return fail(probeResult);
+type KitPatch = Database["public"]["Tables"]["interview_kits"]["Update"];
 
-  const caseResult = await runCases(input, atoms, probeResult.questions.length);
-  if (typeof caseResult === "string") return fail(caseResult);
+async function patch(kitId: string, values: KitPatch): Promise<void> {
+  const supabase = await createClient();
+  await supabase.from("interview_kits").update(values).eq("id", kitId);
+}
 
-  const questions = [...probeResult.questions, ...caseResult.questions];
-  if (questions.length === 0)
-    return fail("模型没有产出任何可用的题目，再试一次");
-
-  const written = await writeKit(input, questions);
-  if (!written) return fail("题目写入失败");
-
-  const warnings = [...probeResult.warnings, ...caseResult.warnings];
-  if (written.inherited > 0) {
-    warnings.push(`${written.inherited} 道题继承了上一版的练习状态`);
-  }
-  if (written.carried > 0) {
-    warnings.push(
-      `${written.carried} 道标着「答不好」的旧题这一版没再出，已原样保留`,
-    );
-  }
-
-  refresh();
-  return ok({
-    kitId: written.kitId,
-    total: questions.length,
-    probes: probeResult.questions.length,
-    cases: caseResult.questions.length,
-    warnings,
-    rejected: [...probeResult.rejected, ...caseResult.rejected],
+async function failJob(kitId: string, message: string): Promise<void> {
+  await patch(kitId, {
+    job_status: "failed",
+    job_stage: null,
+    error_message: message,
+    heartbeat_at: new Date().toISOString(),
   });
+}
+
+async function stage(kitId: string, s: KitJobStage): Promise<void> {
+  await patch(kitId, { job_stage: s, heartbeat_at: new Date().toISOString() });
+}
+
+/**
+ * 跑完一个出题作业。不抛异常 —— 失败写进 error_message，让界面有话可说。
+ *
+ * 可重入：从头再跑一次是安全的，落库按题型整批替换，练习状态照样继承。
+ * 重入会重花一次模型钱，所以只在心跳停了、用户明确要求时才续。
+ */
+export async function runKitJob(kitId: string): Promise<void> {
+  const beat = setInterval(() => {
+    void patch(kitId, { heartbeat_at: new Date().toISOString() });
+  }, HEARTBEAT_MS);
+
+  try {
+    const supabase = await createClient();
+    const { data: kit } = await supabase
+      .from("interview_kits")
+      .select("id,resume_version_id,job_status")
+      .eq("id", kitId)
+      .maybeSingle();
+    if (!kit?.resume_version_id) {
+      await failJob(kitId, "这个题包没有对应的投递版本");
+      return;
+    }
+
+    const input = await loadKitInput(kit.resume_version_id);
+    if (!input) {
+      await failJob(kitId, "找不到这份投递版本");
+      return;
+    }
+    if (input.atoms.length === 0) {
+      await failJob(kitId, "这份简历里没有可出题的经历，先去基线里选几条经历");
+      return;
+    }
+
+    const atoms = input.atoms.map(toPlanAtom);
+    const warnings: string[] = [];
+    const rejected: RejectedQuestion[] = [];
+
+    // ---- 阶段一：项目深挖题 ----
+    await stage(kitId, "probing");
+    const probeResult = await runProbes(input, atoms);
+    if (typeof probeResult === "string") {
+      await failJob(kitId, `出项目深挖题时失败：${probeResult}`);
+      return;
+    }
+    warnings.push(...probeResult.warnings);
+    rejected.push(...probeResult.rejected);
+
+    const probeWrite = await writeKind(kitId, ["project_probe"], probeResult.questions, 0);
+    if (!probeWrite) {
+      await failJob(kitId, "项目深挖题写入失败");
+      return;
+    }
+    if (probeWrite.inherited > 0) {
+      warnings.push(`${probeWrite.inherited} 道深挖题继承了上一版的练习状态`);
+    }
+    if (probeWrite.carried > 0) {
+      warnings.push(`${probeWrite.carried} 道标着「答不好」的旧深挖题这一版没再出，已原样保留`);
+    }
+    // 深挖题先落库先能看：这十几道题正是最该先准备的那些。
+    await patch(kitId, {
+      probe_count: probeWrite.written,
+      warnings: warnings as unknown as Json,
+      rejected: rejected as unknown as Json,
+      heartbeat_at: new Date().toISOString(),
+    });
+
+    // ---- 阶段二：案例题 ----
+    await stage(kitId, "casing");
+    const caseResult = await runCases(input, atoms, probeWrite.written);
+    if (typeof caseResult === "string") {
+      // 深挖题已经落库了，不算全盘失败 —— 但要说清楚少了半边。
+      await patch(kitId, {
+        job_status: "failed",
+        job_stage: null,
+        error_message: `深挖题已经出好了，案例题这次没出上：${caseResult}`,
+        warnings: warnings as unknown as Json,
+        rejected: rejected as unknown as Json,
+        heartbeat_at: new Date().toISOString(),
+      });
+      return;
+    }
+    warnings.push(...caseResult.warnings);
+    rejected.push(...caseResult.rejected);
+
+    await stage(kitId, "writing");
+    const caseWrite = await writeKind(
+      kitId,
+      ["product_case", "ai_tech", "data_case"],
+      caseResult.questions,
+      probeWrite.written,
+    );
+    if (!caseWrite) {
+      await failJob(kitId, "案例题写入失败");
+      return;
+    }
+    if (caseWrite.inherited > 0) {
+      warnings.push(`${caseWrite.inherited} 道案例题继承了上一版的练习状态`);
+    }
+    if (caseWrite.carried > 0) {
+      warnings.push(`${caseWrite.carried} 道标着「答不好」的旧案例题这一版没再出，已原样保留`);
+    }
+
+    await patch(kitId, {
+      job_status: "done",
+      job_stage: null,
+      error_message: null,
+      probe_count: probeWrite.written,
+      case_count: caseWrite.written,
+      generated_at: new Date().toISOString(),
+      warnings: warnings as unknown as Json,
+      rejected: rejected as unknown as Json,
+      heartbeat_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    // 后台作业没人接住异常。吞掉但写进 error_message，
+    // 否则作业会一直标着 running，界面看着跟死了一样还不报错。
+    await failJob(kitId, e instanceof Error ? e.message : "出题时出了意外");
+  } finally {
+    clearInterval(beat);
+  }
 }

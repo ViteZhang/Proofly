@@ -6,6 +6,7 @@
 // =============================================================
 
 import { getKit, listVersionOptions } from "@/lib/queries/interview";
+import { getKitJobProgress } from "@/app/(app)/interview/job-actions";
 import { InterviewBoard } from "@/components/interview/InterviewBoard";
 
 export default async function InterviewPage({
@@ -18,6 +19,10 @@ export default async function InterviewPage({
   // 没指定就选第一份 —— 已投递的排在前面，那通常就是最近要面的那家。
   const selected = versions.find((x) => x.id === v) ?? versions[0] ?? null;
   const kit = selected ? await getKit(selected.id) : null;
+  // 服务端就把作业状态读出来：刷新或换台设备打开时，正在跑的作业
+  // 立刻接着显示进度，不用等第一次轮询。
+  const jobRes = kit ? await getKitJobProgress(kit.id) : null;
+  const job = jobRes?.ok ? jobRes.data : null;
 
   return (
     <div>
@@ -25,7 +30,7 @@ export default async function InterviewPage({
       <p className="mt-1.5 text-[14px]" style={{ color: "var(--slate)" }}>
         知道会被问什么，尤其是会被问倒什么
       </p>
-      <InterviewBoard kit={kit} versions={versions} selected={selected} />
+      <InterviewBoard kit={kit} versions={versions} selected={selected} job={job} />
     </div>
   );
 }

@@ -53,6 +53,8 @@ export type ProbeType =
 export type QuestionDifficulty = "basic" | "standard" | "deep";
 export type RiskLevel = "high" | "medium" | "low";
 export type PracticeStatus = "untouched" | "practiced" | "struggling";
+export type KitJobStatus = "idle" | "running" | "done" | "failed";
+export type KitJobStage = "probing" | "casing" | "writing";
 export type CheckScope = "facts" | "skills" | "resume" | "cross_doc";
 export type CheckLevel = "blocking" | "warning" | "pass";
 
@@ -1214,6 +1216,15 @@ export type Database = {
           items: Json;
           resume_version_id: string | null;
           generated_at: string | null;
+          job_status: KitJobStatus;
+          job_stage: KitJobStage | null;
+          job_started_at: string | null;
+          heartbeat_at: string | null;
+          error_message: string | null;
+          probe_count: number;
+          case_count: number;
+          warnings: Json;
+          rejected: Json;
           created_at: string | null;
           updated_at: string | null;
         };
@@ -1226,6 +1237,15 @@ export type Database = {
           items?: Json;
           resume_version_id?: string | null;
           generated_at?: string | null;
+          job_status?: KitJobStatus;
+          job_stage?: KitJobStage | null;
+          job_started_at?: string | null;
+          heartbeat_at?: string | null;
+          error_message?: string | null;
+          probe_count?: number;
+          case_count?: number;
+          warnings?: Json;
+          rejected?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -1238,6 +1258,15 @@ export type Database = {
           items?: Json;
           resume_version_id?: string | null;
           generated_at?: string | null;
+          job_status?: KitJobStatus;
+          job_stage?: KitJobStage | null;
+          job_started_at?: string | null;
+          heartbeat_at?: string | null;
+          error_message?: string | null;
+          probe_count?: number;
+          case_count?: number;
+          warnings?: Json;
+          rejected?: Json;
           created_at?: string | null;
           updated_at?: string | null;
         };

@@ -12,7 +12,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { QuestionCard } from "./QuestionCard";
-import { generateKit, type KitOutcome } from "@/app/(app)/interview/actions";
+import { KitJobPanel } from "./KitJobPanel";
+import { startKitJob, type KitJobProgress } from "@/app/(app)/interview/job-actions";
 import { overviewOf } from "@/lib/interview/view";
 import type { KitView, VersionOption } from "@/lib/queries/interview";
 import type { InterviewKind, PracticeStatus, RiskLevel } from "@/types/database";
@@ -42,15 +43,24 @@ export function InterviewBoard({
   kit,
   versions,
   selected,
+  job,
 }: {
   kit: KitView | null;
   versions: VersionOption[];
   selected: VersionOption | null;
+  /** 服务端渲染时读到的作业状态。有它页面一打开就知道该不该轮询。 */
+  job: KitJobProgress | null;
 }) {
   const router = useRouter();
   const [, start] = useTransition();
   const [running, setRunning] = useState(false);
-  const [outcome, setOutcome] = useState<KitOutcome | null>(null);
+  // 正在跑的作业 id。为 null 时不轮询。
+  const [jobKitId, setJobKitId] = useState<string | null>(
+    job && !job.settled ? job.kitId : null,
+  );
+  const [outcome, setOutcome] = useState<KitJobProgress | null>(
+    job && job.settled && (job.warnings.length > 0 || job.rejected.length > 0) ? job : null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<InterviewKind>("project_probe");
   const [risk, setRisk] = useState<RiskLevel | "all">("all");
@@ -58,21 +68,32 @@ export function InterviewBoard({
   const [atomId, setAtomId] = useState<string>("all");
   const [picking, setPicking] = useState(false);
 
+  // 起作业只是插一行 + after()，秒回。真正的等待交给 KitJobPanel 轮询，
+  // 页面关掉作业照样在后台跑完。
   function run() {
     if (!selected) return;
     setError(null);
     setOutcome(null);
     setRunning(true);
     start(async () => {
-      const r = await generateKit(selected.id);
+      const r = await startKitJob(selected.id);
       setRunning(false);
       if (!r.ok) {
         setError(r.error);
         return;
       }
-      setOutcome(r.data);
-      router.refresh();
+      setJobKitId(r.data);
     });
+  }
+
+  // 深挖题落库时会来一次，作业停下来时再来一次。两次都要刷新页面 ——
+  // 前者是为了让刚出的十几道题立刻能看，后者是为了把案例题也带出来。
+  function onProgress(p: KitJobProgress) {
+    if (p.settled) {
+      setJobKitId(null);
+      if (p.warnings.length > 0 || p.rejected.length > 0) setOutcome(p);
+    }
+    router.refresh();
   }
 
   if (versions.length === 0) {
@@ -122,8 +143,8 @@ export function InterviewBoard({
           {picking ? "收起" : "换一份 ▾"}
         </Button>
         {kit && (
-          <Button size="sm" variant="secondary" disabled={running} onClick={run}>
-            {running ? "正在出题，十来分钟…" : "重新出题"}
+          <Button size="sm" variant="secondary" disabled={running || jobKitId !== null} onClick={run}>
+            {jobKitId ? "正在出题…" : "重新出题"}
           </Button>
         )}
         {kit && (
@@ -172,18 +193,27 @@ export function InterviewBoard({
         </p>
       )}
 
-      {outcome && <Outcome outcome={outcome} />}
+      {jobKitId && <KitJobPanel kitId={jobKitId} onSettled={onProgress} />}
 
-      {!kit ? (
+      {!jobKitId && outcome && <Outcome outcome={outcome} />}
+
+      {/* 作业刚起、题还没落库时，题包行已经存在但里面是空的 ——
+          那还是空状态，不该显示四个 0 的标签页。 */}
+      {!kit || (questions.length === 0 && !jobKitId) ? (
         <Empty>
           <p className="text-[14px]">
             这份投递版本还没出过题。我按它实际用到的经历出题 —— 面试官只会问简历上写了的。
           </p>
           <p className="mt-2 text-[12.5px]" style={{ color: "var(--mute)" }}>
-            两次大生成，一次十来分钟。别关页面。
+            两次大生成，一次十来分钟。作业跑在后台，可以关掉页面。
           </p>
-          <Button size="sm" className="mt-3" disabled={running || !selected} onClick={run}>
-            {running ? "正在出题，十来分钟…" : "出一套题"}
+          <Button
+            size="sm"
+            className="mt-3"
+            disabled={running || jobKitId !== null || !selected}
+            onClick={run}
+          >
+            {jobKitId ? "正在出题…" : "出一套题"}
           </Button>
         </Empty>
       ) : (
@@ -317,7 +347,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 /** 丢掉的题必须说出来 —— 不说，用户以为模型只出了这么多。 */
-function Outcome({ outcome }: { outcome: KitOutcome }) {
+function Outcome({ outcome }: { outcome: KitJobProgress }) {
   const [open, setOpen] = useState(false);
   const noise = outcome.warnings.length + outcome.rejected.length;
   return (
@@ -326,7 +356,8 @@ function Outcome({ outcome }: { outcome: KitOutcome }) {
       style={{ borderColor: "var(--line-soft)", background: "var(--card)" }}
     >
       <p>
-        出了 {outcome.total} 道题：项目深挖 {outcome.probes} · 案例题 {outcome.cases}。
+        出了 {outcome.probeCount + outcome.caseCount} 道题：项目深挖 {outcome.probeCount} · 案例题{" "}
+        {outcome.caseCount}。
       </p>
       {noise > 0 && (
         <button
@@ -340,12 +371,12 @@ function Outcome({ outcome }: { outcome: KitOutcome }) {
       )}
       {open && (
         <div className="mt-2 space-y-1.5 text-[12.5px]" style={{ color: "var(--slate)" }}>
-          {outcome.rejected.map((r, i) => (
+          {outcome.rejected.map((r: { question: string; problems: string[] }, i: number) => (
             <p key={`r-${i}`}>
               丢掉「{r.question}」：{r.problems.join("；")}
             </p>
           ))}
-          {outcome.warnings.map((w, i) => (
+          {outcome.warnings.map((w: string, i: number) => (
             <p key={`w-${i}`}>{w}</p>
           ))}
         </div>
