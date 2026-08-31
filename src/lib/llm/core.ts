@@ -50,6 +50,15 @@ type BaseOptions = {
   purpose: string;
   /** JSON 校验失败后的重试次数，默认 1。 */
   maxRetries?: number;
+  /**
+   * 这一次调用的总时限，默认 CALL_DEADLINE_MS（5 分钟）。
+   *
+   * 只有一种情况该调大：任务本身就要生成很长的结构化输出，5 分钟不是
+   * 「卡住了」而是「还没写完」。面试题包是唯一这样的地方 —— 一次要 15–20
+   * 道题、每道带 3–4 个应答要点，实测单次要 300–500s。把它按卡死处理，
+   * 用户永远拿不到题。
+   */
+  deadlineMs?: number;
 };
 
 export type TextTier = Exclude<Tier, "embedding">;
@@ -135,7 +144,9 @@ export async function callLLM(
       // 网络层重试，与下面的校验重试是两回事。
       // 中转站在并发下会回 503，SDK 的指数退避能扛过大部分，所以给到 4 次。
       maxRetries: 4,
-      timeout: ATTEMPT_TIMEOUT_MS,
+      // 传了 deadlineMs 就跟着放宽：SDK 先超时的话会自己重试，
+      // 于是一次本来只是慢的生成被重跑四遍，比不放宽还糟。
+      timeout: opts.deadlineMs ?? ATTEMPT_TIMEOUT_MS,
     });
 
     const r: Attempt<unknown> =
@@ -188,6 +199,8 @@ async function complete(
     { role: "user", content: userContent(opts) },
   ];
 
+  const deadline = opts.deadlineMs ?? CALL_DEADLINE_MS;
+
   let attempts = 0;
   let promptTokens = 0;
   let completionTokens = 0;
@@ -211,7 +224,7 @@ async function complete(
           messages,
           max_completion_tokens: cap,
         },
-        { signal: AbortSignal.timeout(CALL_DEADLINE_MS) },
+        { signal: AbortSignal.timeout(deadline) },
       );
       const ms = Date.now() - t0;
       promptTokens += res.usage?.prompt_tokens ?? 0;

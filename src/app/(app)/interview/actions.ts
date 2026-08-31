@@ -19,8 +19,15 @@ import {
   probeUser,
 } from "@/lib/llm/interview-prompts";
 import { createClient } from "@/lib/supabase/server";
-import { fail, ok, type ActionResult } from "@/lib/domain";
-import { loadKitInput, toRiskAtom, type KitAtom, type KitInput } from "@/lib/queries/interview";
+import { fail, ok, parseStringList, type ActionResult } from "@/lib/domain";
+import {
+  loadKitInput,
+  parseOutline,
+  toRiskAtom,
+  type KitAtom,
+  type KitInput,
+} from "@/lib/queries/interview";
+import { inheritPractice, type PriorQuestion } from "@/lib/interview/inherit";
 import { caseSetSchema, probeSetSchema } from "@/lib/interview/schema";
 import {
   buildCaseQuestions,
@@ -62,7 +69,13 @@ function sourceTextOf(a: KitAtom): string {
     a.situation,
     a.task,
     ...a.actions,
-    ...a.metrics.flatMap((m) => [m.name, m.fromValue, m.toValue, m.delta, m.method]),
+    ...a.metrics.flatMap((m) => [
+      m.name,
+      m.fromValue,
+      m.toValue,
+      m.delta,
+      m.method,
+    ]),
     ...a.probes.flatMap((p) => [p.q, p.a_outline]),
     a.periodStart,
     a.periodEnd,
@@ -118,7 +131,9 @@ function usedAtomsJson(input: KitInput): string {
       },
       resume_spread: spreadOf(a),
       resume_text: a.block
-        ? [a.block.title, a.block.summary, ...a.block.bullets].filter(Boolean).join("\n")
+        ? [a.block.title, a.block.summary, ...a.block.bullets]
+            .filter(Boolean)
+            .join("\n")
         : "",
     })),
   );
@@ -135,14 +150,23 @@ function requirementsJson(input: KitInput): string {
   );
 }
 
-/** 丢掉的题喂回模型。只说问题，不给替代答案 —— 替代答案又是一次编造。 */
-function rejectFeedback(rejected: { question: string; problems: string[] }[]): string {
-  if (rejected.length === 0) return "";
-  const lines = rejected.map((r) => `- 「${r.question}」：${r.problems.join("；")}`);
-  return `\n\n## 上一次这几道题被丢弃了，重出时避开同样的问题\n\n${lines.join("\n")}\n\n应答要点里的每一个事实都必须能在给定的经历数据里查到。`;
-}
+/**
+ * 项目深挖题：一次调用，长时限。
+ *
+ * 实测这一段是全项目最重的一次生成 —— 提示词要「总数 15–20 题」，每道
+ * 带 3–4 个应答要点、别做的事与缺数据提示，单次输出上万 token，从头到尾
+ * 300–500 秒。默认的 5 分钟总时限会把它当成卡死掐掉。
+ *
+ * 试过按经历切批并行，没用：模型是照着「15–20 题」这条数量要求写的，
+ * 给它一条经历它照样出 18 道题（实测 486s）。切批只会把同样的输出量
+ * 乘上批数。所以还是一次调用，把时限放到 10 分钟。
+ */
+const PROBE_DEADLINE_MS = 600_000;
 
-async function runProbes(input: KitInput, atoms: PlanAtom[]): Promise<BuildResult | string> {
+async function runProbes(
+  input: KitInput,
+  atoms: PlanAtom[],
+): Promise<BuildResult | string> {
   const base = probeUser({
     company: input.company || "（未填公司）",
     roleTitle: input.roleTitle || "（未填岗位）",
@@ -161,29 +185,24 @@ async function runProbes(input: KitInput, atoms: PlanAtom[]): Promise<BuildResul
     ),
   });
 
-  let best: BuildResult | null = null;
-  const allRejected: { question: string; problems: string[] }[] = [];
+  const res = await callLLM({
+    tier: "strong",
+    purpose: "interview_probe",
+    system: PROBE_SYSTEM,
+    user: base,
+    jsonSchema: probeSetSchema,
+    deadlineMs: PROBE_DEADLINE_MS,
+    // 默认 16000 不够：实测输出打到 13–15k token 就被截断，截断的那一份
+    // 连 JSON 都不完整，等于整次白跑。推理模型的思考 token 也算在这里，
+    // 所以要留出两倍余量。
+    maxTokens: 32000,
+    // 校验失败不再补一轮。这一次已经十分钟了，再来一轮等于二十分钟，
+    // 那时候用户早就走开了 —— 不如让他看到失败，自己决定要不要重来。
+    maxRetries: 0,
+  });
+  if (!res.ok) return res.error;
 
-  // 最多两次。第一次有题因为编造被丢才重来 —— 没问题就不该多花一次 strong 档。
-  for (let pass = 0; pass < 2; pass++) {
-    const res = await callLLM({
-      tier: "strong",
-      purpose: "interview_probe",
-      system: PROBE_SYSTEM,
-      user: base + rejectFeedback(allRejected),
-      jsonSchema: probeSetSchema,
-    });
-    if (!res.ok) return res.error;
-
-    const built = buildProbeQuestions(res.data.questions, atoms);
-    allRejected.push(...built.rejected);
-    // 重试只可能让题变多，所以取题多的那次。
-    if (best === null || built.questions.length > best.questions.length) best = built;
-    if (built.rejected.length === 0) break;
-  }
-
-  if (best === null) return "模型没有产出任何题目";
-  return { ...best, rejected: allRejected };
+  return buildProbeQuestions(res.data.questions, atoms);
 }
 
 async function runCases(
@@ -211,10 +230,17 @@ async function runCases(
         })),
       ),
       skillsJson: JSON.stringify(
-        input.skills.map((s) => ({ label: s.label, category: s.category, depth: s.depth })),
+        input.skills.map((s) => ({
+          label: s.label,
+          category: s.category,
+          depth: s.depth,
+        })),
       ),
     }),
     jsonSchema: caseSetSchema,
+    // 比深挖题轻（不吃经历细节），但同样是 15–24 道题的结构化输出。
+    deadlineMs: 480_000,
+    maxTokens: 32000,
   });
   if (!res.ok) return res.error;
 
@@ -222,7 +248,13 @@ async function runCases(
   // 就是模型自己想出来的。
   const vocab = techVocabulary([
     ...input.skills.map((s) => s.label),
-    ...input.atoms.flatMap((a) => [a.title, ...a.skills, ...a.actions, a.situation ?? "", a.task ?? ""]),
+    ...input.atoms.flatMap((a) => [
+      a.title,
+      ...a.skills,
+      ...a.actions,
+      a.situation ?? "",
+      a.task ?? "",
+    ]),
     ...input.requirements.flatMap((r) => [r.text, r.rawPhrase]),
   ]);
   return buildCaseQuestions(res.data.questions, atoms, startOrder, vocab);
@@ -231,7 +263,7 @@ async function runCases(
 async function writeKit(
   input: KitInput,
   questions: BuiltQuestion[],
-): Promise<string | null> {
+): Promise<{ kitId: string; inherited: number; carried: number } | null> {
   const supabase = await createClient();
 
   const { data: existing } = await supabase
@@ -261,11 +293,40 @@ async function writeKit(
   }
   if (!kitId) return null;
 
-  // 整包替换。练习状态的继承是 7.5 的事，这一片先把生成跑通。
+  // 先把上一版标过的题读出来，再删。练习状态是用户花时间试出来的，
+  // 一次重新生成抹掉它，下次他就不知道自己卡在哪了。
+  const { data: priorRows } = await supabase
+    .from("interview_questions")
+    .select("*")
+    .eq("kit_id", kitId)
+    .neq("practice_status", "untouched");
+
+  const prior: PriorQuestion[] = (priorRows ?? []).map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    question: r.question,
+    probeType: r.probe_type,
+    difficulty: r.difficulty,
+    fromAtomId: r.from_atom_id,
+    fromExistingProbe: r.from_existing_probe ?? false,
+    riskLevel: r.risk_level,
+    riskReason: r.risk_reason,
+    answerOutline: parseOutline(r.answer_outline),
+    dontDo: r.dont_do,
+    dataGapHint: r.data_gap_hint,
+    gapMetricId: r.gap_metric_id,
+    relatedAtomIds: parseStringList(r.related_atom_ids),
+    whyThisQuestion: r.why_this_question,
+    practiceStatus: r.practice_status,
+    practiceNote: r.practice_note,
+  }));
+
+  const merged = inheritPractice(questions, prior);
+
   await supabase.from("interview_questions").delete().eq("kit_id", kitId);
 
   const { error } = await supabase.from("interview_questions").insert(
-    questions.map((q) => ({
+    merged.questions.map((q) => ({
       kit_id: kitId,
       kind: q.kind,
       question: q.question,
@@ -281,15 +342,20 @@ async function writeKit(
       gap_metric_id: q.gapMetricId,
       related_atom_ids: q.relatedAtomIds as unknown as Json,
       why_this_question: q.whyThisQuestion,
+      practice_status: q.practiceStatus,
+      practice_note: q.practiceNote,
+      carried_over: q.carriedOver,
       sort_order: q.sortOrder,
     })),
   );
   if (error) return null;
-  return kitId;
+  return { kitId, inherited: merged.inherited, carried: merged.carried };
 }
 
 /** 为一份投递版本生成题包。 */
-export async function generateKit(versionId: string): Promise<ActionResult<KitOutcome>> {
+export async function generateKit(
+  versionId: string,
+): Promise<ActionResult<KitOutcome>> {
   const input = await loadKitInput(versionId);
   if (!input) return fail("找不到这份投递版本");
   if (input.atoms.length === 0) {
@@ -305,18 +371,29 @@ export async function generateKit(versionId: string): Promise<ActionResult<KitOu
   if (typeof caseResult === "string") return fail(caseResult);
 
   const questions = [...probeResult.questions, ...caseResult.questions];
-  if (questions.length === 0) return fail("模型没有产出任何可用的题目，再试一次");
+  if (questions.length === 0)
+    return fail("模型没有产出任何可用的题目，再试一次");
 
-  const kitId = await writeKit(input, questions);
-  if (!kitId) return fail("题目写入失败");
+  const written = await writeKit(input, questions);
+  if (!written) return fail("题目写入失败");
+
+  const warnings = [...probeResult.warnings, ...caseResult.warnings];
+  if (written.inherited > 0) {
+    warnings.push(`${written.inherited} 道题继承了上一版的练习状态`);
+  }
+  if (written.carried > 0) {
+    warnings.push(
+      `${written.carried} 道标着「答不好」的旧题这一版没再出，已原样保留`,
+    );
+  }
 
   refresh();
   return ok({
-    kitId,
+    kitId: written.kitId,
     total: questions.length,
     probes: probeResult.questions.length,
     cases: caseResult.questions.length,
-    warnings: [...probeResult.warnings, ...caseResult.warnings],
+    warnings,
     rejected: [...probeResult.rejected, ...caseResult.rejected],
   });
 }

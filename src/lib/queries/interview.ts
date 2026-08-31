@@ -244,6 +244,8 @@ export type QuestionView = {
   difficulty: QuestionDifficulty | null;
   fromAtomId: string | null;
   fromAtomTitle: string | null;
+  /** 来源经历的证明度。题目卡上的 ProofDot 继承它。 */
+  fromAtomEvidence: EvidenceLevel | null;
   fromExistingProbe: boolean;
   riskLevel: RiskLevel;
   riskReason: string | null;
@@ -333,11 +335,38 @@ export async function getKit(versionId: string): Promise<KitView | null> {
     .limit(1)
     .maybeSingle();
   if (!kit) return null;
+  return loadKit(kit);
+}
+
+/** 按题包 id 读。导出与打印路由用的是这一个。 */
+export async function getKitById(kitId: string): Promise<KitView | null> {
+  if (!UUID_RE.test(kitId)) return null;
+  const supabase = await createClient();
+  const { data: kit } = await supabase
+    .from("interview_kits")
+    .select("id,resume_version_id,target_id,jd_id,generated_at")
+    .eq("id", kitId)
+    .maybeSingle();
+  if (!kit || !kit.resume_version_id) return null;
+  return loadKit(kit);
+}
+
+type KitRow = {
+  id: string;
+  resume_version_id: string | null;
+  target_id: string;
+  jd_id: string | null;
+  generated_at: string | null;
+};
+
+async function loadKit(kit: KitRow): Promise<KitView | null> {
+  const supabase = await createClient();
+  const versionId = kit.resume_version_id ?? "";
 
   const [{ data: rows }, { data: jd }] = await Promise.all([
     supabase
       .from("interview_questions")
-      .select("*,atoms(title)")
+      .select("*,atoms(title,evidence_level)")
       .eq("kit_id", kit.id)
       .order("sort_order", { ascending: true }),
     supabase.from("jds").select("company,role_title").eq("id", kit.jd_id ?? "").maybeSingle(),
@@ -351,6 +380,8 @@ export async function getKit(versionId: string): Promise<KitView | null> {
     difficulty: r.difficulty,
     fromAtomId: r.from_atom_id,
     fromAtomTitle: (r.atoms as { title: string } | null)?.title ?? null,
+    fromAtomEvidence:
+      (r.atoms as { evidence_level: EvidenceLevel } | null)?.evidence_level ?? null,
     fromExistingProbe: r.from_existing_probe ?? false,
     riskLevel: r.risk_level,
     riskReason: r.risk_reason,
@@ -403,3 +434,87 @@ export async function getKit(versionId: string): Promise<KitView | null> {
     numbers,
   };
 }
+
+// ---- 版本选择器 ----
+
+export type VersionOption = {
+  id: string;
+  company: string;
+  roleTitle: string;
+  targetName: string;
+  submittedAt: string | null;
+  updatedAt: string | null;
+  /** 已经出过题的版本显示题数；没出过显示「去出题」。 */
+  questionCount: number;
+  highRiskCount: number;
+};
+
+/** 可以出题的投递版本。已投递的排前面 —— 面试是投出去之后的事。 */
+export async function listVersionOptions(): Promise<VersionOption[]> {
+  const supabase = await createClient();
+
+  const { data: rows } = await supabase
+    .from("resume_versions")
+    .select("id,jd_id,baseline_id,submitted_at,updated_at")
+    .order("submitted_at", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false });
+  if (!rows || rows.length === 0) return [];
+
+  const [{ data: jds }, { data: baselines }, { data: targets }, { data: kits }] =
+    await Promise.all([
+      supabase.from("jds").select("id,company,role_title").in("id", rows.map((r) => r.jd_id)),
+      supabase
+        .from("resume_baselines")
+        .select("id,target_id")
+        .in("id", rows.map((r) => r.baseline_id)),
+      supabase.from("targets").select("id,name"),
+      supabase
+        .from("interview_kits")
+        .select("id,resume_version_id")
+        .in("resume_version_id", rows.map((r) => r.id)),
+    ]);
+
+  const kitIds = (kits ?? []).map((k) => k.id);
+  const countByVersion = new Map<string, { total: number; high: number }>();
+  if (kitIds.length > 0) {
+    const { data: qs } = await supabase
+      .from("interview_questions")
+      .select("kit_id,risk_level")
+      .in("kit_id", kitIds);
+    const versionOfKit = new Map(
+      (kits ?? []).map((k) => [k.id, k.resume_version_id ?? ""]),
+    );
+    for (const q of qs ?? []) {
+      const vid = versionOfKit.get(q.kit_id);
+      if (!vid) continue;
+      const cur = countByVersion.get(vid) ?? { total: 0, high: 0 };
+      cur.total += 1;
+      if (q.risk_level === "high") cur.high += 1;
+      countByVersion.set(vid, cur);
+    }
+  }
+
+  const jdById = new Map((jds ?? []).map((j) => [j.id, j]));
+  const targetOfBaseline = new Map((baselines ?? []).map((b) => [b.id, b.target_id]));
+  const nameOfTarget = new Map((targets ?? []).map((t) => [t.id, t.name]));
+
+  return rows.map((r) => {
+    const jd = jdById.get(r.jd_id);
+    const counts = countByVersion.get(r.id) ?? { total: 0, high: 0 };
+    return {
+      id: r.id,
+      company: jd?.company ?? "未填公司",
+      roleTitle: jd?.role_title ?? "未填岗位",
+      targetName: nameOfTarget.get(targetOfBaseline.get(r.baseline_id) ?? "") ?? "未知方向",
+      submittedAt: r.submitted_at,
+      updatedAt: r.updated_at,
+      questionCount: counts.total,
+      highRiskCount: counts.high,
+    };
+  });
+}
+
+// 概览计算搬到 lib/interview/view.ts —— 客户端组件要用，
+// 从这里 import 会把服务端 Supabase 客户端一起拖进 bundle。
+export { overviewOf, type KitOverview } from "@/lib/interview/view";
