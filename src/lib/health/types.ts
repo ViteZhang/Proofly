@@ -40,6 +40,11 @@ export interface HealthCheck {
   scope: HealthScope;
   /** 全部通过时列在「N 项检查通过」里的名字。 */
   label: string;
+  /**
+   * 深扫项要调模型，一次二十到六十秒，跑在后台作业里，不能挂在进页面上。
+   * 它的 run() 返回空数组 —— 结果由作业写库，报告从库里读。
+   */
+  deep?: boolean;
   run(ctx: HealthContext): Promise<HealthIssue[]>;
 }
 

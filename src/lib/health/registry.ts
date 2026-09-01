@@ -10,6 +10,7 @@ import { c1Facts } from "./c1-facts";
 import { c2Skills, c3Wording, c4NeverSay, c5Exclusive } from "./c2-c5-gate";
 import { c6FactDrift } from "./c6-fact-drift";
 import { c7CrossTarget } from "./c7-cross-target";
+import { c8Conflict } from "./c8-conflict";
 import { c9Stale } from "./c9-stale";
 import { c10Method } from "./c10-method";
 
@@ -26,8 +27,8 @@ export const QUICK_CHECKS: HealthCheck[] = [
   c10Method,
 ];
 
-/** 深扫。C8 在切片 8.4 接进来。 */
-export const DEEP_CHECKS: HealthCheck[] = [];
+/** 深扫。调模型，二十到六十秒，只能手动触发。 */
+export const DEEP_CHECKS: HealthCheck[] = [c8Conflict];
 
 export const ALL_CHECKS = [...QUICK_CHECKS, ...DEEP_CHECKS];
 

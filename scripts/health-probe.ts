@@ -27,6 +27,16 @@ import {
   normalizeNumber,
   verbStrength,
 } from "../src/lib/health/c7-cross-target";
+import {
+  EXCERPT_LIMIT,
+  MIN_SOURCES,
+  atomsToScan,
+  buildConflictIssues,
+  levelOfSeverity,
+  sourceExcerptsJson,
+  usable,
+} from "../src/lib/health/c8-conflict";
+import { CONFLICT_SYSTEM, conflictUser } from "../src/lib/llm/health-prompts";
 import { c9Stale, daysSince } from "../src/lib/health/c9-stale";
 import { c10Method, methodMissing } from "../src/lib/health/c10-method";
 import { QUICK_CHECKS } from "../src/lib/health/registry";
@@ -399,6 +409,96 @@ console.log("\n【C7 跨方向简历一致性】");
     })).get("a1")?.length === 1,
   );
   check("15i · 指纹按经历 + 两个方向稳定", v[0]?.fingerprint === "C7:verb:a1:t1:t2");
+}
+
+// ============ C8 ============
+console.log("\n【C8 语义冲突深扫】");
+{
+  // 验收 24 · 只关联 1 个源文档的经历跳过
+  const c = ctx({
+    atoms: [
+      atom({ id: "a1", title: "知识宇宙", sourceDocIds: ["d1", "d2"] }),
+      atom({ id: "a2", title: "单一来源的", sourceDocIds: ["d1"] }),
+      atom({ id: "a3", title: "没有来源的", sourceDocIds: [] }),
+    ],
+    sourceDocs: [
+      { id: "d1", filename: "项目全景档案.md", parsedText: "用的是通义千问", ingestedAt: "2026-01-01T00:00:00Z" },
+      { id: "d2", filename: "简历项目档案.md", parsedText: "接的 OpenAI", ingestedAt: "2026-05-01T00:00:00Z" },
+    ],
+  });
+  const scan = atomsToScan(c);
+  check("24a · 只有多来源的经历才扫", scan.length === 1 && scan[0].id === "a1", scan.map((a) => a.id).join());
+  check("24b · 门槛是 2 份", MIN_SOURCES === 2);
+
+  // 上传时间必须进输入：它是「进展还是矛盾」的唯一依据
+  const ex = sourceExcerptsJson(c, scan[0]);
+  check("21a · 源材料片段带上传时间", ex.includes("2026-01-01") && ex.includes("2026-05-01"));
+  check("21b · 片段带文档名", ex.includes("项目全景档案.md"));
+  check("21c · 超长正文被截断", sourceExcerptsJson(
+    ctx({ sourceDocs: [{ id: "d1", filename: "x", parsedText: "啊".repeat(9000), ingestedAt: null }] }),
+    atom({ sourceDocIds: ["d1"] }),
+  ).length < EXCERPT_LIMIT * 2);
+
+  // 验收 20 · high → 警告
+  const a1 = c.atoms[0];
+  const high = buildConflictIssues(a1, [{
+    subject: "知识宇宙所用的大模型",
+    severity: "high",
+    statements: [
+      { source: "项目全景档案.md", claim: "用的是通义千问" },
+      { source: "简历项目档案.md", claim: "接的 OpenAI" },
+    ],
+    why_conflict: "同一个技术选型两种说法",
+    suggested_action: "回想一下实际用的是哪个，改掉另一处",
+  }]);
+  check("20a · high 归警告级", high.issues[0]?.level === "warning", high.issues[0]?.level);
+  check("20b · 两处说法都列出来", high.issues[0]?.detail.includes("通义千问") && high.issues[0]?.detail.includes("OpenAI"));
+  check("20c · 带来源文档名", high.issues[0]?.detail.includes("项目全景档案.md"));
+  check("20d · 给了建议", high.issues[0]?.detail.includes("建议："));
+  check("20e · 文案承认可能误报", high.issues[0]?.detail.includes("可能有误报"));
+  check("20f · 跳转到那条经历", high.issues[0]?.resolveLink === "/library?atom=a1");
+  check("20g · 指纹按经历 + 主题稳定", high.issues[0]?.fingerprint === "C8:a1:知识宇宙所用的大模型");
+
+  // 验收 25 · C8 不产生阻断
+  const levels = ["high", "HIGH", " high ", "medium", "low", "乱写的"].map(levelOfSeverity);
+  check("25a · 任何严重度都不是阻断", levels.every((l) => l !== "blocking"), levels.join());
+  check("25b · medium / low 归提示", levelOfSeverity("medium") === "info" && levelOfSeverity("low") === "info");
+  check("25c · 大小写与空格不影响 high 的判定", levelOfSeverity(" HIGH ") === "warning");
+  check("25d · 认不出的严重度按提示走，不按警告", levelOfSeverity("严重") === "info");
+
+  // 只给一处说法的「矛盾」没法核对
+  const one = buildConflictIssues(a1, [{
+    subject: "某件事", severity: "high",
+    statements: [{ source: "A", claim: "只有这一处" }],
+    why_conflict: "", suggested_action: "",
+  }]);
+  check("20h · 只给一处说法的丢弃", one.issues.length === 0 && one.dropped.length === 1);
+  check("20i · 丢弃时说清为什么", one.dropped[0].includes("没法核对"));
+  check("20j · usable 认两处非空说法", usable({
+    subject: "x", severity: "high",
+    statements: [{ source: "", claim: "a" }, { source: "", claim: "b" }],
+    why_conflict: "", suggested_action: "",
+  }));
+  check("20k · 空说法不算数", !usable({
+    subject: "x", severity: "high",
+    statements: [{ source: "", claim: "a" }, { source: "", claim: "  " }],
+    why_conflict: "", suggested_action: "",
+  }));
+
+  // 验收 21 22 23 交给模型判 —— 这里只守住「提示词逐字落码」这条底线。
+  // 第四节全文 1038 字节，改一个字这里就红。
+  check("C8-p1 · System 提示词长度与第四节原文一致", CONFLICT_SYSTEM.length === 1038, `${CONFLICT_SYSTEM.length}`);
+  check("C8-p2 · 误报代价那一段在", CONFLICT_SYSTEM.includes("**拿不准就不报。**"));
+  check("C8-p3 · 时间推移不算矛盾那一条在", CONFLICT_SYSTEM.includes("这是进展不是矛盾"));
+  check("C8-p4 · 「最后一条最容易误报」在", CONFLICT_SYSTEM.includes("**最后一条最容易误报。**"));
+  check("C8-p5 · 不许凑数那一句在", CONFLICT_SYSTEM.includes("**不要为了显得有用而凑数。**"));
+  check("C8-p6 · 详略与视角差异不算矛盾", CONFLICT_SYSTEM.includes("详略不同") && CONFLICT_SYSTEM.includes("视角不同"));
+  const u = conflictUser({ atomJson: "A", sourceExcerptsJson: "B", resumeTextsJson: "C" });
+  check("C8-p7 · User 三个占位都替换了", u.includes("A") && u.includes("B") && u.includes("C") && !u.includes("{{"));
+  // 原文 208 字节，减去三个占位符本身（13 + 24 + 21），空变量代入后应是 150。
+  const empty = conflictUser({ atomJson: "", sourceExcerptsJson: "", resumeTextsJson: "" });
+  check("C8-p8 · User 模板与第四节原文逐字一致", empty.length === 150, `${empty.length}`);
+  check("C8-p9 · 三段小字说明都在", ["每条含：文档名、上传时间、原文片段。", "每条含：所属求职方向、简历中的原文。"].every((x) => empty.includes(x)));
 }
 
 // ============ C9 ============

@@ -1,5 +1,6 @@
 import { runQuickScan, lastScan } from "@/lib/queries/health";
 import { bannerOf, sortIssues } from "@/lib/health/report";
+import { DeepScanPanel } from "@/components/health/DeepScanPanel";
 import { rescan } from "./actions";
 
 // 进入体检页自动跑一次快扫（《Step 8》§五-8.6 自动扫描时机）。
@@ -29,6 +30,8 @@ export default async function HealthPage() {
           </button>
         </form>
       </div>
+
+      <DeepScanPanel initialScanId={null} />
 
       <div
         className="mt-5 rounded-card px-5 py-4"
