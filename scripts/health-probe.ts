@@ -20,6 +20,13 @@ import {
   statedYears,
   textSources,
 } from "../src/lib/health/c6-fact-drift";
+import {
+  appearancesByAtom,
+  c7CrossTarget,
+  conflictingNumbers,
+  normalizeNumber,
+  verbStrength,
+} from "../src/lib/health/c7-cross-target";
 import { c9Stale, daysSince } from "../src/lib/health/c9-stale";
 import { c10Method, methodMissing } from "../src/lib/health/c10-method";
 import { QUICK_CHECKS } from "../src/lib/health/registry";
@@ -292,6 +299,106 @@ console.log("\n【C6 文本产物与事实台账对不上】");
   const viaCheck = await run(c6FactDrift, ctx({ facts, atoms: [atom({ id: "a1", situation: "常驻新加坡" })] }));
   check("2q · 走 HealthCheck 接口也一致", viaCheck.length === 1 && viaCheck[0].code === "C6");
   check("2r · 指纹按 key + 产物稳定", viaCheck[0].fingerprint === "C6:location:atom:a1");
+}
+
+// ============ C7 ============
+console.log("\n【C7 跨方向简历一致性】");
+{
+  const resume = (
+    id: string,
+    targetId: string,
+    label: string,
+    blocks: { id: string; atomId: string | null; renderedText: string | null }[],
+  ) => ({ kind: "baseline" as const, id, targetId, targetName: label, label, renderedMd: null, blocks });
+
+  const two = (textA: string, textB: string) =>
+    ctx({
+      atoms: [atom({ id: "a1", title: "AI 成长陪伴助手" })],
+      resumes: [
+        resume("b1", "t1", "C 端 AI 应用 · 基线", [{ id: "k1", atomId: "a1", renderedText: textA }]),
+        resume("b2", "t2", "AI Agent 平台 · 基线", [{ id: "k2", atomId: "a1", renderedText: textB }]),
+      ],
+    });
+
+  // 验收 15 · 主导 vs 参与 → 检出，阻断
+  const v = await run(c7CrossTarget, two(
+    "主导 AI 模块从 0 到 1，设计 Multi-Agent 意图路由架构",
+    "参与 AI 模块规划，协助设计意图路由方案",
+  ));
+  check("15a · 动词跨级被检出", v.length === 1, `${v.length} 条`);
+  check("15b · 阻断级", v[0]?.level === "blocking");
+  check("15c · 强度差写清楚", v[0]?.detail.includes("强度差 2 级"), v[0]?.detail.slice(-80));
+
+  // 验收 16 · 主导 vs 负责 → 不报（同级）
+  check(
+    "16 · 同级替换不报",
+    (await run(c7CrossTarget, two("主导 AI 模块从 0 到 1", "负责 AI 模块从 0 到 1"))).length === 0,
+  );
+
+  // 验收 17 · 75% vs 70% → 检出
+  const n = await run(c7CrossTarget, two("主导 AI 模块，人效提升 75%", "主导 AI 模块，人效提升 70%"));
+  check("17a · 数字不一致被检出", n.length === 1, `${n.length} 条`);
+  check("17b · 两个数都写进 detail", n[0]?.detail.includes("75") && n[0]?.detail.includes("70"));
+  check("17c · 阻断级", n[0]?.level === "blocking");
+
+  // 验收 18 · expand 三个数字 vs brief 一个 → 不报
+  check(
+    "18 · 只比对同时出现的数字",
+    (await run(c7CrossTarget, two(
+      "主导 AI 模块，人效提升 75%，团队 12 人，迭代 8 次",
+      "主导 AI 模块，人效提升 75%",
+    ))).length === 0,
+  );
+  check(
+    "18b · 共同单位里有一个对得上就不算冲突",
+    conflictingNumbers("提升 75%，留存 5%", "提升 75%").length === 0,
+  );
+  check(
+    "18c · 共同单位全对不上才报",
+    conflictingNumbers("提升 75%", "提升 70%").length === 1,
+  );
+
+  // 验收 19 · detail 列出两处原文
+  check("19a · detail 含 A 方向原文", v[0]?.detail.includes("主导 AI 模块从 0 到 1，设计 Multi-Agent 意图路由架构"));
+  check("19b · detail 含 B 方向原文", v[0]?.detail.includes("参与 AI 模块规划，协助设计意图路由方案"));
+  check("19c · 两处都标了是哪个方向", v[0]?.detail.includes("C 端 AI 应用 · 基线") && v[0]?.detail.includes("AI Agent 平台 · 基线"));
+
+  // 验收 30 · 跳转能同时看到两个方向
+  check("30 · 跳转带 compare", v[0]?.resolveLink === "/resume?target=t1&block=k1&compare=t2", v[0]?.resolveLink);
+
+  // 边界
+  check("15d · 取最先出现的动词，不是最强的", verbStrength("参与 AI 模块规划，协助设计意图路由方案")?.verb === "参与");
+  check("15d2 · 开头就是最强动词时照取", verbStrength("主导并参与了设计")?.verb === "主导");
+  check("15e · 没有职责动词就不判", verbStrength("AI 模块从 0 到 1") === null);
+  check("18d · 裸数字不参与比对", conflictingNumbers("迭代 8 次做了 3 版", "迭代 8 次做了 5 版").length === 0);
+  check("18e · 归一化去空格与全角", normalizeNumber(" 75 ％") === "75%");
+  check(
+    "15f · 同一方向的基线与投递版本不比",
+    (await run(c7CrossTarget, ctx({
+      atoms: [atom({ id: "a1" })],
+      resumes: [
+        resume("b1", "t1", "C 端 · 基线", [{ id: "k1", atomId: "a1", renderedText: "主导 AI 模块" }]),
+        { ...resume("v1", "t1", "C 端 · 星岚", [{ id: "k2", atomId: "a1", renderedText: "参与 AI 模块" }]), kind: "version" as const },
+      ],
+    }))).length === 0,
+  );
+  check(
+    "15g · 只在一个方向出现的经历不比",
+    (await run(c7CrossTarget, ctx({
+      atoms: [atom({ id: "a1" })],
+      resumes: [resume("b1", "t1", "C 端 · 基线", [{ id: "k1", atomId: "a1", renderedText: "主导 AI 模块" }])],
+    }))).length === 0,
+  );
+  check(
+    "15h · 同一份简历里同一经历的多块只取第一块",
+    appearancesByAtom(ctx({
+      resumes: [resume("b1", "t1", "C 端 · 基线", [
+        { id: "k1", atomId: "a1", renderedText: "主导" },
+        { id: "k2", atomId: "a1", renderedText: "参与" },
+      ])],
+    })).get("a1")?.length === 1,
+  );
+  check("15i · 指纹按经历 + 两个方向稳定", v[0]?.fingerprint === "C7:verb:a1:t1:t2");
 }
 
 // ============ C9 ============
