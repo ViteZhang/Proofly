@@ -8,6 +8,7 @@
 import type { HealthCheck } from "./types";
 import { c1Facts } from "./c1-facts";
 import { c2Skills, c3Wording, c4NeverSay, c5Exclusive } from "./c2-c5-gate";
+import { c6FactDrift } from "./c6-fact-drift";
 import { c9Stale } from "./c9-stale";
 import { c10Method } from "./c10-method";
 
@@ -18,6 +19,7 @@ export const QUICK_CHECKS: HealthCheck[] = [
   c3Wording,
   c4NeverSay,
   c5Exclusive,
+  c6FactDrift,
   c9Stale,
   c10Method,
 ];

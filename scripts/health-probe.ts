@@ -10,6 +10,16 @@
 
 import { c1Facts } from "../src/lib/health/c1-facts";
 import { c2Skills, c3Wording, c4NeverSay, c5Exclusive } from "../src/lib/health/c2-c5-gate";
+import {
+  authoritativeYears,
+  c6FactDrift,
+  labelledValue,
+  rulesAgainstDisclosure,
+  scanSource,
+  statedCities,
+  statedYears,
+  textSources,
+} from "../src/lib/health/c6-fact-drift";
 import { c9Stale, daysSince } from "../src/lib/health/c9-stale";
 import { c10Method, methodMissing } from "../src/lib/health/c10-method";
 import { QUICK_CHECKS } from "../src/lib/health/registry";
@@ -170,6 +180,118 @@ console.log("\n【C2–C5 从门禁汇总】");
     (await run(c4NeverSay, { ...base, gateRows: base.gateRows.map((g) => ({ ...g, id: `${g.id}-new` })) }))[0]
       .fingerprint === c4[0].fingerprint,
   );
+}
+
+// ============ C6 ============
+console.log("\n【C6 文本产物与事实台账对不上】");
+{
+  const fact = (key: string, value: string | null, label: string, rule: string | null = null) => ({
+    id: `f-${key}`,
+    key,
+    label,
+    value,
+    status: "RESOLVED" as const,
+    conflicts: [],
+    disclosureRule: rule,
+  });
+
+  const facts = [
+    fact("years_of_experience", "10 年", "工作年限"),
+    fact("location", "北京", "常驻地"),
+    fact("name", "张昭", "姓名"),
+    fact("phone", "13800138000", "手机"),
+    fact("email", "zhang@example.com", "邮箱"),
+    fact("entity_disclosure", "北京润泽园科技有限公司", "主体披露口径", "不主动披露公司主体，只写行业"),
+  ];
+
+  const src = (over: Partial<Parameters<typeof scanSource>[1]>) => ({
+    kind: "baseline" as const,
+    id: "b1",
+    where: "C 端 AI 应用 · 基线",
+    text: "",
+    resolveLink: "/resume?target=t1",
+    ...over,
+  });
+
+  // 验收 1 · 年限：台账 10 年，简历写 8 年互联网 PM
+  const y = scanSource(ctx({ facts }), src({ text: "8 年互联网 PM，主导过三个 0 到 1 的项目。" }));
+  check("1a · 年限不符被检出", y.length === 1, `${y.length} 条`);
+  check("1b · 简历产物里是阻断级", y[0]?.level === "blocking");
+  check("1c · 两边的数都写进标题", y[0]?.title.includes("8 年") && y[0]?.title.includes("10 年"), y[0]?.title);
+
+  check("1d · ±1 之内不报", scanSource(ctx({ facts }), src({ text: "9 年产品经验" })).length === 0);
+  check("1e · 差 2 年就报", scanSource(ctx({ facts }), src({ text: "8 年产品经验" })).length === 1);
+  check("1f · 「项目做了 2 年，产品上线」不是资历", statedYears("项目做了 2 年，产品上线") .length === 0);
+  check("1g · 「10 年从业」正常识别", statedYears("10 年从业经历").includes(10));
+  check("1h · 台账值带单位也能取数", authoritativeYears("10 年") === 10);
+
+  // 验收 2 · 常驻地：台账北京，经历 situation 里写常驻新加坡
+  const loc = scanSource(
+    ctx({ facts }),
+    src({ kind: "atom", id: "a1", where: "经历「知识宇宙」", text: "常驻新加坡，远程协作。", resolveLink: "/library?atom=a1" }),
+  );
+  check("2a · 常驻地不符被检出", loc.length === 1, `${loc.length} 条`);
+  check("2b · 经历字段是警告级，不是阻断", loc[0]?.level === "warning", loc[0]?.level);
+  check("2c · 跳转到那条经历", loc[0]?.resolveLink === "/library?atom=a1");
+  check("2d · 裸城市名不报", statedCities("北京大学毕业，上海分公司做过项目").length === 0);
+  check("2e · 带标记词才认", statedCities("常驻新加坡").join() === "新加坡");
+  check("2f · base 在 也认", statedCities("base 在杭州").join() === "杭州");
+  check("2g · 与权威值一致的位置不报", scanSource(ctx({ facts }), src({ text: "常驻北京" })).length === 0);
+
+  // 验收 4 · 主体披露
+  const ent = scanSource(ctx({ facts }), src({ text: "任职于北京润泽园科技有限公司，负责 AI 方向。" }));
+  check("4a · 不主动披露时出现主体全称被检出", ent.length === 1, `${ent.length} 条`);
+  check("4b · 阻断级", ent[0]?.level === "blocking");
+  check("4c · detail 里写清规则原文", ent[0]?.detail.includes("不主动披露公司主体"));
+  check(
+    "4d · 规则没说不披露就不报",
+    scanSource(
+      ctx({ facts: [fact("entity_disclosure", "北京润泽园科技有限公司", "主体披露口径", "可以写全称")] }),
+      src({ text: "任职于北京润泽园科技有限公司" }),
+    ).length === 0,
+  );
+  check("4e · 规则识别", rulesAgainstDisclosure("不主动披露") && !rulesAgainstDisclosure("随便写"));
+
+  // 手机 / 邮箱
+  const ph = scanSource(ctx({ facts }), src({ text: "联系方式 13900139000，邮箱 old@example.com" }));
+  check("2h · 手机与邮箱不符各报一条", ph.length === 2, `${ph.length} 条`);
+  check("2i · 与权威值一致的联系方式不报", scanSource(ctx({ facts }), src({ text: "13800138000 zhang@example.com" })).length === 0);
+
+  // 姓名与其余 key：只认明确标注
+  check("2j · 「姓名：李四」被检出", scanSource(ctx({ facts }), src({ text: "姓名：李四" })).length === 1);
+  check("2k · 自由文本里的人名不猜", scanSource(ctx({ facts }), src({ text: "和李四一起做的这个项目" })).length === 0);
+  check("2l · 标注解析", labelledValue("姓名：李四，手机：x", "姓名") === "李四");
+
+  // 源文档降级
+  const doc = scanSource(
+    ctx({ facts }),
+    src({ kind: "doc", id: "d1", where: "源材料《旧简历.pdf》", text: "常驻上海", resolveLink: "/import" }),
+  );
+  check("2m · 源文档统一降为警告", doc[0]?.level === "warning");
+  check("2n · 源文档文案说清改不改都行", doc[0]?.detail.includes("改不改都行"), doc[0]?.detail.slice(-60));
+
+  // 扫描范围
+  const wide = textSources(
+    ctx({
+      resumes: [
+        { kind: "baseline", id: "b1", targetId: "t1", targetName: "T", label: "T · 基线", renderedMd: "# x", blocks: [] },
+        { kind: "version", id: "v1", targetId: "t1", targetName: "T", label: "T · 星岚", renderedMd: "# y", blocks: [] },
+      ],
+      atoms: [atom({ id: "a1", situation: "背景", task: "目标", actions: ["做了事"] })],
+      sourceDocs: [{ id: "d1", filename: "旧简历.pdf", parsedText: "正文", ingestedAt: null }],
+      interviewOutlines: [{ id: "q1", atomId: "a1", text: "先说背景" }],
+    }),
+  );
+  check(
+    "2o · 五类产物都在扫描范围内",
+    new Set(wide.map((w) => w.kind)).size === 5,
+    wide.map((w) => w.kind).join(),
+  );
+  check("2p · 没有正文的产物不进列表", textSources(ctx({ atoms: [atom({ id: "a9" })] })).length === 0);
+
+  const viaCheck = await run(c6FactDrift, ctx({ facts, atoms: [atom({ id: "a1", situation: "常驻新加坡" })] }));
+  check("2q · 走 HealthCheck 接口也一致", viaCheck.length === 1 && viaCheck[0].code === "C6");
+  check("2r · 指纹按 key + 产物稳定", viaCheck[0].fingerprint === "C6:location:atom:a1");
 }
 
 // ============ C9 ============
