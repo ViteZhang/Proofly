@@ -55,8 +55,13 @@ export type RiskLevel = "high" | "medium" | "low";
 export type PracticeStatus = "untouched" | "practiced" | "struggling";
 export type KitJobStatus = "idle" | "running" | "done" | "failed";
 export type KitJobStage = "probing" | "casing" | "writing";
-export type CheckScope = "facts" | "skills" | "resume" | "cross_doc";
-export type CheckLevel = "blocking" | "warning" | "pass";
+export type CheckScope = "facts" | "skills" | "resume" | "cross_doc" | "atoms";
+// info：C9 C10 这类不阻断任何事、但应该在视野里的提示。
+export type CheckLevel = "blocking" | "warning" | "info" | "pass";
+// gate：Step 6 门禁写的；health：Step 8 体检写的。体检清空重写时只碰自己那拨。
+export type CheckOrigin = "gate" | "health";
+export type HealthScanKind = "quick" | "deep";
+export type HealthScanStatus = "running" | "done" | "failed";
 
 export type Database = {
   public: {
@@ -1438,6 +1443,9 @@ export type Database = {
           title: string;
           detail: string | null;
           ref_ids: Json;
+          origin: CheckOrigin;
+          resolve_link: string | null;
+          fingerprint: string | null;
           ignored_at: string | null;
           resolved_at: string | null;
           created_at: string | null;
@@ -1452,6 +1460,9 @@ export type Database = {
           title: string;
           detail?: string | null;
           ref_ids?: Json;
+          origin?: CheckOrigin;
+          resolve_link?: string | null;
+          fingerprint?: string | null;
           ignored_at?: string | null;
           resolved_at?: string | null;
           created_at?: string | null;
@@ -1466,8 +1477,89 @@ export type Database = {
           title?: string;
           detail?: string | null;
           ref_ids?: Json;
+          origin?: CheckOrigin;
+          resolve_link?: string | null;
+          fingerprint?: string | null;
           ignored_at?: string | null;
           resolved_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      health_ignores: {
+        Row: {
+          id: string;
+          user_id: string;
+          fingerprint: string;
+          code: string | null;
+          reason: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          fingerprint: string;
+          code?: string | null;
+          reason?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          fingerprint?: string;
+          code?: string | null;
+          reason?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      health_scans: {
+        Row: {
+          id: string;
+          user_id: string;
+          kind: HealthScanKind;
+          status: HealthScanStatus;
+          done_count: number;
+          total_count: number;
+          coverage: Json;
+          error_message: string | null;
+          started_at: string | null;
+          heartbeat_at: string | null;
+          finished_at: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          kind: HealthScanKind;
+          status?: HealthScanStatus;
+          done_count?: number;
+          total_count?: number;
+          coverage?: Json;
+          error_message?: string | null;
+          started_at?: string | null;
+          heartbeat_at?: string | null;
+          finished_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          kind?: HealthScanKind;
+          status?: HealthScanStatus;
+          done_count?: number;
+          total_count?: number;
+          coverage?: Json;
+          error_message?: string | null;
+          started_at?: string | null;
+          heartbeat_at?: string | null;
+          finished_at?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
