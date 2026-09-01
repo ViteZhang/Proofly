@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { getPrintDoc } from "@/lib/queries/resume";
+import { healthSummary } from "@/lib/queries/health";
 import { exportFilename, renderMarkdown } from "@/lib/resume/markdown";
 
 export async function GET(
@@ -17,11 +18,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const doc = await getPrintDoc(id);
+  const [doc, health] = await Promise.all([getPrintDoc(id), healthSummary()]);
   if (!doc) return new NextResponse("没有这份简历", { status: 404 });
-  if (doc.blockingCount > 0) {
+
+  // 两道：这份文档自己的门禁结果，以及全局体检里的阻断。后者是 Step 8 加的 ——
+  // 常驻地在事实层还没定死，这份简历文本再干净也不该发出去。
+  const blocking = Math.max(doc.blockingCount, health.blockingCount);
+  if (blocking > 0) {
     return new NextResponse(
-      `还有 ${doc.blockingCount} 处问题必须先解决，导出被拦下了。去 /resume/issues 看看。`,
+      `还有 ${blocking} 处问题必须先解决，导出被拦下了。去 /health 看看。`,
       { status: 409, headers: { "content-type": "text/plain; charset=utf-8" } },
     );
   }

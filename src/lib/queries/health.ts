@@ -501,3 +501,49 @@ export async function shouldSuggestDeepScan(): Promise<boolean> {
   const last = scanQ.data?.finished_at;
   return !last || Date.parse(newest) > Date.parse(last);
 }
+
+// ---- 顶栏芯片与首页卡 ----
+
+export type HealthSummary = {
+  scanned: boolean;
+  blockingCount: number;
+  minorCount: number;
+};
+
+/**
+ * 只读不跑。顶栏芯片挂在每个页面上，不能一进任何页面就触发一次全量扫描。
+ * 扫描时机按方案定死：进体检页、生成简历前、生成简历后，不做定时扫描。
+ *
+ * 所以有个「还没扫过」的状态 —— 一次都没体检过时说「一切正常」是撒谎。
+ */
+export async function healthSummary(): Promise<HealthSummary> {
+  const [report, scanned] = await Promise.all([readReport(), hasScan("quick")]);
+  return { scanned, blockingCount: report.blockingCount, minorCount: report.minorCount };
+}
+
+// ---- 生成前拦截 ----
+
+/**
+ * 简历产物里的问题（C3 C4 C5 C6-on-resume C7）**不**作为生成前的拦截项。
+ *
+ * 理由是它们会死锁：这些问题是上一次生成的产物写出来的，而修好它们的办法
+ * 恰恰是重新生成一次（Step 6 还会把上一轮的门禁反馈附给模型）。拿它们拦住
+ * 重新生成，等于把用户锁在一个改不了的状态里。
+ *
+ * 它们照旧拦导出 —— 那是 Step 6 已经做的事，也是真正该拦的那一刀：
+ * 有问题的简历可以存在，不可以发出去。
+ *
+ * 这里拦的是事实层与技能层的阻断（C1 C2）：那些不重新生成也能修，
+ * 而且不修的话这次生成出来还是错的。
+ */
+const PRE_GENERATION_CODES = ["C1", "C2"];
+
+export type PreGenerationBlock = { code: string; title: string; detail: string };
+
+export async function blockingBeforeGeneration(): Promise<PreGenerationBlock[]> {
+  // 生成简历前自动跑一次快扫（§五-8.6 自动扫描时机）。
+  const report = await runQuickScan();
+  return report.blocking
+    .filter((i) => PRE_GENERATION_CODES.includes(i.code))
+    .map((i) => ({ code: i.code, title: i.title, detail: i.detail }));
+}

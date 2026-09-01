@@ -39,10 +39,13 @@ export function BaselineWorkbench({
   targetId,
   targetName,
   baseline,
+  globalBlocking,
 }: {
   targetId: string;
   targetName: string;
   baseline: BaselineView | null;
+  /** 全局体检里的阻断数。事实层没定死，这份简历再干净也不该导出。 */
+  globalBlocking: number;
 }) {
   const router = useRouter();
   // 体检页的「去解决」带着 ?block=<id> 过来 —— 直接选中那一块并滚过去，
@@ -188,10 +191,16 @@ export function BaselineWorkbench({
           </Button>
         )}
         {blocks.length > 0 &&
-          (baseline && baseline.checks.some((c) => c.level === "blocking") ? (
+          (baseline &&
+          (baseline.checks.some((c) => c.level === "blocking") || globalBlocking > 0) ? (
             <span className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "var(--danger)" }}>
-              ⚠ 有 {baseline.checks.filter((c) => c.level === "blocking").length} 处问题必须先解决
-              <Link href="/resume/issues" className="underline" style={{ color: "var(--ink)" }}>
+              ⚠ 有{" "}
+              {Math.max(
+                baseline.checks.filter((c) => c.level === "blocking").length,
+                globalBlocking,
+              )}{" "}
+              处问题必须先解决
+              <Link href="/health#blocking" className="underline" style={{ color: "var(--ink)" }}>
                 去看看
               </Link>
             </span>
