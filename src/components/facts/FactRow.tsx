@@ -1,11 +1,23 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { resolveFact, updateFact } from "@/app/(app)/facts/actions";
 import type { ProfileFact } from "@/lib/queries/facts";
 
 export function FactRow({ fact }: { fact: ProfileFact }) {
+  // 体检页的「去解决」带着 ?key=location&highlight=1 过来。跳到页面顶部
+  // 让用户自己找等于没做跳转 —— 滚到那一行，并把它标出来。
+  const params = useSearchParams();
+  const targeted = params.get("key") === fact.key;
+  const highlighted = targeted && params.get("highlight") === "1";
+  const row = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!targeted) return;
+    row.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [targeted]);
+
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(fact.value ?? "");
   const [choice, setChoice] = useState<string | null>(null);
@@ -45,7 +57,14 @@ export function FactRow({ fact }: { fact: ProfileFact }) {
   }
 
   return (
-    <div className="border-t px-5 py-4 first:border-t-0" style={{ borderColor: "var(--line-soft)" }}>
+    <div
+      ref={row}
+      className="border-t px-5 py-4 first:border-t-0"
+      style={{
+        borderColor: "var(--line-soft)",
+        background: highlighted ? "var(--caution-soft)" : undefined,
+      }}
+    >
       <div className="flex items-center gap-3">
         <span className="w-[110px] shrink-0 text-[13.5px] font-medium">{fact.label}</span>
 

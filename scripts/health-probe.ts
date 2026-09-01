@@ -149,7 +149,7 @@ console.log("\n【C1 事实层 BLOCKING】");
 console.log("\n【C2–C5 从门禁汇总】");
 {
   const base = ctx({
-    skills: [{ id: "s9", label: "Multi-Agent 编排", evidenceStrength: "none" }],
+    skills: [{ id: "s9", label: "Multi-Agent 编排", evidenceStrength: "none", atomIds: ["a7"] }],
     resumes: [
       {
         kind: "baseline",
@@ -174,7 +174,7 @@ console.log("\n【C2–C5 从门禁汇总】");
 
   const c2 = await run(c2Skills, base);
   check("7a · C2 从 G5 汇总出一条", c2.length === 1, `${c2.length} 条`);
-  check("7b · C2 跳转带 skill id", c2[0]?.resolveLink === "/library?tab=skills&skill=s9", c2[0]?.resolveLink);
+  check("7b · C2 跳到挂了这个技能的经历", c2[0]?.resolveLink === "/library?atom=a7&highlight=skills", c2[0]?.resolveLink);
 
   const c3 = await run(c3Wording, base);
   check("8a · C3 收 G1 与 G3 两类", c3.length === 2, `${c3.length} 条`);

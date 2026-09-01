@@ -44,7 +44,12 @@ function resolveLink(ctx: HealthContext, code: string, row: GateRow): string {
     // G5 的 ref 没带 skill id，只能按标签名回查。
     const m = row.title.match(/「(.+?)」/);
     const skill = m ? ctx.skills.find((s) => s.label === m[1]) : undefined;
-    return skill ? `/library?tab=skills&skill=${skill.id}` : "/library?tab=skills";
+    // 方案写的是 /library?tab=skills&skill=<id>，但技能栏不是一个独立页面 ——
+    // 技能挂在经历面板里，要给它补证据只能去某条经历上。所以跳到第一条
+    // 挂了它的经历并展开技能区；一条都没挂就跳经历库，那正是要做的事：
+    // 要么把它挂到一条经历上，要么删掉它。
+    const atomId = skill?.atomIds[0];
+    return atomId ? `/library?atom=${atomId}&highlight=skills` : "/library?highlight=skills";
   }
   const target = ctx.resumes.find((x) => `${x.kind}:${x.id}` === row.owner)?.targetId;
   if (code === "C5") {

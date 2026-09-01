@@ -1,88 +1,113 @@
-import { runQuickScan, lastScan } from "@/lib/queries/health";
-import { bannerOf, sortIssues } from "@/lib/health/report";
+import { lastScan, runQuickScan, shouldSuggestDeepScan } from "@/lib/queries/health";
+import { bannerOf, type ReportIssue } from "@/lib/health/report";
 import { DeepScanPanel } from "@/components/health/DeepScanPanel";
+import { IssueCard } from "@/components/health/IssueCard";
+import { PassedList } from "@/components/health/PassedList";
 import { rescan } from "./actions";
 
-// 进入体检页自动跑一次快扫（《Step 8》§五-8.6 自动扫描时机）。
-// 快扫零 LLM 调用，全是库查询与文本比对，所以敢挂在进页面上。
+// S10 体检页。全局视图 —— 方向选择器在这一页置灰（判定在 nav.ts）。
+//
+// 进页面自动跑一次快扫。快扫零 LLM 调用、全是库查询与文本比对，所以敢
+// 挂在进页面上；深扫要调模型，只能手动点。
 export default async function HealthPage() {
   const report = await runQuickScan();
-  const meta = await lastScan("quick");
+  const [meta, suggestDeep] = await Promise.all([lastScan("quick"), shouldSuggestDeepScan()]);
   const banner = bannerOf(report);
   const cover = meta?.coverage;
 
+  const tone =
+    banner.kind === "blocked"
+      ? { bg: "var(--danger-soft)", fg: "var(--danger)" }
+      : banner.kind === "minor"
+        ? { bg: "var(--caution-soft)", fg: "var(--caution)" }
+        : { bg: "var(--proof-soft)", fg: "var(--proof)" };
+
   return (
-    <div>
-      <div className="flex items-start justify-between gap-4">
+    <div className="max-w-[760px]">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="font-display text-[26px] font-semibold tracking-tight">体检</h1>
           <p className="mt-1.5 text-[14px]" style={{ color: "var(--slate)" }}>
-            投出去之前，先自查 · 全局 · 所有方向共用
+            投出去之前，先自查
+            <span className="ml-2 rounded-pill px-2 py-[2px] text-[11.5px]" style={{ background: "var(--bg)", color: "var(--mute)" }}>
+              全局 · 所有方向共用
+            </span>
           </p>
         </div>
-        <form action={rescan}>
-          <button
-            type="submit"
-            className="rounded-btn px-3 py-1.5 text-[13px]"
-            style={{ background: "var(--card)", border: "1px solid var(--line)" }}
-          >
-            重新扫描
-          </button>
-        </form>
+
+        <div className="text-right">
+          <form action={rescan} className="inline">
+            <button
+              type="submit"
+              className="rounded-btn px-3 py-1.5 text-[13px]"
+              style={{ background: "var(--card)", border: "1px solid var(--line)" }}
+            >
+              重新扫描
+            </button>
+          </form>
+          <DeepScanPanel initialScanId={null} />
+          {meta?.finishedAt && (
+            <p className="mt-2 text-[11.5px]" style={{ color: "var(--mute)" }}>
+              上次扫描 {new Date(meta.finishedAt).toLocaleString("zh-CN", { hour12: false })}
+              {cover && (
+                <>
+                  <br />
+                  {cover.atoms} 条经历 · {cover.skills} 个技能 · {cover.resumes} 份简历 ·{" "}
+                  {cover.sourceDocs} 份源材料
+                </>
+              )}
+            </p>
+          )}
+        </div>
       </div>
 
-      <DeepScanPanel initialScanId={null} />
-
-      <div
-        className="mt-5 rounded-card px-5 py-4"
-        style={{
-          background:
-            banner.kind === "blocked"
-              ? "var(--danger-soft)"
-              : banner.kind === "minor"
-                ? "var(--caution-soft)"
-                : "var(--proof-soft)",
-          color:
-            banner.kind === "blocked"
-              ? "var(--danger)"
-              : banner.kind === "minor"
-                ? "var(--caution)"
-                : "var(--proof)",
-        }}
-      >
-        <div className="text-[15px] font-medium">{banner.headline}</div>
-        {banner.sub && <div className="mt-1 text-[13px] opacity-80">{banner.sub}</div>}
-        {cover && (
-          <div className="mt-2 text-[12px] opacity-70">
-            {cover.atoms} 条经历 · {cover.skills} 个技能 · {cover.resumes} 份简历 ·{" "}
-            {cover.sourceDocs} 份源材料
-          </div>
-        )}
-      </div>
-
-      {sortIssues([...report.blocking, ...report.warning, ...report.info]).map((i) => (
-        <div
-          key={i.fingerprint}
-          className="mt-3 rounded-card px-5 py-4"
-          style={{ background: "var(--card)", border: "1px solid var(--line)" }}
+      {suggestDeep && (
+        <p
+          className="mt-4 rounded-card px-4 py-3 text-[13px]"
+          style={{ background: "var(--ai-soft)", color: "var(--ai)" }}
         >
-          <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--mute)" }}>
-            <span>{i.code}</span>
-            <span>{i.level}</span>
-          </div>
-          <div className="mt-1 text-[14px] font-medium">{i.title}</div>
-          <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
-            {i.detail}
-          </p>
-          <a className="mt-2 inline-block text-[13px] underline" href={i.resolveLink}>
-            去解决
-          </a>
-        </div>
-      ))}
+          导入了新材料，建议做一次深度扫描 —— 新旧材料之间说法不一致，只有语义比对查得出来。
+        </p>
+      )}
 
-      <p className="mt-5 text-[13px]" style={{ color: "var(--mute)" }}>
-        {report.passed.length} 项检查通过：{report.passed.map((p) => p.label).join(" · ")}
-      </p>
+      <div className="mt-4 rounded-card px-5 py-4" style={{ background: tone.bg, color: tone.fg }}>
+        <p className="text-[15px] font-medium">{banner.headline}</p>
+        {banner.sub && <p className="mt-1 text-[13px] opacity-80">{banner.sub}</p>}
+      </div>
+
+      <Group title="必须解决" issues={report.blocking} />
+      <Group title="建议解决" issues={report.warning} />
+      <Group title="知道就行" issues={report.info} />
+      <Group title="已忽略" issues={report.ignored} muted />
+
+      <PassedList passed={report.passed} />
     </div>
+  );
+}
+
+function Group({
+  title,
+  issues,
+  muted,
+}: {
+  title: string;
+  issues: ReportIssue[];
+  muted?: boolean;
+}) {
+  if (issues.length === 0) return null;
+  return (
+    <section className="mt-6">
+      <h2
+        className="text-[11.5px] font-medium"
+        style={{ letterSpacing: "0.06em", color: "var(--mute)", opacity: muted ? 0.7 : 1 }}
+      >
+        {title} · {issues.length}
+      </h2>
+      <div className="mt-2 space-y-2" style={{ opacity: muted ? 0.72 : 1 }}>
+        {issues.map((i) => (
+          <IssueCard key={i.fingerprint} issue={i} />
+        ))}
+      </div>
+    </section>
   );
 }

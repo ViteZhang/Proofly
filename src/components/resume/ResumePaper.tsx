@@ -168,6 +168,8 @@ function BlockRow({
         tabIndex={0}
         aria-pressed={selected}
         aria-label={`简历块 ${block.title}`}
+        // 体检页跳过来时要能滚到这一块
+        data-block-id={block.id}
         className={`${newSection ? "" : "mt-5"} cursor-pointer border-l-[3px] pl-3 transition-colors`}
         style={{ borderColor: border, marginLeft: -15 }}
       >

@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import type { EvidenceChange } from "@/app/(app)/library/actions";
 import {
@@ -177,6 +178,13 @@ export function AtomReadView({
 
 // ---- 小件 ----
 
+// 体检页的「去解决」带着 ?highlight=技能证据 / 结果 过来 —— 滚到那一区
+// 并标出来。跳到经历顶部让用户自己往下找，等于没做跳转。
+const HIGHLIGHT_BLOCK: Record<string, string> = {
+  skills: "技能证据",
+  metrics: "结果",
+};
+
 function Block({
   title,
   aside,
@@ -186,11 +194,23 @@ function Block({
   aside?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const params = useSearchParams();
+  const wanted = HIGHLIGHT_BLOCK[params.get("highlight") ?? ""];
+  const hit = wanted === title;
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (hit) ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [hit]);
+
   return (
     <section
+      ref={ref}
       data-block={title}
       className="border-t px-6 py-5"
-      style={{ borderColor: "var(--line-soft)" }}
+      style={{
+        borderColor: "var(--line-soft)",
+        background: hit ? "var(--caution-soft)" : undefined,
+      }}
     >
       <h3
         className="flex items-center gap-1.5 text-[11.5px] font-medium"

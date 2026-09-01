@@ -96,6 +96,8 @@ export type HealthSkill = {
   id: string;
   label: string;
   evidenceStrength: EvidenceStrength;
+  /** 挂在哪些经历上。C2 的「去解决」要跳到能给它补证据的地方。 */
+  atomIds: string[];
 };
 
 export type HealthTarget = { id: string; name: string };

@@ -12,7 +12,7 @@
 // =============================================================
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { ResumePaper } from "./ResumePaper";
@@ -45,12 +45,17 @@ export function BaselineWorkbench({
   baseline: BaselineView | null;
 }) {
   const router = useRouter();
+  // 体检页的「去解决」带着 ?block=<id> 过来 —— 直接选中那一块并滚过去，
+  // 不让用户自己在整页简历里找。
+  const params = useSearchParams();
+  const wanted = params.get("block");
+
   const [phase, setPhase] = useState<Phase>("idle");
   const [preview, setPreview] = useState<SelectionPreview | null>(null);
   const [blocked, setBlocked] = useState<GateResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(wanted);
   const [menu, setMenu] = useState<{ blockId: string; x: number; y: number } | null>(null);
   const [confirm, setConfirm] = useState<"lock" | "unlock" | null>(null);
   const [, start] = useTransition();
@@ -58,6 +63,13 @@ export function BaselineWorkbench({
   const blocks = baseline?.blocks ?? [];
   const locked = !!baseline?.lockedAt;
   const selected = blocks.find((b) => b.id === selectedId) ?? null;
+
+  // 块是异步渲染出来的，选中不等于已经在 DOM 里，所以滚动等一拍。
+  useEffect(() => {
+    if (!wanted) return;
+    const el = document.querySelector(`[data-block-id="${wanted}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [wanted, blocks.length]);
 
   const [revealed, setRevealed] = useState(0);
   useEffect(() => {

@@ -49,6 +49,7 @@ export async function loadHealthContext(now = new Date()): Promise<HealthContext
     metricsQ,
     srcLinkQ,
     skillsQ,
+    skillLinkQ,
     targetsQ,
     docsQ,
     gateQ,
@@ -66,6 +67,7 @@ export async function loadHealthContext(now = new Date()): Promise<HealthContext
         .select("id,atom_id,name,kind,from_value,to_value,delta,method,evidence_level"),
       supabase.from("atom_sources").select("atom_id,source_doc_id"),
       supabase.from("skills").select("id,label,evidence_strength"),
+      supabase.from("atom_skills").select("atom_id,skill_id"),
       supabase.from("targets").select("id,name"),
       supabase.from("source_docs").select("id,filename,parsed_text,ingested_at"),
       supabase
@@ -145,6 +147,7 @@ export async function loadHealthContext(now = new Date()): Promise<HealthContext
       id: s.id,
       label: s.label,
       evidenceStrength: s.evidence_strength,
+      atomIds: (skillLinkQ.data ?? []).filter((l) => l.skill_id === s.id).map((l) => l.atom_id),
     })),
     targets: (targetsQ.data ?? []).map((t) => ({ id: t.id, name: t.name })),
     resumes,
@@ -396,4 +399,105 @@ export async function lastScan(kind: "quick" | "deep"): Promise<ScanMeta | null>
         ? { atoms: c.atoms, skills: c.skills ?? 0, resumes: c.resumes ?? 0, sourceDocs: c.sourceDocs ?? 0 }
         : null,
   };
+}
+
+// ---- C7 的跨方向对照 ----
+
+export type CrossCompare = {
+  atomTitle: string;
+  here: { label: string; text: string };
+  there: { label: string; text: string } | null;
+};
+
+/**
+ * C7 的「去解决」带着 ?block=&compare= 过来。跳到简历页只看见一处，
+ * 用户还得自己切到另一个方向再翻一遍 —— 那等于没做跳转。这里把另一处
+ * 的原文一起取出来，两处并排放在页面顶上。
+ */
+export async function getCrossCompare(
+  blockId: string,
+  otherTargetId: string,
+): Promise<CrossCompare | null> {
+  const ctx = await loadHealthContext();
+
+  let here: { resume: HealthResume; text: string; atomId: string } | null = null;
+  for (const r of ctx.resumes) {
+    for (const b of r.blocks) {
+      if (b.id !== blockId || !b.atomId) continue;
+      here = { resume: r, text: b.renderedText ?? "", atomId: b.atomId };
+    }
+  }
+  if (!here) return null;
+
+  let there: { label: string; text: string } | null = null;
+  for (const r of ctx.resumes) {
+    if (r.targetId !== otherTargetId) continue;
+    for (const b of r.blocks) {
+      if (b.atomId !== here.atomId || !b.renderedText) continue;
+      there = { label: r.label, text: b.renderedText };
+      break;
+    }
+    if (there) break;
+  }
+
+  const atom = ctx.atoms.find((a) => a.id === here.atomId);
+  return {
+    atomTitle: atom?.title ?? "这条经历",
+    here: { label: here.resume.label, text: here.text },
+    there,
+  };
+}
+
+// ---- 忽略 ----
+
+export async function ignoreIssue(
+  fingerprint: string,
+  code: string,
+  reason: string,
+): Promise<void> {
+  const supabase = await createClient();
+  await supabase
+    .from("health_ignores")
+    .upsert(
+      { fingerprint, code, reason: reason.trim() === "" ? null : reason.trim() },
+      { onConflict: "user_id,fingerprint" },
+    );
+}
+
+export async function restoreIssue(fingerprint: string): Promise<void> {
+  const supabase = await createClient();
+  await supabase.from("health_ignores").delete().eq("fingerprint", fingerprint);
+}
+
+// ---- 导入新材料后建议深扫 ----
+
+/**
+ * 上一次深扫之后又导入了新材料，那次深扫就不算数了 —— 新旧材料之间的
+ * 矛盾正是这一项要找的东西，而它还没看过新的那份。
+ */
+export async function shouldSuggestDeepScan(): Promise<boolean> {
+  const supabase = await createClient();
+  const [docQ, scanQ] = await Promise.all([
+    supabase
+      .from("source_docs")
+      .select("ingested_at")
+      .not("ingested_at", "is", null)
+      .order("ingested_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("health_scans")
+      .select("finished_at")
+      .eq("kind", "deep")
+      .eq("status", "done")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  const newest = docQ.data?.ingested_at;
+  if (!newest) return false;
+  // 一份材料都没扫过 → 建议扫；扫过但之后又导入了新的 → 也建议扫。
+  const last = scanQ.data?.finished_at;
+  return !last || Date.parse(newest) > Date.parse(last);
 }
