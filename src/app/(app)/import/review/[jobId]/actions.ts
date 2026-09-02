@@ -8,7 +8,7 @@ import { fail, ok, type ActionResult } from "@/lib/domain";
 import { refreshAtomEmbedding } from "@/lib/ingest/embedding";
 import { diffEntry, pass2Schema } from "@/lib/ingest/schema";
 import { getProofSummary } from "@/lib/queries/atoms";
-import { BULK_THRESHOLD } from "@/lib/queries/drafts";
+import { BULK_THRESHOLD, settleIngestJob } from "@/lib/queries/drafts";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
 
@@ -97,7 +97,7 @@ export async function acceptDraft(
   after(() => refreshAtomEmbedding(atomId));
 
   const after_ = await getProofSummary();
-  const rest = await settleJob(draft.ingest_job_id);
+  const rest = await settleIngestJob(draft.ingest_job_id);
 
   revalidatePath("/library");
   revalidatePath("/");
@@ -129,7 +129,7 @@ export async function rejectDraft(draftId: string): Promise<ActionResult<CommitR
   if (error) return fail(`没能丢掉这条：${error.message}`);
 
   const score = await getProofSummary();
-  const rest = await settleJob(draft.ingest_job_id);
+  const rest = await settleIngestJob(draft.ingest_job_id);
   return ok({
     scoreBefore: score.score,
     scoreAfter: score.score,
@@ -164,7 +164,7 @@ export async function acceptAllCreates(jobId: string): Promise<ActionResult<Comm
     if (res.ok) last = res.data.atomId;
   }
   const after_ = await getProofSummary();
-  const rest = await settleJob(jobId);
+  const rest = await settleIngestJob(jobId);
 
   return ok({
     scoreBefore: before.score,
@@ -173,21 +173,6 @@ export async function acceptAllCreates(jobId: string): Promise<ActionResult<Comm
     remaining: rest.remaining,
     jobCommitted: rest.committed,
   });
-}
-
-// 队列清空 → 作业收尾
-async function settleJob(jobId: string): Promise<{ remaining: number; committed: boolean }> {
-  const supabase = await createClient();
-  const { count } = await supabase
-    .from("drafts")
-    .select("id", { count: "exact", head: true })
-    .eq("ingest_job_id", jobId)
-    .eq("review_status", "pending");
-  const remaining = count ?? 0;
-  if (remaining === 0) {
-    await supabase.from("ingest_jobs").update({ status: "committed" }).eq("id", jobId);
-  }
-  return { remaining, committed: remaining === 0 };
 }
 
 function obj(v: Json): Record<string, Json | undefined> {

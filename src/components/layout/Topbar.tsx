@@ -15,9 +15,12 @@ const SELECT_STYLE = {
 
 export function Topbar({
   blockingCount,
+  scanned,
   targets,
 }: {
   blockingCount: number;
+  /** 一次都没扫过时不能说「一切正常」—— 那是撒谎。 */
+  scanned: boolean;
   targets: TargetOption[];
 }) {
   const pathname = usePathname();
@@ -76,22 +79,27 @@ export function Topbar({
         </select>
       )}
 
-      {/* 体检状态芯片：事实层里 BLOCKING 的条数。点进去就能处理。 */}
+      {/* 体检状态芯片：全部阻断级问题的条数，不只是事实层。点进去就能处理。 */}
       <Link
-        href="/facts"
+        href="/health"
         className="inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-[11.5px] font-medium transition-opacity hover:opacity-80"
         style={
           blockingCount > 0
             ? { background: "var(--danger-soft)", color: "var(--danger)" }
-            : { background: "var(--proof-soft)", color: "var(--proof)" }
+            : scanned
+              ? { background: "var(--proof-soft)", color: "var(--proof)" }
+              : { background: "var(--bg)", color: "var(--mute)" }
         }
       >
         <span
           aria-hidden
           className="h-1.5 w-1.5 rounded-pill"
-          style={{ background: blockingCount > 0 ? "var(--danger)" : "var(--proof)" }}
+          style={{
+            background:
+              blockingCount > 0 ? "var(--danger)" : scanned ? "var(--proof)" : "var(--mute)",
+          }}
         />
-        {blockingCount > 0 ? `${blockingCount} 处待解决` : "一切正常"}
+        {blockingCount > 0 ? `${blockingCount} 处待解决` : scanned ? "一切正常" : "还没体检过"}
       </Link>
 
       {/* 全局搜索占位：显示 ⌘K，本步不实现 */}

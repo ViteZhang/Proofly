@@ -87,10 +87,13 @@ export async function getJobProgress(jobId: string): Promise<ActionResult<JobPro
     .maybeSingle();
   if (!job) return fail("找不到这个作业");
 
+  // 只数还没处理的。数全部的话，确认了两条再回来，
+  // 界面还写着「抽出 5 条，等你确认」，按钮点进去队列里只剩 3 条。
   const { count } = await supabase
     .from("drafts")
     .select("id", { count: "exact", head: true })
-    .eq("ingest_job_id", jobId);
+    .eq("ingest_job_id", jobId)
+    .eq("review_status", "pending");
 
   const candidates = parseCandidates(job.candidates);
   const current = job.progress_current ?? 0;
@@ -204,13 +207,28 @@ export async function discardJob(jobId: string): Promise<ActionResult<null>> {
   return error ? fail(`没能放弃这个作业：${error.message}`) : ok(null);
 }
 
-/** 打开导入页时找回上一个没处理完的作业。 */
+// 多久以前的作业就不再往回捡了。断线续跑说的是「刚才那次」，
+// 上周挂掉的作业早就不是用户此刻想接着做的事——每次打开导入页
+// 都先甩他一条隔了一周的报错，比直接给上传区还糟。
+// 行不删：同一份文档再传一次，startJob 照样会认领它。
+const ADOPT_WINDOW_MS = 24 * 60 * 60_000;
+
+/**
+ * 打开导入页时找回上一个没处理完的作业。
+ *
+ * 只认 input_type='upload'。随手记走的是同一张 ingest_jobs，
+ * 它的作业确认完卡片也不会改状态，会一直挂在 awaiting_review——
+ * 不挡住的话导入页会把别人的活捡过来，点进去又是空队列。
+ */
 export async function findOpenJob(): Promise<ActionResult<string | null>> {
   const supabase = await createClient();
+  const cut = new Date(Date.now() - ADOPT_WINDOW_MS).toISOString();
   const { data } = await supabase
     .from("ingest_jobs")
     .select("id")
+    .eq("input_type", "upload")
     .in("status", ["extracting", "awaiting_review"])
+    .or(`heartbeat_at.gte.${cut},and(heartbeat_at.is.null,created_at.gte.${cut})`)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

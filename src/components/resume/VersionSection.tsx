@@ -431,7 +431,7 @@ function Outcome({ outcome, onClose }: { outcome: VersionOutcome; onClose: () =>
 
 /**
  * 导出入口。存在 blocking 问题时禁用，换成「⚠ 有 N 处问题必须先解决」。
- * Step 8 的体检页做出来之前，「去看看」落在临时的问题列表页。
+ * 「去看看」落在体检页 —— 那里有全部十项检查的结果，以及每条的精确跳转。
  */
 function ExportGroup({
   versionId,
@@ -444,7 +444,7 @@ function ExportGroup({
     return (
       <span className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "var(--danger)" }}>
         ⚠ 有 {blockingCount} 处问题必须先解决
-        <Link href="/resume/issues" className="underline" style={{ color: "var(--ink)" }}>
+        <Link href="/health#blocking" className="underline" style={{ color: "var(--ink)" }}>
           去看看
         </Link>
       </span>

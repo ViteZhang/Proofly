@@ -18,6 +18,7 @@ import { obj } from "@/lib/chat/message-shape";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import { computeRipple, readRippleState, type RippleEffect } from "@/lib/ripple";
 import { startReassess, type ReassessPlan } from "@/app/(app)/actions/reassess-actions";
+import { settleIngestJob } from "@/lib/queries/drafts";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
 
@@ -50,7 +51,7 @@ export async function commitCard(
   const supabase = await createClient();
   const { data: draft } = await supabase
     .from("drafts")
-    .select("id, intent, target_atom_id, payload, diff, review_status")
+    .select("id, intent, target_atom_id, payload, diff, review_status, ingest_job_id")
     .eq("id", draftId)
     .maybeSingle();
   if (!draft) return fail("这条草稿不在了");
@@ -117,6 +118,10 @@ export async function commitCard(
     ripple: ripple as unknown as Json,
   });
 
+  // 这一批卡片都处理完了就把作业收掉。不收的话它会一直挂在
+  // awaiting_review，被导入页当成「上次没处理完的上传」捡走。
+  await settleIngestJob(draft.ingest_job_id);
+
   // 重评异步跑，不阻塞这次返回。失败也不回滚 —— 经历已经在库里了。
   const reassess = await startReassess([atomId]);
 
@@ -157,12 +162,16 @@ export async function rejectCard(draftId: string): Promise<ActionResult<null>> {
   if (!uuid.safeParse(draftId).success) return fail("草稿标识不对");
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("drafts")
     .update({ review_status: "rejected" })
     .eq("id", draftId)
-    .eq("review_status", "pending");
+    .eq("review_status", "pending")
+    .select("ingest_job_id");
   if (error) return fail(`没能放下这条：${error.message}`);
+
+  const jobId = updated?.[0]?.ingest_job_id;
+  if (jobId) await settleIngestJob(jobId);
 
   await patchCard(await cardMessageId(draftId), { rejected: true });
   return ok(null);

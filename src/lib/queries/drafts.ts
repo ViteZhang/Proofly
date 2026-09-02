@@ -30,14 +30,39 @@ export type ReviewQueue = {
 
 export const BULK_THRESHOLD = 0.9;
 
+/**
+ * 队列清空 → 作业收尾。
+ *
+ * 上传和随手记共用 ingest_jobs，两边确认完都得来这一下。
+ * 漏掉的一边会永远挂在 awaiting_review，被另一边的「找回没处理完的作业」捡走。
+ */
+export async function settleIngestJob(
+  jobId: string,
+): Promise<{ remaining: number; committed: boolean }> {
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("drafts")
+    .select("id", { count: "exact", head: true })
+    .eq("ingest_job_id", jobId)
+    .eq("review_status", "pending");
+  const remaining = count ?? 0;
+  if (remaining === 0) {
+    await supabase.from("ingest_jobs").update({ status: "committed" }).eq("id", jobId);
+  }
+  return { remaining, committed: remaining === 0 };
+}
+
 export async function getReviewQueue(jobId: string): Promise<ReviewQueue | null> {
   if (!z.uuid().safeParse(jobId).success) return null;
   const supabase = await createClient();
 
+  // 只认上传作业。随手记的作业走的是对话流，落到这个校对队列里
+  // 永远是空的 —— 与其显示一个空队列，不如直说这里没有它。
   const { data: job } = await supabase
     .from("ingest_jobs")
     .select("id, status, source_doc_id")
     .eq("id", jobId)
+    .eq("input_type", "upload")
     .maybeSingle();
   if (!job) return null;
 

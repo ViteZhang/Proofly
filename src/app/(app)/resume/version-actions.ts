@@ -14,6 +14,7 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
+import { blockingBeforeGeneration, runQuickScan } from "@/lib/queries/health";
 import { z } from "zod";
 import { callLLM } from "@/lib/llm";
 import { DELTA_SYSTEM, deltaUser } from "@/lib/llm/resume-prompts";
@@ -42,6 +43,14 @@ function refresh() {
   revalidatePath("/resume");
   revalidatePath("/targets");
   revalidatePath("/");
+  revalidatePath("/health");
+}
+
+/** 生成完成后再扫一次（§五-8.6）。 */
+async function rescanAfterGeneration() {
+  await runQuickScan();
+  revalidatePath("/health");
+  revalidatePath("/", "layout");
 }
 
 export type VersionOutcome = {
@@ -90,6 +99,17 @@ export async function generateVersion(
   if (!baseline) return fail("这个方向还没有基线。先生成一份基线并锁定，再生成投递版本。");
   if (!baseline.locked_at) {
     return fail("先锁定基线。基线会飘的话，「只生成差异」就没有意义了 —— 每份版本都在跟一个不一样的底稿做差异。");
+  }
+
+  // 生成前先过一遍体检（Step 8 §五-8.6）。与基线同一套：拦事实层与技能层的
+  // 阻断，不拦简历产物自身的问题。
+  const preBlocks = await blockingBeforeGeneration();
+  if (preBlocks.length > 0) {
+    return fail(
+      `体检里还有 ${preBlocks.length} 处必须先解决：${preBlocks
+        .map((b) => b.title)
+        .join("；")}。去体检页看看。`,
+    );
   }
 
   const [{ data: blockRows }, { data: reqs }, { data: assessments }] = await Promise.all([
@@ -330,6 +350,7 @@ export async function generateVersion(
     versionId = created.id;
   }
 
+  await rescanAfterGeneration();
   refresh();
   return ok({
     versionId,

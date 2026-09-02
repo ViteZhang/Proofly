@@ -8,6 +8,8 @@ import {
   listVersions,
 } from "@/lib/queries/resume";
 import { listTargets } from "@/lib/queries/targets";
+import { getCrossCompare, healthSummary } from "@/lib/queries/health";
+import { CrossCompare } from "@/components/health/CrossCompare";
 import { resolveTarget } from "@/lib/targets/shape";
 import Link from "next/link";
 
@@ -38,11 +40,18 @@ export default async function ResumePage({
     );
   }
 
-  const [baseline, summaries, versions, evolution] = await Promise.all([
+  // 体检页 C7 的「去解决」带着 ?block=&compare= 过来：两个方向的原文
+  // 并排放在最上面，不用自己切方向再翻一遍。
+  const blockId = typeof params.block === "string" ? params.block : null;
+  const compareTo = typeof params.compare === "string" ? params.compare : null;
+  const compare = blockId && compareTo ? await getCrossCompare(blockId, compareTo) : null;
+
+  const [baseline, summaries, versions, evolution, health] = await Promise.all([
     getBaseline(selected.id),
     listBaselines(),
     listVersions(selected.id),
     getEvolutionSignals(selected.id),
+    healthSummary(),
   ]);
 
   return (
@@ -62,11 +71,17 @@ export default async function ResumePage({
           )
           .join("　")}
       </p>
+      {compare && (
+        <div className="mt-5">
+          <CrossCompare data={compare} />
+        </div>
+      )}
       <BaselineWorkbench
         key={selected.id}
         targetId={selected.id}
         targetName={selected.name}
         baseline={baseline}
+        globalBlocking={health.blockingCount}
       />
       {evolution.baselineId && evolution.signals.length > 0 && (
         <div className="mt-9">
@@ -76,7 +91,7 @@ export default async function ResumePage({
       <VersionSection
         hasBaseline={!!baseline && baseline.blocks.length > 0}
         locked={versions.locked}
-        blockingCount={versions.blockingCount}
+        blockingCount={Math.max(versions.blockingCount, health.blockingCount)}
         versions={versions.versions}
         jdsWithoutVersion={versions.jdsWithoutVersion}
       />

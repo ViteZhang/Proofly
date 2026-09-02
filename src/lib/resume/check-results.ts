@@ -38,6 +38,7 @@ export async function replaceResumeChecks(
     .from("check_results")
     .delete()
     .eq("scope", "resume")
+    .eq("origin", "gate")
     .filter("ref_ids->>owner", "eq", key);
 
   if (results.length === 0) return;
@@ -49,6 +50,7 @@ export async function replaceResumeChecks(
       code: r.code,
       title: r.message,
       detail: r.detail,
+      origin: "gate" as const,
       ref_ids: { owner: key, blockId: r.blockId ?? null } as unknown as Json,
     })),
   );
@@ -60,6 +62,7 @@ export async function listResumeChecks(owner: CheckOwner): Promise<CheckRow[]> {
     .from("check_results")
     .select("id,level,code,title,detail,ref_ids")
     .eq("scope", "resume")
+    .eq("origin", "gate")
     .is("ignored_at", null)
     .is("resolved_at", null)
     .filter("ref_ids->>owner", "eq", ownerKey(owner))
@@ -70,7 +73,8 @@ export async function listResumeChecks(owner: CheckOwner): Promise<CheckRow[]> {
     const ref = (r.ref_ids ?? {}) as { blockId?: string | null };
     return {
       id: r.id,
-      level: r.level,
+      // 门禁只写这三档；info 是体检那边的提示级，不会出现在 origin='gate' 里。
+      level: r.level === "info" ? "warning" : r.level,
       code: r.code,
       title: r.title,
       detail: r.detail,

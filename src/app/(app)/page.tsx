@@ -3,6 +3,7 @@ import { getOverviewStats, getProofSummary } from "@/lib/queries/atoms";
 import { getRiskCards } from "@/lib/queries/risk";
 import { getTaskBoard } from "@/lib/queries/tasks";
 import { listRecentVersions } from "@/lib/queries/resume";
+import { healthSummary } from "@/lib/queries/health";
 import { sortTasks } from "@/lib/planning/sort";
 import { ACTION_COPY } from "@/lib/planning/labels";
 import { EmptyLibrary } from "@/components/library/EmptyLibrary";
@@ -20,12 +21,13 @@ const BAR: Record<EvidenceLevel, string> = {
 };
 
 export default async function HomePage() {
-  const [summary, stats, risks, board, recentVersions] = await Promise.all([
+  const [summary, stats, risks, board, recentVersions, health] = await Promise.all([
     getProofSummary(),
     getOverviewStats(),
     getRiskCards(),
     getTaskBoard(),
     listRecentVersions(),
+    healthSummary(),
   ]);
 
   // S2 区块三「今天做什么」：priority 最高的三条。
@@ -101,6 +103,43 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* 体检卡。数字与体检页同一个口径 —— 两处对不上，用户就不知道该信哪个。 */}
+      <Link
+        href="/health"
+        className="mt-4 block rounded-card px-5 py-4 transition-opacity hover:opacity-90"
+        style={
+          health.blockingCount > 0
+            ? { background: "var(--danger-soft)", border: "1px solid var(--danger)" }
+            : { background: "var(--card)", border: "1px solid var(--line)" }
+        }
+      >
+        <div className="flex items-baseline justify-between gap-3">
+          <span
+            className="text-[14px] font-semibold"
+            style={{ color: health.blockingCount > 0 ? "var(--danger)" : "var(--ink)" }}
+          >
+            体检 ·{" "}
+            {health.blockingCount > 0
+              ? `${health.blockingCount} 处待解决`
+              : health.scanned
+                ? "一切正常"
+                : "还没体检过"}
+          </span>
+          {health.minorCount > 0 && (
+            <span className="shrink-0 text-[12.5px]" style={{ color: "var(--mute)" }}>
+              另有 {health.minorCount} 处小问题
+            </span>
+          )}
+        </div>
+        <p className="mt-1.5 text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
+          {health.blockingCount > 0
+            ? "在解决之前，简历生成和导出都会被拦住。"
+            : health.scanned
+              ? "口径一致、措辞有据、跨方向说法对得上。可以放心投。"
+              : "进去扫一次，看看简历、经历、源材料之间有没有对不上的地方。"}
+        </p>
+      </Link>
 
       {/* S2 区块二 · 风险提示。做过一堆事但都拿不出数据，
           比「没做过」更容易在面试里被问穿，而它平时看不出来。 */}

@@ -29,6 +29,7 @@ import {
   type GateResult,
 } from "@/lib/resume/gate";
 import { listResumeChecks, replaceResumeChecks } from "@/lib/resume/check-results";
+import { blockingBeforeGeneration, runQuickScan } from "@/lib/queries/health";
 import { renderMarkdown, type RenderBlock } from "@/lib/resume/markdown";
 import type { Json, RenderWeight } from "@/types/database";
 
@@ -51,6 +52,17 @@ function refresh() {
   revalidatePath("/resume");
   revalidatePath("/targets");
   revalidatePath("/");
+  revalidatePath("/health");
+}
+
+/**
+ * 生成完成后再扫一次（§五-8.6 自动扫描时机）。刚写出来的简历会带进新的
+ * 门禁结果，顶栏芯片和体检页得跟着走 —— 否则用户看到的是上一次的数。
+ */
+async function rescanAfterGeneration() {
+  await runQuickScan();
+  revalidatePath("/health");
+  revalidatePath("/", "layout");
 }
 
 /** 一个方向一份基线。已存在就复用，不新建。 */
@@ -104,15 +116,18 @@ export async function generateBaseline(
     return fail("基线已锁定。要重新生成，先解锁 —— 锁定的意义就是措辞不会在你不知道的时候变。");
   }
 
-  // G4 前置：基本事实有 BLOCKING 就不该开始生成。
-  // 放在调用模型之前，省下的不只是钱：生成出来再拦，用户会以为是模型的问题。
-  const blockingFacts = input.facts.filter((f) => f.status === "BLOCKING");
-  if (blockingFacts.length > 0) {
-    const results: GateResult[] = blockingFacts.map((f) => ({
+  // 生成前先过一遍体检（Step 8 §五-8.6）。放在调用模型之前，省下的不只是
+  // 钱：生成出来再拦，用户会以为是模型的问题。
+  //
+  // 拦的是事实层与技能层的阻断，不含简历产物自身的问题 —— 那些正是靠
+  // 重新生成来修的，拿它们拦住重新生成会把人锁死。详见 blockingBeforeGeneration。
+  const preBlocks = await blockingBeforeGeneration();
+  if (preBlocks.length > 0) {
+    const results: GateResult[] = preBlocks.map((b) => ({
       code: "G4" as const,
       level: "blocking" as const,
-      message: `基本事实「${f.key}」还没定下来`,
-      detail: "这一项被标成 BLOCKING，几处材料的说法对不上。先去事实台账把它定死，再生成简历。",
+      message: b.title,
+      detail: b.detail,
     }));
     const id = existing?.id ?? null;
     if (id) await replaceResumeChecks({ kind: "baseline", id }, results);
@@ -269,6 +284,7 @@ export async function generateBaseline(
     .eq("id", baselineId);
 
   await replaceResumeChecks({ kind: "baseline", id: baselineId }, results);
+  await rescanAfterGeneration();
   refresh();
   return ok({ status: "ok", baselineId, blocks: blocks.length, warnings: results });
 }
