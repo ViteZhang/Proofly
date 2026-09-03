@@ -3,6 +3,7 @@ import "./site.css";
 import { SiteNav } from "@/components/site/SiteNav";
 import { Reveal } from "@/components/site/Reveal";
 import { JoinForm } from "@/components/site/JoinForm";
+import { LogoWordmark } from "@/components/layout/Logo";
 import {
   HeroDiagram,
   ArchiveDiagram,
@@ -470,10 +471,7 @@ export default function SitePage() {
 
       <footer className="foot">
         <div className="foot-in">
-          <span className="mark" style={{ fontSize: 16 }}>
-            <i />
-            Proofly
-          </span>
+          <LogoWordmark height={18} />
           <span>让你的经历真正产生价值</span>
         </div>
       </footer>

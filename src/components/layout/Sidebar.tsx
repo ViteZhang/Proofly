@@ -36,9 +36,16 @@ export function Sidebar({
       className="sticky top-0 flex h-screen w-[210px] shrink-0 flex-col"
       style={{ background: "var(--ink)", color: "rgba(255,255,255,0.72)" }}
     >
-      {/* Logo + slogan */}
+      {/* Logo + slogan。字标点回官网 —— 侧栏里每一项都是产品内的页面，
+          只有这里是出口。想看定价、常见问题、把链接发给别人，都从这走。 */}
       <div className="px-4 pb-4 pt-5">
-        <LogoWordmark tone="white" height={22} priority />
+        <Link
+          href="/"
+          aria-label="回到 Proofly 官网首页"
+          className="inline-flex transition-opacity hover:opacity-75"
+        >
+          <LogoWordmark tone="white" height={22} priority />
+        </Link>
 
         <div className="mt-1 text-[11.5px]" style={{ color: "rgba(255,255,255,0.5)" }}>
           让你的经历真正产生价值

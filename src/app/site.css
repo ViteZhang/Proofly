@@ -101,21 +101,15 @@
   justify-content: space-between;
   gap: 20px;
 }
+/* 字标用产品里的同一张图（components/layout/Logo）。官网自己拿
+   Space Grotesk 拼一个「● Proofly」出来，就等于有两个 logo。 */
 .site .mark {
-  font-family: var(--font-display);
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: -0.035em;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  transition: opacity 0.15s;
 }
-.site .mark i {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--proof);
-  display: block;
+.site .mark:hover {
+  opacity: 0.75;
 }
 .site .nav-r {
   display: flex;
@@ -126,6 +120,14 @@
 }
 .site .nav-r a:hover {
   color: var(--ink);
+}
+/* 登录着的时候顶栏显示的账号名。它不是链接，别给 hover 反应。 */
+.site .nav-r .who {
+  color: var(--mute);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 @media (max-width: 860px) {
   .site .nav-r .navlink {
