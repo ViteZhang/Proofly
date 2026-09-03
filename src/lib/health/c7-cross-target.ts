@@ -133,7 +133,7 @@ function quote(a: Appearance): string {
 }
 
 function link(a: Appearance, other: Appearance): string {
-  return `/resume?target=${a.resume.targetId}&block=${a.blockId}&compare=${other.resume.targetId}`;
+  return `/app/resume?target=${a.resume.targetId}&block=${a.blockId}&compare=${other.resume.targetId}`;
 }
 
 export const c7CrossTarget: HealthCheck = {

@@ -32,17 +32,17 @@ import {
   pollChat,
   retryMessage,
   sendMessage,
-} from "@/app/(app)/notes/actions";
+} from "@/app/app/notes/actions";
 import {
   commitCard,
   rejectCard,
   undoCard,
   type Choice,
-} from "@/app/(app)/notes/commit-actions";
+} from "@/app/app/notes/commit-actions";
 import { AnswerLinks } from "./AnswerLinks";
 import { UndoToast } from "./UndoToast";
 import { ReassessNotice } from "@/components/actions/ReassessNotice";
-import type { ReassessPlan } from "@/app/(app)/actions/reassess-actions";
+import type { ReassessPlan } from "@/app/app/actions/reassess-actions";
 import { AtomPicker, type PickerAtom } from "./AtomPicker";
 import { Composer } from "./Composer";
 

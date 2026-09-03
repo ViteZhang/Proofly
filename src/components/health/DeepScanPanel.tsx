@@ -6,7 +6,7 @@ import {
   getDeepScanProgress,
   startDeepScan,
   type DeepScanProgress,
-} from "@/app/(app)/health/job-actions";
+} from "@/app/app/health/job-actions";
 
 const POLL_MS = 3000;
 const MAX_MISSES = 3;

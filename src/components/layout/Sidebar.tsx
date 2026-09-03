@@ -74,7 +74,7 @@ export function Sidebar({
                     />
                   )}
                   {item.label}
-                  {item.href === "/actions" && todoCount > 0 && (
+                  {item.href === "/app/actions" && todoCount > 0 && (
                     <span
                       className="ml-auto rounded-pill px-1.5 text-[11px]"
                       style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}
@@ -97,7 +97,7 @@ export function Sidebar({
             style={{ background: "var(--card)", boxShadow: "var(--shadow-3)" }}
           >
             <Link
-              href="/facts"
+              href="/app/facts"
               onClick={() => setMenuOpen(false)}
               className="block px-3.5 py-2.5 text-left text-[13px] transition-colors hover:bg-[var(--line-soft)]"
               style={{ color: "var(--ink)" }}

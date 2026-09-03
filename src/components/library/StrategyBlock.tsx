@@ -2,7 +2,7 @@
 
 import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveStrategy } from "@/app/(app)/targets/strategy-actions";
+import { saveStrategy } from "@/app/app/targets/strategy-actions";
 import {
   conflictNotice,
   normalizeGroup,

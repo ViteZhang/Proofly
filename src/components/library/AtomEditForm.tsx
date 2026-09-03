@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import { CONTEXT_LABEL, STATUS_LABEL, EVIDENCE_LABEL } from "@/lib/domain";
-import { updateAtom, type UpdateAtomInput } from "@/app/(app)/library/actions";
+import { updateAtom, type UpdateAtomInput } from "@/app/app/library/actions";
 import type { AtomDetail as Detail } from "@/lib/queries/atoms";
 import type { AtomContext, AtomLevel, AtomStatus } from "@/types/database";
 import { DeleteAtomDialog } from "./DeleteAtomDialog";

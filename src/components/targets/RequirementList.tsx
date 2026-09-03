@@ -6,7 +6,7 @@ import {
   addRequirement,
   deleteRequirement,
   updateRequirement,
-} from "@/app/(app)/targets/jd-actions";
+} from "@/app/app/targets/jd-actions";
 import { KIND_HINT, KIND_LABEL, KIND_ORDER } from "@/lib/jd/labels";
 import type { RequirementRow } from "@/lib/queries/jds";
 import type { RequirementKind } from "@/types/database";

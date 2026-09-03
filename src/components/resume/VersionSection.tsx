@@ -20,7 +20,7 @@ import {
   generateVersion,
   submitVersion,
   type VersionOutcome,
-} from "@/app/(app)/resume/version-actions";
+} from "@/app/app/resume/version-actions";
 import { farOffCopy, overThresholdCopy } from "@/lib/resume/delta";
 import type { VersionSummary } from "@/lib/queries/resume";
 
@@ -97,7 +97,7 @@ export function VersionSection({
       ) : versions.length === 0 && jdsWithoutVersion.length === 0 ? (
         <p className="mt-2 text-[13px]" style={{ color: "var(--mute)" }}>
           这个方向下还没有 JD。
-          <Link href="/targets" className="ml-1 underline" style={{ color: "var(--ink)" }}>
+          <Link href="/app/targets" className="ml-1 underline" style={{ color: "var(--ink)" }}>
             去贴一份
           </Link>
         </p>
@@ -143,7 +143,7 @@ export function VersionSection({
                 )}
                 <span className="ml-auto flex items-center gap-2">
                   <Link
-                    href={`/resume/${v.id}`}
+                    href={`/app/resume/${v.id}`}
                     className="text-[12.5px] hover:underline"
                     style={{ color: "var(--ink)" }}
                   >
@@ -308,7 +308,7 @@ function JdPicker({
           )}
         </div>
         <div className="mt-4 flex items-center gap-3">
-          <Link href="/targets" className="text-[12.5px] hover:underline" style={{ color: "var(--ink)" }}>
+          <Link href="/app/targets" className="text-[12.5px] hover:underline" style={{ color: "var(--ink)" }}>
             去贴一份新 JD →
           </Link>
           <button
@@ -341,7 +341,7 @@ function Outcome({ outcome, onClose }: { outcome: VersionOutcome; onClose: () =>
           生成了 {outcome.deltaCount} 处调整，动到 {outcome.affected}/{outcome.totalBlocks} 块（
           {Math.round(outcome.deltaRatio * 100)}%）。
           <Link
-            href={`/resume/${outcome.versionId}`}
+            href={`/app/resume/${outcome.versionId}`}
             className="ml-2 underline"
             style={{ color: "var(--ink)" }}
           >
@@ -405,7 +405,7 @@ function Outcome({ outcome, onClose }: { outcome: VersionOutcome; onClose: () =>
                 : farOffCopy(outcome.unmatched.length, outcome.requirementCount)}
             </p>
             <div className="mt-5 flex items-center gap-3">
-              <Link href="/targets?new=1">
+              <Link href="/app/targets?new=1">
                 <Button size="sm">新建方向</Button>
               </Link>
               <Button
@@ -444,7 +444,7 @@ function ExportGroup({
     return (
       <span className="flex items-center gap-1.5 text-[12.5px]" style={{ color: "var(--danger)" }}>
         ⚠ 有 {blockingCount} 处问题必须先解决
-        <Link href="/health#blocking" className="underline" style={{ color: "var(--ink)" }}>
+        <Link href="/app/health#blocking" className="underline" style={{ color: "var(--ink)" }}>
           去看看
         </Link>
       </span>
@@ -453,14 +453,14 @@ function ExportGroup({
   return (
     <>
       <a
-        href={`/resume/${versionId}/export`}
+        href={`/app/resume/${versionId}/export`}
         className="text-[12.5px] hover:underline"
         style={{ color: "var(--mute)" }}
       >
         导出 MD
       </a>
       <a
-        href={`/resume/${versionId}/print`}
+        href={`/app/resume/${versionId}/print`}
         target="_blank"
         rel="noreferrer"
         className="text-[12.5px] hover:underline"

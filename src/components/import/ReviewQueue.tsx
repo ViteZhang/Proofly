@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { completeTaskWithAtom } from "@/app/(app)/actions/reflow-actions";
+import { completeTaskWithAtom } from "@/app/app/actions/reflow-actions";
 
 import { Button } from "@/components/ui/Button";
 import type { ReviewQueue as Queue, ReviewDraft } from "@/lib/queries/drafts";
@@ -12,7 +12,7 @@ import {
   acceptDraft,
   rejectDraft,
   type CommitResult,
-} from "@/app/(app)/import/review/[jobId]/actions";
+} from "@/app/app/import/review/[jobId]/actions";
 import { ConfirmCard } from "./ConfirmCard";
 
 // 分组顺序固定：需你判断 → 更新 → 新增。需要动脑的排前面。
@@ -124,14 +124,14 @@ export function ReviewQueue({
             onClick={() =>
               router.push(
                 flashIds.length > 0
-                  ? `/library?atom=${flashIds[0]}&flash=${flashIds.join(",")}`
-                  : "/library",
+                  ? `/app/library?atom=${flashIds[0]}&flash=${flashIds.join(",")}`
+                  : "/app/library",
               )
             }
           >
             去经历库
           </Button>
-          <Button variant="text" onClick={() => router.push("/import")}>
+          <Button variant="text" onClick={() => router.push("/app/import")}>
             再传一份
           </Button>
         </div>

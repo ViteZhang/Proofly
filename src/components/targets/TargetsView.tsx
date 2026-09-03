@@ -34,7 +34,7 @@ export function TargetsView({
   const open = draft ?? (openNew && !newDismissed ? EMPTY_DRAFT : null);
 
   function select(id: string) {
-    router.replace(`/targets?target=${id}`, { scroll: false });
+    router.replace(`/app/targets?target=${id}`, { scroll: false });
   }
 
   // 关掉弹窗时顺手把 ?new=1 抹掉，否则刷新会重新弹一次。
@@ -42,7 +42,7 @@ export function TargetsView({
     setDraft(null);
     if (openNew) {
       setNewDismissed(true);
-      router.replace(selectedId ? `/targets?target=${selectedId}` : "/targets", { scroll: false });
+      router.replace(selectedId ? `/app/targets?target=${selectedId}` : "/app/targets", { scroll: false });
     }
   }
 
@@ -117,7 +117,7 @@ export function TargetsView({
           onClose={() => setDeleting(null)}
           onDeleted={() => {
             setDeleting(null);
-            router.replace("/targets", { scroll: false });
+            router.replace("/app/targets", { scroll: false });
             router.refresh();
           }}
         />
@@ -228,7 +228,7 @@ function SelectedPanel({
         <div className="flex shrink-0 items-center gap-1.5">
           {/* 批量配置这个方向下每条经历讲多少 */}
           <Link
-            href={`/targets/strategy?target=${target.id}`}
+            href={`/app/targets/strategy?target=${target.id}`}
             className="inline-flex h-[30px] items-center rounded-btn px-3 text-[13px] font-medium transition-colors hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             style={{ background: "var(--card)", border: "1px solid var(--line)", color: "var(--ink)" }}
           >

@@ -4,8 +4,8 @@ import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
-import { generatePlan } from "@/app/(app)/actions/plan-actions";
-import { dismissGap, dropTask, pinTask } from "@/app/(app)/actions/task-actions";
+import { generatePlan } from "@/app/app/actions/plan-actions";
+import { dismissGap, dropTask, pinTask } from "@/app/app/actions/task-actions";
 import {
   EMPTY_TASK,
   TaskFormDialog,
@@ -15,7 +15,7 @@ import {
 } from "./TaskFormDialog";
 import { GAP_COPY } from "@/lib/scoring/gap-copy";
 import { ReflowPanel } from "./ReflowPanel";
-import { reopenTask } from "@/app/(app)/actions/reflow-actions";
+import { reopenTask } from "@/app/app/actions/reflow-actions";
 import { ACTION_COPY, EMPTY_COPY, SORT_LABEL } from "@/lib/planning/labels";
 import { IMPACT_IS_ESTIMATED_NOTE } from "@/lib/planning/config";
 import { sortTasks, type SortMode } from "@/lib/planning/sort";
@@ -194,7 +194,7 @@ function Empty() {
       <p className="text-[14px]" style={{ color: "var(--slate)" }}>
         {EMPTY_COPY}
       </p>
-      <Link href="/targets" className="mt-4 inline-block">
+      <Link href="/app/targets" className="mt-4 inline-block">
         <Button size="sm">去评估一份 JD</Button>
       </Link>
     </div>
@@ -362,7 +362,7 @@ function TaskCard({
           {t.anchorTitle && (
             <p className="mt-1.5 text-[12px]" style={{ color: "var(--mute)" }}>
               挂靠 ·{" "}
-              <Link href="/library" className="hover:underline">
+              <Link href="/app/library" className="hover:underline">
                 {t.anchorTitle}
               </Link>
             </p>
@@ -600,7 +600,7 @@ function DoneCard({ t }: { t: TaskView }) {
             {t.producesTitle && (
               <span>
                 产出 →{" "}
-                <Link href="/library" className="hover:underline">
+                <Link href="/app/library" className="hover:underline">
                   {t.producesTitle}
                 </Link>
               </span>

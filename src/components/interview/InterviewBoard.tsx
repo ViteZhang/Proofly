@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { QuestionCard } from "./QuestionCard";
 import { KitJobPanel } from "./KitJobPanel";
-import { startKitJob, type KitJobProgress } from "@/app/(app)/interview/job-actions";
+import { startKitJob, type KitJobProgress } from "@/app/app/interview/job-actions";
 import { overviewOf } from "@/lib/interview/view";
 import type { KitView, VersionOption } from "@/lib/queries/interview";
 import type { InterviewKind, PracticeStatus, RiskLevel } from "@/types/database";
@@ -108,7 +108,7 @@ export function InterviewBoard({
     return (
       <Empty>
         <p className="text-[14px]">还没有题目。先生成一份投递版本，我按它出题。</p>
-        <Link href="/resume" className="mt-3 inline-block">
+        <Link href="/app/resume" className="mt-3 inline-block">
           <Button size="sm">去生成投递版本</Button>
         </Link>
       </Empty>
@@ -162,12 +162,12 @@ export function InterviewBoard({
         )}
         {kit && (
           <>
-            <Link href={`/interview/${kit.id}/print`}>
+            <Link href={`/app/interview/${kit.id}/print`}>
               <Button size="sm" variant="secondary">
                 面试小抄
               </Button>
             </Link>
-            <a href={`/interview/${kit.id}/export`}>
+            <a href={`/app/interview/${kit.id}/export`}>
               <Button size="sm" variant="text">
                 导出 MD
               </Button>
@@ -181,7 +181,7 @@ export function InterviewBoard({
           {versions.map((v) => (
             <li key={v.id}>
               <Link
-                href={`/interview?v=${v.id}`}
+                href={`/app/interview?v=${v.id}`}
                 onClick={() => setPicking(false)}
                 className="flex items-center gap-2.5 rounded-btn border px-3 py-2 text-[13px] hover:bg-[var(--line-soft)]"
                 style={{

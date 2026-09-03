@@ -3,15 +3,24 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/types/database";
 
 // 公开路由：无需登录即可访问。其余一律要求登录。
+// - /               官网首页（营销站），登录与否都能看
 // - /login          登录页（(auth) 组）
 // - /auth/callback  Magic Link 落地，必须可达以交换 session
+//
+// 产品在 /app 下，整段受保护 —— 官网和产品同域，靠这一条分界。
 function isPublicPath(pathname: string): boolean {
+  if (pathname === "/") return true;
   if (pathname === "/login") return true;
   if (pathname === "/auth" || pathname.startsWith("/auth/")) return true;
   return false;
 }
 
 export async function updateSession(request: NextRequest) {
+  // 官网首页完全不看 session，直接放行。
+  // 不这么写的话，每一次营销页浏览都要往 Auth 服务打一次 getUser——
+  // 落地页的首屏时间要为一个用不上的结果买单。
+  if (request.nextUrl.pathname === "/") return NextResponse.next({ request });
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient<Database>(
@@ -51,10 +60,11 @@ export async function updateSession(request: NextRequest) {
     return copyCookies(supabaseResponse, NextResponse.redirect(url));
   }
 
-  // 已登录访问 /login → 首页
+  // 已登录访问 /login → 产品首页。
+  // 官网 / 不在此列：登录了也该能回去看定价和常见问题。
   if (user && pathname === "/login") {
     const url = request.nextUrl.clone();
-    url.pathname = "/";
+    url.pathname = "/app";
     return copyCookies(supabaseResponse, NextResponse.redirect(url));
   }
 

@@ -10,7 +10,7 @@ import {
   resumeJob,
   retryOne,
   type JobProgress,
-} from "@/app/(app)/import/job-actions";
+} from "@/app/app/import/job-actions";
 
 const POLL_MS = 2000;
 

@@ -14,10 +14,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { ProofDot } from "@/components/library/ProofDot";
 import { EVIDENCE_LABEL } from "@/lib/domain";
-import { editBlock } from "@/app/(app)/resume/block-actions";
+import { editBlock } from "@/app/app/resume/block-actions";
 import type { GateResult } from "@/lib/resume/gate";
 import type { BaselineBlockView, BaselineView } from "@/lib/queries/resume";
-import type { SelectionPreview } from "@/app/(app)/resume/baseline-actions";
+import type { SelectionPreview } from "@/app/app/resume/baseline-actions";
 import type { EvidenceLevel } from "@/types/database";
 
 // 2.1 四档规则，逐条对应。面板上写出来，用户改文本时才知道边界在哪。
@@ -122,7 +122,7 @@ export function InspectPanel({
       <p className="text-[12px] leading-relaxed" style={{ color: "var(--mute)" }}>
         选材、互斥消解、技能过滤全部由代码判定，同样的策略配置生成十次得到同样的名单。
         模型只负责措辞。
-        <Link href="/targets/strategy" className="ml-1 underline" style={{ color: "var(--ink)" }}>
+        <Link href="/app/targets/strategy" className="ml-1 underline" style={{ color: "var(--ink)" }}>
           去改策略
         </Link>
       </p>

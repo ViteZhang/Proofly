@@ -1712,6 +1712,32 @@ export type Database = {
           },
         ];
       };
+      // 官网候补名单。整张表没有 user_id —— 留邮箱的人还没有账号。
+      // RLS 只开了 insert，读不出来（见 supabase/23_site_waitlist.sql）。
+      waitlist: {
+        Row: {
+          id: string;
+          email: string;
+          source: string;
+          invited_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          email: string;
+          source?: string;
+          invited_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          email?: string;
+          source?: string;
+          invited_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       task_priority: {

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { JdForm } from "./JdForm";
 import { GenerateResumeButton } from "@/components/resume/GenerateResumeButton";
 import { RequirementList } from "./RequirementList";
-import { deleteJd, parseJd } from "@/app/(app)/targets/jd-actions";
+import { deleteJd, parseJd } from "@/app/app/targets/jd-actions";
 import { BIND_LABEL } from "@/lib/jd/labels";
 import type { JdCard, JdDetail } from "@/lib/queries/jds";
 
@@ -32,7 +32,7 @@ export function JdSection({
   const [removing, startRemove] = useTransition();
 
   function select(jdId: string) {
-    router.replace(`/targets?target=${targetId}&jd=${jdId}`, { scroll: false });
+    router.replace(`/app/targets?target=${targetId}&jd=${jdId}`, { scroll: false });
   }
 
   function parse(jdId: string) {
@@ -57,7 +57,7 @@ export function JdSection({
         setError(res.error);
         return;
       }
-      router.replace(`/targets?target=${targetId}`, { scroll: false });
+      router.replace(`/app/targets?target=${targetId}`, { scroll: false });
       router.refresh();
     });
   }
@@ -267,7 +267,7 @@ function JdRow({
 
       {/* 简历要到 Step 6，按钮先给个说明，状态判定逻辑现在就是对的 */}
       <Link
-        href={`/resume?jd=${jd.id}`}
+        href={`/app/resume?jd=${jd.id}`}
         className="shrink-0 rounded-btn px-2.5 py-1 text-[12.5px] transition-colors hover:bg-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
         style={{ color: "var(--slate)", border: "1px solid var(--line)" }}
       >

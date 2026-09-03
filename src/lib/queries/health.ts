@@ -346,7 +346,7 @@ export async function readPersistedIssues(codes?: string[]): Promise<HealthIssue
       title: r.title,
       detail: r.detail ?? "",
       refIds: Array.isArray(r.ref_ids) ? (r.ref_ids as string[]) : [],
-      resolveLink: r.resolve_link ?? "/health",
+      resolveLink: r.resolve_link ?? "/app/health",
       fingerprint: r.fingerprint ?? `${r.code}:${r.id}`,
       autoFixable: false,
     }));

@@ -7,7 +7,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { generateVersion } from "@/app/(app)/resume/version-actions";
+import { generateVersion } from "@/app/app/resume/version-actions";
 
 export function GenerateResumeButton({ jdId }: { jdId: string }) {
   const router = useRouter();
@@ -28,7 +28,7 @@ export function GenerateResumeButton({ jdId }: { jdId: string }) {
               setError(r.error);
               return;
             }
-            router.push(`/resume/${r.data.versionId}`);
+            router.push(`/app/resume/${r.data.versionId}`);
           });
         }}
       >

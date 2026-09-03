@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
-import { unlinkSkill } from "@/app/(app)/library/actions";
+import { unlinkSkill } from "@/app/app/library/actions";
 import { STRENGTH_LABEL } from "@/lib/domain";
 import type { AtomSkill } from "@/lib/queries/atoms";
 import { SkillCombobox } from "./SkillCombobox";

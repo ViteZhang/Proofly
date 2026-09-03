@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import { ProofDot } from "@/components/library/ProofDot";
-import { saveStrategies, type StrategyEntry } from "@/app/(app)/targets/strategy-actions";
+import { saveStrategies, type StrategyEntry } from "@/app/app/targets/strategy-actions";
 import {
   conflictNotice,
   findConflicts,
@@ -106,7 +106,7 @@ export function StrategyBoard({ board }: { board: Board }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <Link
-            href={`/targets?target=${board.target.id}`}
+            href={`/app/targets?target=${board.target.id}`}
             className="text-[12.5px] hover:underline"
             style={{ color: "var(--slate)" }}
           >

@@ -18,12 +18,12 @@ import {
   commitReflow,
   describeReflow,
   markDone,
-} from "@/app/(app)/actions/reflow-actions";
-import type { Choice } from "@/app/(app)/notes/commit-actions";
+} from "@/app/app/actions/reflow-actions";
+import type { Choice } from "@/app/app/notes/commit-actions";
 import { confirmCard, type ChatMessageView } from "@/lib/chat/message-shape";
 import type { TaskView } from "@/lib/queries/tasks";
 import { ReassessNotice } from "./ReassessNotice";
-import type { ReassessPlan } from "@/app/(app)/actions/reassess-actions";
+import type { ReassessPlan } from "@/app/app/actions/reassess-actions";
 
 type Mode = "describe" | "upload";
 
@@ -171,7 +171,7 @@ export function ReflowPanel({
                   完全一样。
                 </p>
                 <Link
-                  href={`/import?task=${task.id}`}
+                  href={`/app/import?task=${task.id}`}
                   className="mt-2.5 inline-block text-[13px] hover:underline"
                   style={{ color: "var(--ink)" }}
                 >

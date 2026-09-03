@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
-import { deleteGuards, upsertGuards } from "@/app/(app)/library/actions";
+import { deleteGuards, upsertGuards } from "@/app/app/library/actions";
 import type { Probe } from "@/lib/domain";
 import type { AtomGuards } from "@/lib/queries/atoms";
 

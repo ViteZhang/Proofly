@@ -22,12 +22,12 @@ import {
   generateBaseline,
   prepareBaseline,
   type SelectionPreview,
-} from "@/app/(app)/resume/baseline-actions";
+} from "@/app/app/resume/baseline-actions";
 import {
   lockBaseline,
   reorderBlocks,
   unlockBaseline,
-} from "@/app/(app)/resume/block-actions";
+} from "@/app/app/resume/block-actions";
 import type { GateResult } from "@/lib/resume/gate";
 import type { BaselineView } from "@/lib/queries/resume";
 
@@ -200,7 +200,7 @@ export function BaselineWorkbench({
                 globalBlocking,
               )}{" "}
               处问题必须先解决
-              <Link href="/health#blocking" className="underline" style={{ color: "var(--ink)" }}>
+              <Link href="/app/health#blocking" className="underline" style={{ color: "var(--ink)" }}>
                 去看看
               </Link>
             </span>
@@ -208,14 +208,14 @@ export function BaselineWorkbench({
             baseline && (
               <>
                 <a
-                  href={`/resume/${baseline.id}/export`}
+                  href={`/app/resume/${baseline.id}/export`}
                   className="text-[12.5px] hover:underline"
                   style={{ color: "var(--mute)" }}
                 >
                   导出 MD
                 </a>
                 <a
-                  href={`/resume/${baseline.id}/print`}
+                  href={`/app/resume/${baseline.id}/print`}
                   target="_blank"
                   rel="noreferrer"
                   className="text-[12.5px] hover:underline"
@@ -413,7 +413,7 @@ function ContextMenu({
 
   function apply(weight: "one_line" | "omit") {
     start(async () => {
-      const { setBlockWeight } = await import("@/app/(app)/resume/block-actions");
+      const { setBlockWeight } = await import("@/app/app/resume/block-actions");
       const r = await setBlockWeight(blockId, weight);
       if (!r.ok) onError(r.error);
       else onDone();

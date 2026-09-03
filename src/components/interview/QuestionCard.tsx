@@ -19,7 +19,7 @@ import { EVIDENCE_LABEL } from "@/lib/domain";
 import {
   setPracticeNote,
   setPracticeStatus,
-} from "@/app/(app)/interview/practice-actions";
+} from "@/app/app/interview/practice-actions";
 import type { QuestionView } from "@/lib/queries/interview";
 import type { PracticeStatus, ProbeType, QuestionDifficulty } from "@/types/database";
 
@@ -124,7 +124,7 @@ export function QuestionCard({ q }: { q: QuestionView }) {
         <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[12.5px]">
           {q.fromAtomId && (
             <Link
-              href={`/library?atom=${q.fromAtomId}`}
+              href={`/app/library?atom=${q.fromAtomId}`}
               className="underline decoration-[var(--line)] underline-offset-2 hover:decoration-[var(--ink)]"
               style={{ color: "var(--slate)" }}
             >
@@ -204,8 +204,8 @@ export function QuestionCard({ q }: { q: QuestionView }) {
               <Link
                 href={
                   q.gapMetricId
-                    ? `/library?atom=${q.fromAtomId}&metric=${q.gapMetricId}`
-                    : `/library?atom=${q.fromAtomId}`
+                    ? `/app/library?atom=${q.fromAtomId}&metric=${q.gapMetricId}`
+                    : `/app/library?atom=${q.fromAtomId}`
                 }
                 className="shrink-0 rounded-btn border px-2 py-[3px] text-[12px]"
                 style={{ borderColor: "var(--line)", background: "var(--card)" }}

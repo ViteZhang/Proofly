@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { ProofDot } from "@/components/library/ProofDot";
-import { matchAndScore, recallAtoms } from "@/app/(app)/targets/assess-actions";
-import { parseJd } from "@/app/(app)/targets/jd-actions";
-import { countOpenGaps, generatePlan } from "@/app/(app)/actions/plan-actions";
+import { matchAndScore, recallAtoms } from "@/app/app/targets/assess-actions";
+import { parseJd } from "@/app/app/targets/jd-actions";
+import { countOpenGaps, generatePlan } from "@/app/app/actions/plan-actions";
 import { KIND_LABEL } from "@/lib/jd/labels";
 import { GAP_COPY, gapExplain, OTHER_COPY } from "@/lib/scoring/gap-copy";
 import { isStrong } from "@/lib/scoring";
@@ -131,7 +131,7 @@ function PlanPrompt({ count, onDone }: { count: number; onDone: () => void }) {
         return;
       }
       onDone();
-      router.push("/actions");
+      router.push("/app/actions");
     });
   }
 
@@ -144,7 +144,7 @@ function PlanPrompt({ count, onDone }: { count: number; onDone: () => void }) {
       <Button size="sm" onClick={run} disabled={busy}>
         {busy ? "生成中…" : "生成行动清单"}
       </Button>
-      <Link href="/actions" className="text-[12.5px] hover:underline" style={{ color: "var(--slate)" }}>
+      <Link href="/app/actions" className="text-[12.5px] hover:underline" style={{ color: "var(--slate)" }}>
         先去看看清单
       </Link>
       {msg && (
@@ -374,7 +374,7 @@ function RequirementCard({ r, link }: { r: RequirementResult; link: TaskLink | n
         <p className="mt-1 pl-[44px] text-[12px]">
           {link ? (
             <Link
-              href={`/actions?task=${link.taskId}`}
+              href={`/app/actions?task=${link.taskId}`}
               className="hover:underline"
               style={{ color: "var(--ai)" }}
             >

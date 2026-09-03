@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { ResumePaper } from "./ResumePaper";
 import { InspectPanel } from "./InspectPanel";
-import { toggleDelta } from "@/app/(app)/resume/version-actions";
+import { toggleDelta } from "@/app/app/resume/version-actions";
 import { DELTA_LABEL } from "@/lib/resume/delta";
 import type { DeltaView, VersionDetail } from "@/lib/queries/resume";
 

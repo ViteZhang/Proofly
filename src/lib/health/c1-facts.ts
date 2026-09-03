@@ -35,7 +35,7 @@ export const c1Facts: HealthCheck = {
           title: `「${f.label}」还没定下来`,
           detail: `${body}\n\n在解决之前，简历生成会被拦住。`,
           refIds: [f.id],
-          resolveLink: `/facts?key=${encodeURIComponent(f.key)}&highlight=1`,
+          resolveLink: `/app/facts?key=${encodeURIComponent(f.key)}&highlight=1`,
           fingerprint: `C1:${f.key}`,
           autoFixable: false,
         };

@@ -15,7 +15,7 @@ import {
   pollReassess,
   retryReassess,
   type ReassessPlan,
-} from "@/app/(app)/actions/reassess-actions";
+} from "@/app/app/actions/reassess-actions";
 import type { RippleEffect } from "@/lib/ripple/types";
 
 const POLL_MS = 2500;

@@ -62,7 +62,7 @@ export function LoginForm({ expired }: { expired: boolean }) {
     });
     setBusy(false);
     if (error) return setFieldError(mapSignInError(error.message));
-    router.push("/");
+    router.push("/app");
     router.refresh();
   }
 
@@ -105,7 +105,7 @@ export function LoginForm({ expired }: { expired: boolean }) {
     const { error: pwError } = await supabase.auth.updateUser({ password });
     setBusy(false);
     if (pwError) return setFieldError("密码没设成功，换一个再试试");
-    router.push("/");
+    router.push("/app");
     router.refresh();
   }
 

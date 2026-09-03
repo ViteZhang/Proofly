@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 
 import { UploadZone } from "./UploadZone";
 import { JobProgressPanel } from "./JobProgressPanel";
-import { startJob, type JobProgress } from "@/app/(app)/import/job-actions";
-import type { UploadSummary } from "@/app/(app)/import/actions";
+import { startJob, type JobProgress } from "@/app/app/import/job-actions";
+import type { UploadSummary } from "@/app/app/import/actions";
 import { Button } from "@/components/ui/Button";
 
 export function ImportFlow({
@@ -47,7 +47,7 @@ export function ImportFlow({
         {done && (
           <div className="mt-4 flex items-center gap-2">
             {done.draftCount > 0 ? (
-              <Button onClick={() => router.push(`/import/review/${jobId}${taskId ? `?task=${taskId}` : ""}`)}>
+              <Button onClick={() => router.push(`/app/import/review/${jobId}${taskId ? `?task=${taskId}` : ""}`)}>
                 去确认这 {done.draftCount} 条
               </Button>
             ) : (

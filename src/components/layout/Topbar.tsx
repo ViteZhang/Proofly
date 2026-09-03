@@ -34,7 +34,7 @@ export function Topbar({
 
   function onChange(value: string) {
     if (value === "__new__") {
-      router.push("/targets?new=1");
+      router.push("/app/targets?new=1");
       return;
     }
     router.replace(`${pathname}?target=${value}`, { scroll: false });
@@ -81,7 +81,7 @@ export function Topbar({
 
       {/* 体检状态芯片：全部阻断级问题的条数，不只是事实层。点进去就能处理。 */}
       <Link
-        href="/health"
+        href="/app/health"
         className="inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-[11.5px] font-medium transition-opacity hover:opacity-80"
         style={
           blockingCount > 0

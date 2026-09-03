@@ -16,7 +16,7 @@ import {
   getKitJobProgress,
   resumeKitJob,
   type KitJobProgress,
-} from "@/app/(app)/interview/job-actions";
+} from "@/app/app/interview/job-actions";
 
 const POLL_MS = 4000;
 

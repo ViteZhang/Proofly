@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
-import { deleteAtom, getDeleteImpact, type DeleteImpact } from "@/app/(app)/library/actions";
+import { deleteAtom, getDeleteImpact, type DeleteImpact } from "@/app/app/library/actions";
 
 // 二次确认。影响范围必须是查库算出来的真实数字——写死的数字会在
 // 用户真正需要它的那一次骗到人。

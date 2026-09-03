@@ -130,7 +130,7 @@ export function buildConflictIssues(
         (act ? `建议：${act}\n\n` : "") +
         `这是语义比对找出来的，可能有误报 —— 拿不准就当没看见，它不会拦住任何事。`,
       refIds: [atom.id],
-      resolveLink: `/library?atom=${atom.id}`,
+      resolveLink: `/app/library?atom=${atom.id}`,
       fingerprint: `C8:${atom.id}:${c.subject.trim()}`,
       autoFixable: false,
     });

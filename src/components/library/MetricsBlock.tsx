@@ -8,7 +8,7 @@ import {
   deleteMetric,
   updateMetric,
   type EvidenceChange,
-} from "@/app/(app)/library/actions";
+} from "@/app/app/library/actions";
 import { EVIDENCE_LABEL, METRIC_KIND_LABEL } from "@/lib/domain";
 import type { AtomMetric } from "@/lib/queries/atoms";
 import { MetricForm, type MetricValues } from "./MetricForm";
