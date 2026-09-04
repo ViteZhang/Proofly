@@ -20,18 +20,44 @@ test("随机码只用字母表里的字符，且长度对", () => {
   }
 });
 
-test("拒绝采样：31 个字符的出现频次没有系统性偏斜", () => {
-  // 直接 `byte % 31` 的话，前 6 个字符会比后 25 个多出约 ⅛。
-  // 这里数 6 万个字符，看最热和最冷的差距 —— 偏置版本必然超过 5%。
-  const count = new Map<string, number>();
-  for (let i = 0; i < 7500; i++) {
-    for (const ch of randomCode()) count.set(ch, (count.get(ch) ?? 0) + 1);
+test("拒绝采样：≥248 的字节被丢掉，不是拿去取模", () => {
+  // 直接 `byte % 31` 的话，字节 248..255 会落回前 8 个字符，让它们比
+  // 其余 23 个多出约 ⅛ 的出现概率。用统计去测这件事要么样本量大得
+  // 离谱，要么就会偶发失败 —— 不如把行为本身钉死：喂一串已知字节，
+  // 看它是不是真的把越界的那些跳过去了。
+  const real = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  // 前 8 个字节全部越界，随后是 0,1,2,…
+  const feed = [248, 249, 250, 251, 252, 253, 254, 255, 0, 1, 2, 3, 4, 5, 6, 7];
+  let at = 0;
+  try {
+    globalThis.crypto.getRandomValues = ((a: Uint8Array) => {
+      for (let i = 0; i < a.length; i++) a[i] = feed[at++ % feed.length];
+      return a;
+    }) as typeof globalThis.crypto.getRandomValues;
+
+    // 越界的八个被丢掉，输出应当正好是字母表的前八个字符
+    assert.equal(randomCode(8), CODE_ALPHABET.slice(0, 8));
+  } finally {
+    globalThis.crypto.getRandomValues = real;
   }
-  assert.equal(count.size, 31);
-  const n = [...count.values()];
-  const mean = n.reduce((a, b) => a + b, 0) / n.length;
-  const worst = Math.max(...n.map((v) => Math.abs(v - mean) / mean));
-  assert.ok(worst < 0.05, `最大偏差 ${(worst * 100).toFixed(1)}%`);
+});
+
+test("越界字节喂不完时会继续取，不会返回短码", () => {
+  const real = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  let calls = 0;
+  try {
+    // 前两批全是越界字节，第三批才有可用的
+    globalThis.crypto.getRandomValues = ((a: Uint8Array) => {
+      calls++;
+      for (let i = 0; i < a.length; i++) a[i] = calls <= 2 ? 255 : 30;
+      return a;
+    }) as typeof globalThis.crypto.getRandomValues;
+
+    assert.equal(randomCode(8), CODE_ALPHABET[30].repeat(8));
+    assert.ok(calls >= 3, `要重试到拿够为止，实际调了 ${calls} 次`);
+  } finally {
+    globalThis.crypto.getRandomValues = real;
+  }
 });
 
 test("规范形式是 PF-XXXX-XXXX", () => {

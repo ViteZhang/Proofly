@@ -2167,6 +2167,22 @@ export type Database = {
         Args: Record<string, never>;
         Returns: boolean;
       };
+      admin_overview: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
+      admin_batches: {
+        Args: { p_purpose?: string | null; p_q?: string | null };
+        Returns: Json;
+      };
+      admin_batch: {
+        Args: { p_id: string };
+        Returns: Json;
+      };
+      admin_redemptions: {
+        Args: { p_purpose?: string | null; p_q?: string | null; p_limit?: number };
+        Returns: Json;
+      };
       claim_signup_grant: {
         Args: {
           p_user: string;

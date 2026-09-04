@@ -66,6 +66,28 @@ export async function updateSession(request: NextRequest) {
     return copyCookies(supabaseResponse, NextResponse.redirect(url));
   }
 
+  // 管理后台：非管理员看到的必须是 404，不是 403 —— 403 等于确认
+  // 「这个路径存在，只是你没权限」，那是白送的情报。
+  //
+  // **这一层不能省，也不能只靠页面里的 notFound()。** 试过了：页面与
+  // layout 是并行渲染的，页面那边先渲染出来的 RSC 负载会跟着 404 响应
+  // 一起发出去，layout 的 metadata（「兑换码管理 · Proofly」）也会变成
+  // 404 页的标题。数据没漏，但「这个路径存在」还是说出去了。
+  //
+  // 在这里 rewrite 掉，/admin 那棵树根本不会开始渲染。
+  //
+  // 方案 6.2 要求二说不要依赖中间件 —— 那是说不要**只**依赖它。三层各
+  // 管一件事：这一层管响应形状，layout 的 requireAdmin() 管 matcher 配
+  // 错时的兜底，每个 admin_* 函数里的 admin_assert() 管数据本身。
+  if (user && (pathname === "/admin" || pathname.startsWith("/admin/"))) {
+    const { data: admin } = await supabase.rpc("is_admin");
+    if (admin !== true) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/_not-found";
+      return copyCookies(supabaseResponse, NextResponse.rewrite(url));
+    }
+  }
+
   // 已登录访问 /login → 产品首页。
   // 官网 / 不在此列：登录了也该能回去看定价和常见问题。
   if (user && pathname === "/login") {
