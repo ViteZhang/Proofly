@@ -1981,6 +1981,23 @@ export type Database = {
         Args: { p_user?: string };
         Returns: Json;
       };
+      record_free_spend: {
+        Args: { p_cost_cents?: number };
+        Returns: undefined;
+      };
+      check_global_budget: {
+        Args: { p_est_cents: number; p_cap_cents: number };
+        Returns: Json;
+      };
+      claim_signup_grant: {
+        Args: {
+          p_user: string;
+          p_credits: number;
+          p_cap_cents: number;
+          p_est_cents: number;
+        };
+        Returns: Json;
+      };
       log_free_usage: {
         Args: {
           p_user: string;

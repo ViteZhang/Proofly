@@ -345,5 +345,76 @@ begin
     check_regen_free(u, 'resume_baseline', fp, 24, 3), false);
 end $$;
 
+-- =============================================================
+-- 预算护栏（验收 35–39）
+-- =============================================================
+do $$
+declare
+  u uuid := '99999999-9999-9999-9999-999999999999';
+  r jsonb; h jsonb;
+  cap_normal numeric := 20000;   -- ¥200/日
+  cap_tiny   numeric := 1;       -- ¥0.01
+  est        numeric := 500;
+begin
+  delete from global_budget_counters;
+  update user_profiles set signup_grant_issued = false, signup_grant_issued_at = null
+   where user_id = u;
+  delete from entitlements where user_id = u and source = 'grant_signup';
+
+  -- 正常上限下发得出去
+  r := claim_signup_grant(u, 45, cap_normal, est);
+  perform assert_eq('正常上限 · 赠送发得出去', (r->>'granted')::int, 45);
+  perform assert_eq('正常上限 · 计入护栏',
+    (select signup_grant_count from global_budget_counters where bucket_date=current_date), 1);
+
+  -- 幂等：领过了不给第二份
+  r := claim_signup_grant(u, 45, cap_normal, est);
+  perform assert_eq('赠送只发一次', (r->>'granted')::int, 0);
+  perform assert_eq('第二次的理由是已发放', r->>'reason', 'ALREADY_ISSUED');
+
+  -- 35 日上限调到极小 → 新注册赠送暂停
+  update user_profiles set signup_grant_issued = false where user_id = u;
+  r := claim_signup_grant(u, 45, cap_tiny, est);
+  perform assert_eq('验收 35 · 触顶后暂停发放', (r->>'ok')::boolean, false);
+  perform assert_eq('验收 35 · 理由是护栏', r->>'reason', 'BUDGET_CAPPED');
+  perform assert_eq('验收 35 · 触顶不写「已发放」，恢复后还能领',
+    (select signup_grant_issued from user_profiles where user_id=u), false);
+
+  -- 36 已有用户的限次免费对话照常
+  update quota_counters set free_chat_month = to_char(now(),'YYYY-MM'), free_chat_used = 0
+   where user_id = u;
+  perform assert_eq('验收 36 · 触顶时免费对话照常', consume_free_chat(u, 20), true);
+
+  -- 37 付费动作不受影响
+  perform grant_credits(u, 'purchase', 50);
+  h := hold_credits(u, 'target_assess', 5, 'budget-1');
+  perform settle_hold((h->>'hold_id')::uuid);
+  perform assert_eq('验收 37 · 触顶时付费动作照常',
+    (select count(*)::int from usage_logs
+      where user_id=u and action_code='target_assess' and credits_charged=5), 1);
+
+  -- 38 永久免费的纯代码动作不受影响
+  perform log_free_usage(u, 'data_export', 'free_forever');
+  perform assert_eq('验收 38 · 触顶时导出照常',
+    (select count(*)::int from usage_logs where user_id=u and action_code='data_export'), 1);
+
+  -- 39 跨日后恢复
+  --
+  -- 这里的上限要设成「刚好还能发一笔」的量：日上限本身低于单笔预估的话，
+  -- 跨不跨日都发不出来，测的就不是「计数重置」了。
+  delete from global_budget_counters;
+  insert into global_budget_counters (bucket_date, free_cost_cents)
+  values (current_date, est);
+  update user_profiles set signup_grant_issued = false where user_id = u;
+
+  r := claim_signup_grant(u, 45, est + 100, est);
+  perform assert_eq('验收 39 · 今日已用满时仍然暂停', (r->>'ok')::boolean, false);
+
+  update global_budget_counters set bucket_date = current_date - 1
+   where bucket_date = current_date;
+  r := claim_signup_grant(u, 45, est + 100, est);
+  perform assert_eq('验收 39 · 跨日后计数重置，赠送恢复', (r->>'granted')::int, 45);
+end $$;
+
 \echo ''
 \echo '全部通过。'
