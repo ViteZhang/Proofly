@@ -416,5 +416,75 @@ begin
   perform assert_eq('验收 39 · 跨日后计数重置，赠送恢复', (r->>'granted')::int, 45);
 end $$;
 
+-- =============================================================
+-- 悬挂清理（验收 40）
+-- =============================================================
+do $$
+declare
+  u uuid := '99999999-9999-9999-9999-999999999999';
+  h jsonb; a int; n int;
+begin
+  delete from usage_logs where user_id = u;
+  delete from credit_holds where user_id = u;
+  delete from entitlements where user_id = u;
+  update quota_counters set credits_available = 0, credits_held = 0 where user_id = u;
+  perform grant_credits(u, 'purchase', 100);
+
+  -- 造一个已过期的 held
+  h := hold_credits(u, 'interview_kit', 25, 'sweep-1');
+  update credit_holds set expires_at = now() - interval '1 minute'
+   where id = (h->>'hold_id')::uuid;
+  -- 再造一个没过期的，确认扫描不会误伤
+  perform hold_credits(u, 'resume_baseline', 10, 'sweep-2');
+
+  select credits_available into a from quota_counters where user_id = u;
+  perform assert_eq('两笔预扣后余额 65', a, 65);
+
+  n := sweep_expired_holds(500);
+  perform assert_eq('验收 40 · 只释放了过期那一笔', n, 1);
+  select credits_available into a from quota_counters where user_id = u;
+  perform assert_eq('验收 40 · 过期预扣的钱退回来了', a, 90);
+  perform assert_eq('验收 40 · 状态置为 released',
+    (select status from credit_holds where id=(h->>'hold_id')::uuid), 'released');
+  perform assert_eq('验收 40 · 释放原因是 expired',
+    (select release_reason from credit_holds where id=(h->>'hold_id')::uuid), 'expired');
+  perform assert_eq('验收 40 · 走的是 release_hold，失败日志照写',
+    (select count(*)::int from usage_logs
+      where user_id=u and succeeded=false and action_code='interview_kit'), 1);
+  perform assert_eq('验收 40 · 没过期的那笔没被动',
+    (select status from credit_holds where user_id=u and idempotency_key='sweep-2'), 'held');
+
+  -- 再扫一次不应重复退
+  perform assert_eq('重复扫描不重复退', sweep_expired_holds(500), 0);
+  select credits_available into a from quota_counters where user_id = u;
+  perform assert_eq('余额没有二次变动', a, 90);
+end $$;
+
+-- 过期赠送出账
+do $$
+declare
+  u uuid := '99999999-9999-9999-9999-999999999999';
+  e uuid; a int;
+begin
+  delete from usage_logs where user_id = u;
+  delete from credit_holds where user_id = u;
+  delete from entitlements where user_id = u;
+  update quota_counters set credits_available = 0, credits_held = 0 where user_id = u;
+
+  perform grant_credits(u, 'purchase', 100);
+  e := grant_credits(u, 'grant_signup', 45, now() + interval '1 day');
+  update entitlements set expires_at = now() - interval '1 hour' where id = e;
+  -- 快照此刻还是 145，过期不会自己反映到余额上
+  select credits_available into a from quota_counters where user_id = u;
+  perform assert_eq('过期前快照仍是 145', a, 145);
+
+  perform assert_eq('扫描认领了一个用户', sweep_expired_entitlements(500), 1);
+  select credits_available into a from quota_counters where user_id = u;
+  perform assert_eq('过期赠送出账后余额降到 100', a, 100);
+  perform assert_eq('打标而不是改账 · credits_used 原样保留',
+    (select credits_used from entitlements where id = e), 0);
+  perform assert_eq('打标后不再重复捞', sweep_expired_entitlements(500), 0);
+end $$;
+
 \echo ''
 \echo '全部通过。'

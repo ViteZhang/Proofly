@@ -6,12 +6,16 @@ import type { Database } from "@/types/database";
 // - /               官网首页（营销站），登录与否都能看
 // - /login          登录页（(auth) 组）
 // - /auth/callback  Magic Link 落地，必须可达以交换 session
+// - /api/cron/*     定时任务，没有 session 可言，自己用 CRON_SECRET 鉴权
 //
 // 产品在 /app 下，整段受保护 —— 官网和产品同域，靠这一条分界。
 function isPublicPath(pathname: string): boolean {
   if (pathname === "/") return true;
   if (pathname === "/login") return true;
   if (pathname === "/auth" || pathname.startsWith("/auth/")) return true;
+  // 定时任务由 Vercel Cron 发起，带的是 CRON_SECRET 不是登录态。
+  // 放行的只是「不查 session」，不是「不鉴权」—— 路由自己会拒。
+  if (pathname.startsWith("/api/cron/")) return true;
   return false;
 }
 

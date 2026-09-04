@@ -1981,6 +1981,14 @@ export type Database = {
         Args: { p_user?: string };
         Returns: Json;
       };
+      sweep_expired_holds: {
+        Args: { p_limit?: number };
+        Returns: number;
+      };
+      sweep_expired_entitlements: {
+        Args: { p_limit?: number };
+        Returns: number;
+      };
       record_free_spend: {
         Args: { p_cost_cents?: number };
         Returns: undefined;

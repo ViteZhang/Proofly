@@ -30,6 +30,9 @@ create table if not exists entitlements (
   -- 支付订单号。本期不接支付，预留字段，接的时候不用改表。
   order_ref text,
   note text,
+  -- 过期出账的标记。见 28：打标而不是把 credits_used 抹满，
+  -- 「过期时还剩多少没用」是要留住的事实。
+  expired_settled_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (credits_used <= credits_total)
