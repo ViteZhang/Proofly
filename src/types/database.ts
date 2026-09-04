@@ -66,6 +66,20 @@ export type HealthScanStatus = "running" | "done" | "failed";
 export type EntitlementSource =
   | "purchase" | "grant_signup" | "grant_monthly" | "redeem" | "adjust";
 export type HoldStatus = "held" | "settled" | "released";
+// ---- 兑换码后台（38+）----
+export type BatchPurpose =
+  /** 内测发放 */
+  | "internal_beta"
+  /** 定向补偿 */
+  | "compensation"
+  /** 邀请 */
+  | "invite"
+  /** 自用：给自己发积分也要开一张码，见方案 0.1 */
+  | "self"
+  /** 微信付款后发码，C3 的履约通道 */
+  | "purchase";
+/** 只有三个存储态。「已用完」「已过期」是算出来的，不落库（方案 3.4） */
+export type CodeStatus = "active" | "disabled" | "revoked";
 export type FreeReason =
   | "free_forever"
   | "free_quota"
@@ -1913,12 +1927,66 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
-      redeem_records: {
+      redeem_batches: {
         Row: {
           id: string;
-          user_id: string;
+          name: string;
+          purpose: BatchPurpose;
+          reason: string;
+          credits_each: number;
+          max_uses_each: number | null;
+          code_expires_at: string | null;
+          credit_valid_days: number | null;
+          bound_email: string | null;
+          code_count: number;
+          created_by: string;
+          created_at: string;
+          revoked_at: string | null;
+          revoke_reason: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      redeem_codes: {
+        Row: {
+          id: string;
+          batch_id: string;
           code: string;
+          credits: number;
+          max_uses: number | null;
+          used_count: number;
+          status: CodeStatus;
+          status_reason: string | null;
+          status_changed_at: string | null;
+          code_expires_at: string | null;
+          bound_email: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      redeem_redemptions: {
+        Row: {
+          id: string;
+          code_id: string;
+          user_id: string;
+          credits: number;
+          credit_expires_at: string | null;
           entitlement_id: string | null;
+          redeemed_at: string;
+          ip_hash: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      admin_users: {
+        Row: {
+          user_id: string;
+          email: string;
+          note: string | null;
           created_at: string;
         };
         Insert: never;
@@ -2094,6 +2162,10 @@ export type Database = {
       redeem_code: {
         Args: { p_user: string; p_code: string };
         Returns: Json;
+      };
+      is_admin: {
+        Args: Record<string, never>;
+        Returns: boolean;
       };
       claim_signup_grant: {
         Args: {
