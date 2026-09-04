@@ -2187,6 +2187,10 @@ export type Database = {
         Args: { p_id: string };
         Returns: Json;
       };
+      admin_anomalies: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
       admin_toggle_code: {
         Args: { p_id: string; p_reason?: string | null };
         Returns: Json;

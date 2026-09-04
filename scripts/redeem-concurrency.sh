@@ -24,6 +24,7 @@ ADMIN='77777777-7777-7777-7777-777777777777'
 setup() {
   local n=$1 uses=$2 code=$3
   $PSQL >/dev/null <<SQL
+delete from redeem_attempts;
 delete from redeem_redemptions;
 delete from redeem_codes;
 delete from redeem_batches;
@@ -74,7 +75,11 @@ echo "── 1 · 同一个人并发兑一张一次性码 ──"
 setup 1 1 'PF-CONC-0001'
 OUT=$(fire "1 1 1 1 1 1 1 1" 'PF-CONC-0001')
 want "只成功一次"        "$(echo "$OUT" | grep -c '"ok" *: *true')"  1
-want "其余都是已用过"    "$(echo "$OUT" | grep -c 'ALREADY_USED_BY_ME')" 7
+# 数「失败了几次」而不是「几次是 ALREADY_USED_BY_ME」：A5 的失败限流
+# 也在这条路径上，八个连接同时打时，后面几个可能读到已经攒起来的失败
+# 计数而返回 RATE_LOCKED。谁在第几位是竞态决定的，钉死具体话术会让这
+# 条断言变成偶发失败。要保证的是「只成功一次」，不是「输的那些怎么输」。
+want "其余七次都没成功"  "$(echo "$OUT" | grep -c '"ok" *: *false')" 7
 want "used_count"        "$($PSQL -c "select used_count from redeem_codes where code='PF-CONC-0001'")" 1
 want "核销记录"          "$($PSQL -c "select count(*) from redeem_redemptions")" 1
 want "额度记录"          "$($PSQL -c "select count(*) from entitlements where source='redeem'")" 1
@@ -96,7 +101,49 @@ want "成功四次"          "$(echo "$OUT" | grep -c '"ok" *: *true')"  4
 want "used_count"        "$($PSQL -c "select used_count from redeem_codes where code='PF-CONC-0003'")" 4
 want "没人领到两份"      "$($PSQL -c "select count(*) from (select user_id from redeem_redemptions group by user_id having count(*)>1) x")" 0
 
-echo "── 4 · 守恒：额度总额 = 核销总额 = 余额总和 ──"
+echo "── 4 · 失败限流：5 次/小时，触顶锁 1 小时 ──"
+setup 2 1 'PF-CONC-0005'
+for i in 1 2 3 4 5; do
+  $PSQL -c "select redeem_code('$(uid 1)'::uuid, 'PF-NOPE-000$i', 'ip-a')" >/dev/null
+done
+R6=$($PSQL -c "select redeem_code('$(uid 1)'::uuid, 'PF-CONC-0005', 'ip-a') ->> 'reason'")
+want "第 6 次被锁"        "$R6" RATE_LOCKED
+want "锁住时那张真码没被消耗" \
+  "$($PSQL -c "select used_count from redeem_codes where code='PF-CONC-0005'")" 0
+want "锁只锁自己，别人照兑" \
+  "$($PSQL -c "select redeem_code('$(uid 2)'::uuid, 'PF-CONC-0005', 'ip-b') ->> 'ok'")" true
+want "触顶那次也留了痕" \
+  "$($PSQL -c "select count(*) from redeem_attempts where user_id='$(uid 1)' and reason='RATE_LOCKED'")" 1
+
+echo "── 5 · 成功限流：10 次/天（正常用户不会超过 2 次）──"
+$PSQL >/dev/null <<SQL
+delete from redeem_attempts;
+delete from redeem_redemptions;
+delete from redeem_codes;
+delete from redeem_batches;
+delete from entitlements where user_id::text like '9%';
+delete from quota_counters where user_id::text like '9%';
+with b as (
+  insert into redeem_batches
+    (name, purpose, reason, credits_each, max_uses_each, code_count, created_by)
+  values ('成功限流验收', 'internal_beta', '成功限流验收用', 10, 1, 11, '$ADMIN')
+  returning id)
+insert into redeem_codes (batch_id, code, credits, max_uses)
+-- 码面必须是规范形状 PF-XXXX-XXXX：归一化只认 8 位码体，
+-- 造一个 PF-D00-0000 这样 9 位的，兑的时候会被改写成别的字符串。
+select b.id, 'PF-DAY0-00' || lpad(i::text, 2, '0'), 10, 1
+  from b, generate_series(0, 10) i;
+SQL
+DAYOK=0
+for i in 00 01 02 03 04 05 06 07 08 09; do
+  [ "$($PSQL -c "select redeem_code('$(uid 1)'::uuid, 'PF-DAY0-00$i') ->> 'ok'")" = "true" ] \
+    && DAYOK=$((DAYOK+1))
+done
+want "前十次都成功"      "$DAYOK" 10
+want "第十一次被拦" \
+  "$($PSQL -c "select redeem_code('$(uid 1)'::uuid, 'PF-DAY0-0010') ->> 'reason'")" RATE_DAILY
+
+echo "── 6 · 守恒：额度总额 = 核销总额 = 余额总和 ──"
 want "额度 vs 核销" \
   "$($PSQL -c "select (select coalesce(sum(credits_total),0) from entitlements where source='redeem') = (select coalesce(sum(credits),0) from redeem_redemptions)")" t
 want "额度 vs 余额" \
@@ -104,7 +151,7 @@ want "额度 vs 余额" \
 want "没有孤儿额度" \
   "$($PSQL -c "select count(*) from entitlements e where e.source='redeem' and not exists (select 1 from redeem_redemptions r where r.entitlement_id = e.id)")" 0
 
-echo "── 5 · 失败的那些一点痕迹都不留 ──"
+echo "── 7 · 失败的那些一点痕迹都不留 ──"
 setup 2 1 'PF-CONC-0004'
 $PSQL -c "select redeem_code('$(uid 1)'::uuid,'PF-CONC-0004')" >/dev/null
 $PSQL -c "select redeem_code('$(uid 2)'::uuid,'PF-CONC-0004')" >/dev/null

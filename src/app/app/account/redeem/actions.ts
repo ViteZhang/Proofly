@@ -22,6 +22,9 @@ const MESSAGE: Record<string, string> = {
   USED_UP: "这张码的名额用完了",
   ALREADY_USED_BY_ME: "这张码你已经用过了，积分在余额里",
   EMAIL_MISMATCH: "这张码不是发给这个邮箱的",
+  // 限流（方案 7.2）。说清是「多久之后」，不然人只会一直敲。
+  RATE_LOCKED: "错的次数太多了，一小时后再试",
+  RATE_DAILY: "今天兑换的次数够多了，明天再来",
 };
 
 /**

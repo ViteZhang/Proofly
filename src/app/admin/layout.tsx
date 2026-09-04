@@ -10,7 +10,7 @@
 
 import { AdminNav } from "@/components/admin/AdminNav";
 import { createClient } from "@/lib/supabase/server";
-import { getOverview, requireAdmin } from "@/lib/queries/admin";
+import { getAnomalies, getOverview, requireAdmin } from "@/lib/queries/admin";
 
 export const metadata = {
   title: "兑换码管理 · Proofly",
@@ -25,9 +25,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   await requireAdmin();
 
   const supabase = await createClient();
-  const [{ data: auth }, overview] = await Promise.all([
+  const [{ data: auth }, overview, anomalies] = await Promise.all([
     supabase.auth.getUser(),
     getOverview(),
+    getAnomalies(),
   ]);
 
   return (
@@ -35,7 +36,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <AdminNav
         email={auth.user?.email ?? ""}
         groups={[
-          { title: "总览", items: [{ href: "/admin", label: "概览" }] },
+          {
+            title: "总览",
+            items: [
+              { href: "/admin", label: "概览", badge: anomalies.total, amber: true },
+            ],
+          },
           {
             title: "发放",
             items: [
@@ -47,6 +53,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             title: "追踪",
             items: [
               { href: "/admin/redemptions", label: "核销流水", badge: overview.redeemed_count },
+              { href: "/admin/anomalies", label: "异常", badge: anomalies.total, amber: true },
             ],
           },
         ]}

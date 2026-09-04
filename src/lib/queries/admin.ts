@@ -159,6 +159,62 @@ export async function listRedemptions(opts: {
   return (data ?? []) as unknown as RedemptionRow[];
 }
 
+// -------------------------------------------------------------
+// 异常看板（方案 8.4）
+//
+// 四项判定，全部只报不动作。自动封禁在内测阶段的误伤成本远高于收益
+// —— 内测用户可能同办公室、同 VPN 出口。
+// -------------------------------------------------------------
+
+export type FailBurst = {
+  scope: "user" | "ip";
+  who: string;
+  n: number;
+  since: string;
+  last_at: string;
+  /** 其中「码根本不存在」的有几次 —— 分辨手误和枚举就靠这个 */
+  unusable: number;
+};
+
+export type ExpiringBatch = {
+  id: string;
+  name: string;
+  code_expires_at: string;
+  available: number;
+  code_count: number;
+};
+
+export type OrphanCredit = {
+  id: string;
+  source: string;
+  credits_total: number;
+  note: string | null;
+  created_at: string;
+  who: string;
+};
+
+export type HeavyRedeemer = { who: string; n: number; credits: number };
+
+export type Anomalies = {
+  fail_burst: FailBurst[];
+  expiring: ExpiringBatch[];
+  orphan: OrphanCredit[];
+  heavy: HeavyRedeemer[];
+  total: number;
+};
+
+export async function getAnomalies(): Promise<Anomalies> {
+  const supabase = await createClient();
+  const { data } = await supabase.rpc("admin_anomalies");
+  return (data ?? {
+    fail_burst: [],
+    expiring: [],
+    orphan: [],
+    heavy: [],
+    total: 0,
+  }) as unknown as Anomalies;
+}
+
 /**
  * 积分 → 人民币的粗估。
  *

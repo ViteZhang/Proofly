@@ -21,10 +21,10 @@ import {
   Th,
   when,
 } from "@/components/admin/ui";
-import { getOverview, toCny } from "@/lib/queries/admin";
+import { getAnomalies, getOverview, toCny } from "@/lib/queries/admin";
 
 export default async function AdminOverviewPage() {
-  const o = await getOverview();
+  const [o, a] = await Promise.all([getOverview(), getAnomalies()]);
 
   return (
     <>
@@ -33,7 +33,7 @@ export default async function AdminOverviewPage() {
         desc="四个数字，只留会让你产生动作的那些。「累计发码量」不在这里——它只会涨，看了也不做什么。"
       />
 
-      <div className="mb-3.5 grid grid-cols-2 gap-3 md:grid-cols-3">
+      <div className="mb-3.5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat
           value={o.codes_outstanding}
           label="在外流通的码"
@@ -51,6 +51,15 @@ export default async function AdminOverviewPage() {
           // 发码就是发钱，但积分这个单位没有痛感，¥ 有。
           note={`折算模型成本约 ${toCny(o.credits_issued)}（估算）`}
         />
+        {/* 唯一需要你动作的那个数字 */}
+        <Link href="/admin/anomalies">
+          <Stat
+            amber={a.total > 0}
+            value={a.total}
+            label="待处理异常"
+            note={a.total > 0 ? "需人工判断，四项判定只报不动作" : "四项判定都为零"}
+          />
+        </Link>
       </div>
 
       <Card

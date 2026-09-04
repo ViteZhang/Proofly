@@ -31,7 +31,8 @@
     "telemetry:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/telemetry/*.test.ts",
     "health:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/health/*.test.ts",
     "gen-code": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/gen-code.ts",
-    "redeem:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/redeem/*.test.ts"
+    "redeem:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/redeem/*.test.ts",
+    "redeem:concurrency": "bash scripts/redeem-concurrency.sh"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",
