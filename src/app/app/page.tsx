@@ -1,4 +1,7 @@
 import Link from "next/link";
+
+import { SignupGuide } from "@/components/billing/SignupGuide";
+import { ensureOnboarded } from "@/lib/billing/onboard";
 import { getOverviewStats, getProofSummary } from "@/lib/queries/atoms";
 import { getRiskCards } from "@/lib/queries/risk";
 import { getTaskBoard } from "@/lib/queries/tasks";
@@ -21,6 +24,10 @@ const BAR: Record<EvidenceLevel, string> = {
 };
 
 export default async function HomePage() {
+  // 兜住两种人：注册那天护栏触顶没领到的（今天补发），
+  // 以及 Magic Link 落地那一步没走完的。幂等，老用户是空操作。
+  const onboard = await ensureOnboarded();
+
   const [summary, stats, risks, board, recentVersions, health] = await Promise.all([
     getProofSummary(),
     getOverviewStats(),
@@ -43,6 +50,7 @@ export default async function HomePage() {
 
   return (
     <div className="max-w-[860px]">
+      <SignupGuide state={onboard} />
       <h1 className="font-display text-[26px] font-semibold tracking-tight">首页</h1>
       <p className="mt-1.5 text-[14px]" style={{ color: "var(--slate)" }}>
         证明度总览 · 当前该做什么
