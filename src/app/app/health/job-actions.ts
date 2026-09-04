@@ -3,7 +3,9 @@
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { runDeepScan } from "@/lib/health/deep-job";
-import { atomsToScan } from "@/lib/health/c8-conflict";
+import { fingerprintFor } from "@/lib/billing/action";
+import { startJob as startBilledJob } from "@/lib/billing/job";
+import { selectDeepScanBatch } from "@/lib/health/c8-conflict";
 import { loadHealthContext } from "@/lib/queries/health";
 import { STALE_MS } from "@/lib/health/deep-job";
 
@@ -17,6 +19,8 @@ export type DeepScanProgress = {
   settled: boolean;
   stalled: boolean;
   warnings: string[];
+  /** 这次没扫完、还剩几条。用来提示「再来一次 5 分」。 */
+  remaining: number;
 };
 
 /** 起一次深扫。已经在跑就返回那一次，不重复起。 */
@@ -37,15 +41,35 @@ export async function startDeepScan(): Promise<{ scanId: string } | { error: str
   }
 
   const ctx = await loadHealthContext();
-  const total = atomsToScan(ctx).length;
+  const { batch, remaining } = selectDeepScanBatch(ctx);
+
+  // 一条都不用扫就别起作业、别收钱。
+  if (batch.length === 0) {
+    return { error: "该扫的经历上次都扫过了，之后也没改动过 —— 这次不用再扫。" };
+  }
 
   const { data, error } = await supabase
     .from("health_scans")
-    .insert({ kind: "deep" as const, status: "running" as const, total_count: total })
+    .insert({ kind: "deep" as const, status: "running" as const, total_count: batch.length })
     .select("id")
     .single();
 
   if (error || !data) return { error: `起不了深度扫描：${error?.message ?? "未知原因"}` };
+
+  const held = await startBilledJob({
+    jobId: data.id,
+    kind: "health_deep_scan",
+    actionCode: "health_deep_scan",
+    fingerprint: await fingerprintFor("health_deep_scan", {
+      atomIds: batch.map((a) => a.id),
+    }),
+    inputRef: { atom_ids: batch.map((a) => a.id), remaining },
+    segments: [{ name: "conflict", label: "语义冲突比对" }],
+  });
+  if (!held.ok) {
+    await supabase.from("health_scans").delete().eq("id", data.id);
+    return { error: held.error };
+  }
 
   after(() => runDeepScan(data.id));
   return { scanId: data.id };
@@ -55,7 +79,7 @@ export async function getDeepScanProgress(scanId: string): Promise<DeepScanProgr
   const supabase = await createClient();
   const { data } = await supabase
     .from("health_scans")
-    .select("id,status,done_count,total_count,heartbeat_at,error_message")
+    .select("id,status,done_count,total_count,heartbeat_at,error_message,coverage")
     .eq("id", scanId)
     .maybeSingle();
 
@@ -65,11 +89,14 @@ export async function getDeepScanProgress(scanId: string): Promise<DeepScanProgr
   const stalled =
     !settled && Date.parse(data.heartbeat_at ?? "") < Date.now() - STALE_MS;
 
+  const cover = (data.coverage ?? {}) as { remaining?: number };
+
   return {
     scanId: data.id,
     status: data.status,
     done: data.done_count,
     total: data.total_count,
+    remaining: typeof cover.remaining === "number" ? cover.remaining : 0,
     settled,
     stalled,
     warnings: (data.error_message ?? "").split("\n").filter((s) => s.trim() !== ""),

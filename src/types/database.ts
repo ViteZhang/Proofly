@@ -132,6 +132,8 @@ export type Database = {
           evidence_level: EvidenceLevel;
           pending_metrics: Json;
           jd_signals: Json;
+          last_deep_scan_at: string | null;
+          last_deep_scan_rev: string | null;
           embedding: string | null;
           sort_order: number | null;
           created_at: string | null;
@@ -155,6 +157,8 @@ export type Database = {
           evidence_level?: EvidenceLevel;
           pending_metrics?: Json;
           jd_signals?: Json;
+          last_deep_scan_at?: string | null;
+          last_deep_scan_rev?: string | null;
           embedding?: string | null;
           sort_order?: number | null;
           created_at?: string | null;
@@ -178,6 +182,8 @@ export type Database = {
           evidence_level?: EvidenceLevel;
           pending_metrics?: Json;
           jd_signals?: Json;
+          last_deep_scan_at?: string | null;
+          last_deep_scan_rev?: string | null;
           embedding?: string | null;
           sort_order?: number | null;
           created_at?: string | null;

@@ -4,6 +4,7 @@ import { DeepScanPanel } from "@/components/health/DeepScanPanel";
 import { IssueCard } from "@/components/health/IssueCard";
 import { PassedList } from "@/components/health/PassedList";
 import { ScanOnArrival } from "@/components/health/ScanOnArrival";
+import { FreeTag } from "@/components/billing/CreditTag";
 import { rescan } from "./actions";
 
 // S10 体检页。全局视图 —— 方向选择器在这一页置灰（判定在 nav.ts）。
@@ -45,10 +46,12 @@ export default async function HealthPage() {
           <form action={rescan} className="inline">
             <button
               type="submit"
-              className="rounded-btn px-3 py-1.5 text-[13px]"
+              className="inline-flex items-center gap-2 rounded-btn px-3 py-1.5 text-[13px]"
               style={{ background: "var(--card)", border: "1px solid var(--line)" }}
             >
               重新扫描
+              {/* 免费要显性标注：用户不会自己发现「哦这个没扣分」 */}
+              <FreeTag />
             </button>
           </form>
           <DeepScanPanel initialScanId={null} />

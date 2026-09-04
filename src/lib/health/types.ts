@@ -88,6 +88,8 @@ export type HealthAtom = {
   periodEnd: string | null;
   metrics: HealthMetric[];
   updatedAt: string;
+  /** 上次深扫时这条经历的 updated_at。没变过就跳过，不重复调模型。 */
+  lastDeepScanRev?: string | null;
   /** 关联的源文档 id。C8 只扫两个及以上的。 */
   sourceDocIds: string[];
 };

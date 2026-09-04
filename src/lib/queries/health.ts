@@ -60,7 +60,7 @@ export async function loadHealthContext(now = new Date()): Promise<HealthContext
       supabase
         .from("atoms")
         .select(
-          "id,title,org,role,status,evidence_level,situation,task,actions,period_start,period_end,updated_at",
+          "id,title,org,role,status,evidence_level,situation,task,actions,period_start,period_end,updated_at,last_deep_scan_rev",
         ),
       supabase
         .from("metrics")
@@ -116,6 +116,7 @@ export async function loadHealthContext(now = new Date()): Promise<HealthContext
     periodEnd: a.period_end,
     metrics: metricsByAtom.get(a.id) ?? [],
     updatedAt: a.updated_at ?? new Date(0).toISOString(),
+    lastDeepScanRev: a.last_deep_scan_rev,
     sourceDocIds: docsByAtom.get(a.id) ?? [],
   }));
 
