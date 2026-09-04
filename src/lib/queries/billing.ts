@@ -7,7 +7,7 @@
 // 上游：《商业化交互方案 v1.0》第 2 节
 // =============================================================
 
-import { FREE_QUOTA, LOW_BALANCE } from "@/config/plan";
+import { ACTION_LABELS, FREE_QUOTA, LOW_BALANCE } from "@/config/plan";
 import { createClient } from "@/lib/supabase/server";
 
 export type BalanceView = {
@@ -83,4 +83,142 @@ export async function getEntitlements(): Promise<EntitlementView> {
     }
   }
   return { purchased, granted, grantExpiresAt };
+}
+
+// =============================================================
+// 消费记录
+// =============================================================
+
+export type LedgerKind = "spend" | "refund" | "free" | "grant";
+
+export type LedgerRow = {
+  id: string;
+  at: string;
+  /** 动作或来源的中文名 */
+  label: string;
+  kind: LedgerKind;
+  /** 变动的绝对值。kind 决定正负与措辞。 */
+  amount: number;
+  /** 说明列：为什么免费、为什么退回、哪张兑换码 */
+  note: string | null;
+};
+
+const GRANT_LABEL: Record<string, string> = {
+  purchase: "充值到账",
+  redeem: "兑换码到账",
+  grant_signup: "注册赠送",
+  grant_monthly: "月度赠送",
+  adjust: "人工调整",
+};
+
+const FREE_NOTE: Record<string, string> = {
+  free_forever: "永久免费",
+  free_quota: "本月免费额度",
+  regen_window: "24h 内未改事实",
+  budget_grace: "免费额度",
+  bundled: "并入上一步的动作",
+};
+
+/**
+ * 一条流水。
+ *
+ * 来源有两处：usage_logs（消费与退回）与 entitlements（到账）。
+ * 只看其中一处都会漏 —— 用户不会分「消费记录」和「充值记录」，
+ * 他要的是一条时间线。
+ *
+ * **失败退回必须出现在这里。** 这是「失败不扣分」这个承诺的可见证据，
+ * 用户能亲眼看到它被执行，比任何声明都有效。
+ */
+export async function listLedger(opts: {
+  limit?: number;
+  /** 上一页最后一行的时间，向下加载用 */
+  before?: string | null;
+  /** 默认不显示永久免费的动作，否则流水会被它们淹没 */
+  includeFree?: boolean;
+} = {}): Promise<LedgerRow[]> {
+  const limit = opts.limit ?? 30;
+  const supabase = await createClient();
+
+  let usageQ = supabase
+    .from("usage_logs")
+    .select("id,created_at,action_code,credits_charged,free_reason,succeeded,hold_id")
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
+  if (opts.before) usageQ = usageQ.lt("created_at", opts.before);
+  if (!opts.includeFree) {
+    // 永久免费与并入别的动作的那些默认折叠。留下的是「花过钱」
+    // 和「本该花钱但没花」两类 —— 那才是用户想核对的。
+    usageQ = usageQ.not("free_reason", "in", '("free_forever","bundled")');
+  }
+
+  let grantQ = supabase
+    .from("entitlements")
+    .select("id,created_at,source,credits_total,note")
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
+  if (opts.before) grantQ = grantQ.lt("created_at", opts.before);
+
+  const [{ data: usage }, { data: grants }] = await Promise.all([usageQ, grantQ]);
+
+  // 退回的金额不在 usage_logs 上（那一行 credits_charged 是 0），
+  // 在它对应的那笔预扣上。一次取回来，别在循环里逐条查。
+  const holdIds = (usage ?? []).filter((u) => !u.succeeded && u.hold_id).map((u) => u.hold_id!);
+  const holdCredits = new Map<string, number>();
+  if (holdIds.length > 0) {
+    const { data: holds } = await supabase
+      .from("credit_holds")
+      .select("id,credits")
+      .in("id", holdIds);
+    for (const h of holds ?? []) holdCredits.set(h.id, h.credits);
+  }
+
+  const rows: LedgerRow[] = [];
+
+  for (const u of usage ?? []) {
+    const label = ACTION_LABELS[u.action_code] ?? u.action_code;
+    if (!u.succeeded) {
+      rows.push({
+        id: u.id,
+        at: u.created_at,
+        label,
+        kind: "refund",
+        amount: u.hold_id ? (holdCredits.get(u.hold_id) ?? 0) : 0,
+        note: "生成失败，已退回",
+      });
+      continue;
+    }
+    if (u.credits_charged > 0) {
+      rows.push({
+        id: u.id,
+        at: u.created_at,
+        label,
+        kind: "spend",
+        amount: u.credits_charged,
+        note: null,
+      });
+      continue;
+    }
+    rows.push({
+      id: u.id,
+      at: u.created_at,
+      label,
+      kind: "free",
+      amount: 0,
+      note: u.free_reason ? (FREE_NOTE[u.free_reason] ?? null) : null,
+    });
+  }
+
+  for (const g of grants ?? []) {
+    rows.push({
+      id: g.id,
+      at: g.created_at,
+      label: GRANT_LABEL[g.source] ?? "到账",
+      kind: "grant",
+      amount: g.credits_total,
+      note: g.note,
+    });
+  }
+
+  rows.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  return rows.slice(0, limit);
 }

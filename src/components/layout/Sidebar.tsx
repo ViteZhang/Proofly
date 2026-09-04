@@ -111,6 +111,14 @@ export function Sidebar({
             >
               事实层
             </Link>
+            <Link
+              href="/app/account"
+              onClick={() => setMenuOpen(false)}
+              className="block px-3.5 py-2.5 text-left text-[13px] transition-colors hover:bg-[var(--line-soft)]"
+              style={{ color: "var(--ink)" }}
+            >
+              账户与积分
+            </Link>
             <button
               type="button"
               onClick={signOut}
