@@ -108,6 +108,33 @@ export default async function AccountPage() {
         </div>
       </section>
 
+      {/* ---- 数据 ---- */}
+      <section className="mt-3 rounded-card p-5" style={{ background: "var(--card)" }}>
+        <h2 className="mb-2.5 text-[11.5px] font-semibold" style={{ color: "var(--mute)" }}>
+          你的数据
+        </h2>
+        <p className="mb-3.5 text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
+          随时可以把全部数据带走：经历、指标、技能、方向、简历、题包、消费记录，
+          一份完整 JSON。导出不消耗积分。
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="/app/account/export"
+            className="inline-flex h-9 items-center rounded-btn px-4 text-[13.5px]"
+            style={{ border: "1px solid var(--line)" }}
+          >
+            导出全部数据
+          </a>
+          <Link
+            href="/app/account/delete"
+            className="px-2 text-[12.5px]"
+            style={{ color: "var(--mute)" }}
+          >
+            删除账号
+          </Link>
+        </div>
+      </section>
+
       {/* ---- 区块三 · 消费记录 ---- */}
       <section className="mt-3 rounded-card p-5" style={{ background: "var(--card)" }}>
         <h2 className="mb-3 text-[11.5px] font-semibold" style={{ color: "var(--mute)" }}>

@@ -588,6 +588,11 @@ export default function SitePage() {
         <div className="foot-in">
           <LogoWordmark height={18} />
           <span>把经历做成资产，让每一次努力都不被浪费</span>
+          {/* 合规链接放页脚。要在把简历交出来之前就能读到，不能藏。 */}
+          <nav className="foot-links">
+            <a href="/privacy">隐私政策</a>
+            <a href="/terms">服务条款</a>
+          </nav>
         </div>
       </footer>
     </div>

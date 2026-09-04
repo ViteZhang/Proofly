@@ -16,6 +16,8 @@ function isPublicPath(pathname: string): boolean {
   // 定时任务由 Vercel Cron 发起，带的是 CRON_SECRET 不是登录态。
   // 放行的只是「不查 session」，不是「不鉴权」—— 路由自己会拒。
   if (pathname.startsWith("/api/cron/")) return true;
+  // 合规页必须在登录前就能读到 —— 用户要在把简历交出来之前看完它们。
+  if (pathname === "/privacy" || pathname === "/terms") return true;
   return false;
 }
 
