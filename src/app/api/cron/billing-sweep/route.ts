@@ -1,12 +1,18 @@
 // =============================================================
-// Proofly · 悬挂预扣清理（Vercel Cron，每 10 分钟）
+// Proofly · 悬挂预扣清理 · 手动触发口
 //
 // 进程崩溃、部署重启、函数被掐，都会留下「钱扣了、活没跑完、
 // 也没人来退」的预扣记录。用户看到的是余额少了一块，且永远
 // 不会回来 —— 计费系统最不能出的错。
 //
-// 清理逻辑全在 SQL 里（28_billing_sweep.sql），这里只负责鉴权
-// 和触发：退款的正确写法只该有一份。
+// **常规调度不走这里**：定时执行由 Supabase 的 pg_cron 每 10 分钟跑
+// billing_sweep()（见 29_billing_cron.sql）。Vercel Hobby 的定时任务
+// 每天只能跑一次，而这件事的价值全在「快」—— 同一个崩溃，分钟级调度下
+// 用户等 15 分钟拿回积分，每天一次的调度下要等最多 24 小时。
+//
+// 这个接口留作手动触发：想立刻扫一遍时不必开 SQL 编辑器。
+// 它和定时任务调的是同一个 billing_sweep()，「一次清理都做了什么」
+// 只有一份定义。
 //
 // 上游：《商业化技术方案 v1.0》3.4 ·《商业化 C1》切片 C1.7
 // =============================================================
@@ -28,22 +34,10 @@ export async function GET(req: Request) {
 
   const supabase = await createClient();
 
-  const { data: released, error: holdErr } = await supabase.rpc("sweep_expired_holds", {
-    p_limit: 500,
-  });
-  const { data: reconciled, error: entErr } = await supabase.rpc(
-    "sweep_expired_entitlements",
-    { p_limit: 500 },
-  );
-
-  const errors = [holdErr?.message, entErr?.message].filter(Boolean);
-  if (errors.length) {
-    return NextResponse.json({ ok: false, errors }, { status: 500 });
+  const { data, error } = await supabase.rpc("billing_sweep", { p_limit: 500 });
+  if (error) {
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({
-    ok: true,
-    released: released ?? 0,
-    reconciled: reconciled ?? 0,
-  });
+  return NextResponse.json({ ok: true, ...(data as object) });
 }
