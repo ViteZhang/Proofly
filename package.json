@@ -29,7 +29,8 @@
     "billing:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/billing/*.test.ts",
     "arch:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/__tests__/arch.test.ts",
     "telemetry:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/telemetry/*.test.ts",
-    "health:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/health/*.test.ts"
+    "health:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/health/*.test.ts",
+    "gen-code": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/gen-code.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",

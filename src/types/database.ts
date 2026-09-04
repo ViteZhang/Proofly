@@ -2087,6 +2087,10 @@ export type Database = {
         Args: { p_est_cents: number; p_cap_cents: number };
         Returns: Json;
       };
+      redeem_code: {
+        Args: { p_user: string; p_code: string };
+        Returns: Json;
+      };
       claim_signup_grant: {
         Args: {
           p_user: string;

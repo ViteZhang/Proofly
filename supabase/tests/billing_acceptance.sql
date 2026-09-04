@@ -593,5 +593,65 @@ begin
   perform assert_eq('billing_sweep 报告了超时作业数', (r->>'jobs_timed_out')::int, 1);
 end $$;
 
+-- =============================================================
+-- 兑换码（C3 验收 27–31）
+-- =============================================================
+do $$
+declare
+  u  uuid := '99999999-9999-9999-9999-999999999999';
+  u2 uuid := '88888888-8888-8888-8888-888888888888';
+  r jsonb;
+begin
+  delete from redeem_records;
+  delete from redeem_codes where code like 'TEST-%';
+  delete from entitlements where user_id in (u, u2);
+  update quota_counters set credits_available = 0, credits_held = 0 where user_id in (u, u2);
+  insert into auth.users (id, email) values (u2, 'other@test.local')
+    on conflict (id) do nothing;
+  perform ensure_quota_counter(u2);
+
+  insert into redeem_codes (code, credits, max_uses, note)
+  values ('TEST-JOB-A1', 200, 1, '求职包 ¥68 · 微信 someone 2026-09-05'),
+         ('TEST-OLD-A2', 50, 1, '过期用'),
+         ('TEST-MANY-A3', 50, 2, '两人份');
+  update redeem_codes set expires_at = now() - interval '1 day' where code = 'TEST-OLD-A2';
+
+  -- 30 不存在的码
+  perform assert_eq('C3 验收 30 · 不存在的码',
+    redeem_code(u, 'TEST-NOPE')->>'reason', 'NOT_FOUND');
+
+  -- 31 过期
+  perform assert_eq('C3 验收 31 · 过期的码',
+    redeem_code(u, 'TEST-OLD-A2')->>'reason', 'EXPIRED');
+
+  -- 27 正常兑换
+  r := redeem_code(u, 'TEST-JOB-A1');
+  perform assert_eq('C3 验收 27 · 兑换成功', (r->>'credits')::int, 200);
+  perform assert_eq('C3 验收 27 · source 是 redeem',
+    (select source from entitlements where user_id=u order by created_at desc limit 1), 'redeem');
+  perform assert_eq('C3 验收 27 · 永不过期',
+    (select expires_at is null from entitlements where user_id=u order by created_at desc limit 1),
+    true);
+  perform assert_eq('C3 验收 27 · 余额到账',
+    (select credits_available from quota_counters where user_id=u), 200);
+
+  -- 28 同一人二次兑换
+  perform assert_eq('C3 验收 28 · 自己再兑一次',
+    redeem_code(u, 'TEST-JOB-A1')->>'reason', 'ALREADY_USED_BY_ME');
+
+  -- 29 别人来兑一张已用完的
+  perform assert_eq('C3 验收 29 · 被别人用完了',
+    redeem_code(u2, 'TEST-JOB-A1')->>'reason', 'USED_UP');
+
+  -- 34 追溯：记录能回答「发给了谁、哪个包」
+  perform assert_eq('C3 验收 34 · 兑换记录能追溯到人',
+    (select count(*)::int from redeem_records rr join redeem_codes rc on rc.code = rr.code
+      where rr.user_id = u and rc.note like '求职包%'), 1);
+
+  -- 大小写与空格容错
+  perform assert_eq('码不区分大小写与首尾空格',
+    (redeem_code(u2, '  test-many-a3  ')->>'ok')::boolean, true);
+end $$;
+
 \echo ''
 \echo '全部通过。'
