@@ -15,7 +15,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { ACTION_PRICES } from "@/config/plan";
-import { CancelledError, withCredits, type BillingClient } from "./withCredits";
+import {
+  CancelledError,
+  DAILY_CAP_MESSAGE,
+  withCredits,
+  type BillingClient,
+} from "./withCredits";
 
 // ---- 假客户端 ----
 
@@ -126,7 +131,7 @@ test("步骤 2 · 白名单动作不 HOLD，写 free_forever（验收 20）", as
 // ---- 3 限次免费 ----
 
 test("步骤 3 · 本月额度未用完 → 免费（验收 21）", async () => {
-  const { client, calls } = fake({ rpc: { consume_free_chat: true } });
+  const { client, calls } = fake({ rpc: { bump_chat_day: true, consume_free_chat: true } });
   const r = await withCredits({
     actionCode: "chat_record",
     userId: "u1",
@@ -140,7 +145,7 @@ test("步骤 3 · 本月额度未用完 → 免费（验收 21）", async () => 
 
 test("步骤 3 · 额度用完 → 按超额价扣 1 分（验收 22）", async () => {
   const { client, calls } = fake({
-    rpc: { consume_free_chat: false, hold_credits: HOLD_OK },
+    rpc: { bump_chat_day: true, consume_free_chat: false, hold_credits: HOLD_OK },
   });
   const r = await withCredits({
     actionCode: "chat_record",
@@ -154,6 +159,53 @@ test("步骤 3 · 额度用完 → 按超额价扣 1 分（验收 22）", async 
   const hold = calls.find((c) => c.name === "hold_credits");
   assert.equal(hold?.args.p_action, "chat_record_overage");
   assert.equal(hold?.args.p_credits, 1);
+});
+
+test("步骤 3 · 闲聊无限免费，但要过日上限（验收 24）", async () => {
+  const ok = fake({ rpc: { bump_chat_day: true } });
+  const r = await withCredits({
+    actionCode: "chat_smalltalk",
+    userId: "u1",
+    idempotencyKey: "k4b",
+    client: ok.client,
+    run: async () => "hi",
+  });
+  assert.equal(r.ok === true && r.charged, 0);
+  assert.ok(!names(ok.calls).includes("hold_credits"));
+  assert.ok(!names(ok.calls).includes("consume_free_chat"), "闲聊不吃记录额度");
+});
+
+test("步骤 3 · 撞上日上限 → 拒绝服务，且不扣分（验收 24）", async () => {
+  const { client, calls } = fake({ rpc: { bump_chat_day: false } });
+  let ran = false;
+  const r = await withCredits({
+    actionCode: "chat_smalltalk",
+    userId: "u1",
+    idempotencyKey: "k4c",
+    client,
+    run: async () => {
+      ran = true;
+      return "hi";
+    },
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.code, "BLOCKED");
+  assert.equal(r.ok === false && r.message, DAILY_CAP_MESSAGE);
+  assert.equal(ran, false);
+  assert.ok(!names(calls).includes("hold_credits"), "防刷不该产生扣分");
+  assert.ok(!names(calls).includes("log_free_usage"), "被拦下的轮次没有执行，也就没有成本");
+});
+
+test("步骤 3 · 日上限先于免费额度判定，不白吃一次额度", async () => {
+  const { client, calls } = fake({ rpc: { bump_chat_day: false } });
+  await withCredits({
+    actionCode: "chat_record",
+    userId: "u1",
+    idempotencyKey: "k4d",
+    client,
+    run: async () => "x",
+  });
+  assert.deepEqual(names(calls), ["bump_chat_day"]);
 });
 
 // ---- 4 重生成窗口 ----

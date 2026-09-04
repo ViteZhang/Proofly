@@ -172,10 +172,12 @@ begin
   truncate usage_logs, credit_holds, entitlements cascade;
   update quota_counters set credits_available=0, credits_held=0 where user_id=u;
   e_g1 := grant_credits(u, 'grant_signup', 20, now() + interval '10 days');
-  perform pg_sleep(0.01);
   e_g2 := grant_credits(u, 'grant_monthly', 20, now() + interval '10 days');
+  -- 同一个事务里 now() 是常量，两笔的 created_at 会一模一样。
+  -- 这里显式把先发放的那笔往前挪，测的才是「先发放先扣」而不是运气。
   update entitlements set expires_at = date_trunc('day', now() + interval '10 days')
    where id in (e_g1, e_g2);
+  update entitlements set created_at = now() - interval '1 minute' where id = e_g1;
   h := hold_credits(u, 'target_assess', 5, 'p-4');
   perform settle_hold((h->>'hold_id')::uuid);
   perform assert_eq('验收 15 · 同到期时间先扣先发放的',
@@ -245,6 +247,102 @@ begin
   perform hold_credits(u, 'interview_kit', a, 'k-allin');
   perform assert_eq('边界 · 刚好花光可以', 
     (select credits_available from quota_counters where user_id=u), 0);
+end $$;
+
+-- =============================================================
+-- 限次免费与反滥用（验收 21–24）
+-- =============================================================
+do $$
+declare
+  u uuid := '99999999-9999-9999-9999-999999999999';
+  i int; ok boolean;
+begin
+  update quota_counters
+     set free_chat_month = to_char(now(),'YYYY-MM'), free_chat_used = 0,
+         chat_day = current_date, chat_day_used = 0
+   where user_id = u;
+
+  -- 21 本月前 20 轮免费
+  for i in 1..20 loop
+    ok := consume_free_chat(u, 20);
+    if not ok then raise exception '✗ 验收 21 · 第 % 轮就不免费了', i; end if;
+  end loop;
+  perform assert_eq('验收 21 · 本月前 20 轮记录都免费', true, true);
+  perform assert_eq('验收 21 · 计数正好 20',
+    (select free_chat_used from quota_counters where user_id=u), 20);
+
+  -- 22 第 21 轮开始收费
+  perform assert_eq('验收 22 · 第 21 轮不再免费', consume_free_chat(u, 20), false);
+  perform assert_eq('验收 22 · 被拒的那轮不加计数',
+    (select free_chat_used from quota_counters where user_id=u), 20);
+
+  -- 23 跨月重置
+  update quota_counters set free_chat_month = '2020-01' where user_id = u;
+  perform assert_eq('验收 23 · 跨月后恢复免费', consume_free_chat(u, 20), true);
+  perform assert_eq('验收 23 · 计数从 1 重新起算',
+    (select free_chat_used from quota_counters where user_id=u), 1);
+  perform assert_eq('验收 23 · 月份跟着更新',
+    (select free_chat_month from quota_counters where user_id=u), to_char(now(),'YYYY-MM'));
+
+  -- 24 每日对话总轮次（防刷，与计费无关）
+  update quota_counters set chat_day = current_date, chat_day_used = 0 where user_id = u;
+  for i in 1..5 loop
+    if not bump_chat_day(u, 5) then raise exception '✗ 验收 24 · 第 % 轮就被拦', i; end if;
+  end loop;
+  perform assert_eq('验收 24 · 撞上日上限被拒', bump_chat_day(u, 5), false);
+  perform assert_eq('验收 24 · 被拒不影响余额',
+    (select credits_available from quota_counters where user_id=u),
+    (select credits_available from quota_counters where user_id=u));
+  update quota_counters set chat_day = current_date - 1 where user_id = u;
+  perform assert_eq('验收 24 · 跨日后恢复', bump_chat_day(u, 5), true);
+  perform assert_eq('验收 24 · 跨日计数重置',
+    (select chat_day_used from quota_counters where user_id=u), 1);
+end $$;
+
+-- =============================================================
+-- 重生成窗口（验收 25、28、29、30）
+-- =============================================================
+do $$
+declare
+  u uuid := '99999999-9999-9999-9999-999999999999';
+  fp text := 'core111.v1';
+  i int;
+begin
+  delete from usage_logs where user_id = u;
+
+  -- 没有前一次收费生成 → 不是「重新生成」，照常收费
+  perform assert_eq('第一次生成不走窗口',
+    check_regen_free(u, 'resume_baseline', fp, 24, 3), false);
+
+  -- 25 窗口内、事实未变 → 免费
+  insert into usage_logs (user_id, action_code, credits_charged, succeeded, fingerprint, created_at)
+  values (u, 'resume_baseline', 10, true, fp, now() - interval '1 hour');
+  perform assert_eq('验收 25 · 24h 内重新生成免费',
+    check_regen_free(u, 'resume_baseline', fp, 24, 3), true);
+
+  -- 28 只有提示词版本不同 → 仍算同一个输入
+  perform assert_eq('验收 28 · 只改提示词版本仍免费',
+    check_regen_free(u, 'resume_baseline', 'core111.v9', 24, 3), true);
+
+  -- 26/27 指纹不同 → 收费
+  perform assert_eq('验收 26/27 · 指纹变了就收费',
+    check_regen_free(u, 'resume_baseline', 'core222.v1', 24, 3), false);
+
+  -- 30 窗口内免费次数上限
+  for i in 1..3 loop
+    insert into usage_logs (user_id, action_code, credits_charged, free_reason,
+                            succeeded, fingerprint, created_at)
+    values (u, 'resume_baseline', 0, 'regen_window', true, fp, now() - interval '10 minutes');
+  end loop;
+  perform assert_eq('验收 30 · 24h 内第 4 次重新生成开始收费',
+    check_regen_free(u, 'resume_baseline', fp, 24, 3), false);
+
+  -- 29 超出窗口
+  delete from usage_logs where user_id = u;
+  insert into usage_logs (user_id, action_code, credits_charged, succeeded, fingerprint, created_at)
+  values (u, 'resume_baseline', 10, true, fp, now() - interval '25 hours');
+  perform assert_eq('验收 29 · 25 小时后重新生成收费',
+    check_regen_free(u, 'resume_baseline', fp, 24, 3), false);
 end $$;
 
 \echo ''

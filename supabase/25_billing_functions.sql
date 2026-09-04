@@ -207,7 +207,9 @@ begin
      where user_id = h.user_id
        and credits_total > credits_used
        and (expires_at is null or expires_at > now())
-     order by expires_at asc nulls last, created_at asc
+     -- id 是最后的决胜局：同一个事务里发放的两笔 created_at 完全相同，
+     -- 没有它扣哪笔就看运气，测试也就测不出东西来。
+     order by expires_at asc nulls last, created_at asc, id asc
      for update
   loop
     exit when v_remain <= 0;

@@ -92,6 +92,15 @@ export type WithCreditsOpts<T> = {
   client?: BillingClient;
 };
 
+/**
+ * 每日对话上限的话术。
+ *
+ * 要说清楚这不是积分问题 —— 否则用户第一反应是「充钱就能继续」，
+ * 而事实是充了也不行。
+ */
+export const DAILY_CAP_MESSAGE =
+  "今天聊得有点多，明天再来吧。这不是积分问题——我们对每天的对话次数有个上限，防止异常调用。";
+
 /** run() 主动放弃时抛这个，计费侧按「用户取消」处理，不算失败。 */
 export class CancelledError extends Error {
   constructor(message = "用户取消") {
@@ -108,6 +117,9 @@ const FREE_SET: ReadonlySet<string> = new Set(FREE_FOREVER);
  * 只挡「产出对外材料」的动作。文档解析、随手记这些不挡 —— 阻断项
  * 本来就要靠它们去修，连修的路都堵上，用户就被锁死在体检页了。
  */
+/** 走每日对话上限的动作。记录与闲聊都算一轮。 */
+const CHAT_ACTIONS: ReadonlySet<string> = new Set(["chat_record", "chat_smalltalk"]);
+
 const BLOCKING_GATED: ReadonlySet<string> = new Set([
   "resume_baseline",
   "resume_delta",
@@ -216,7 +228,22 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
   // ---- 2 永久免费 ----
   if (FREE_SET.has(actionCode)) return freePath("free_forever");
 
-  // ---- 3 限次免费：随手记的记录轮次 ----
+  // ---- 3 反滥用与限次免费 ----
+  //
+  // 日上限先于一切对话分支：闲聊不计费也有真实成本（约 ¥0.008 一次），
+  // 得有个刹车。它不看余额、不扣分，付费用户撞上一样被拦 ——
+  // 这是防刷，不是计费。
+  if (CHAT_ACTIONS.has(actionCode)) {
+    const { data: allowed } = await supabase.rpc("bump_chat_day", {
+      p_user: userId,
+      p_cap: FREE_QUOTA.chat_daily_hard_cap,
+    });
+    if (!allowed) return { ok: false, code: "BLOCKED", message: DAILY_CAP_MESSAGE };
+  }
+
+  // 闲聊无限免费
+  if (actionCode === "chat_smalltalk") return freePath("free_forever");
+
   let credits = priceOf(actionCode, opts.credits);
   let billedAction = actionCode;
   if (actionCode === "chat_record") {
