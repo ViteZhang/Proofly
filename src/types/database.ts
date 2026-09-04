@@ -2160,7 +2160,7 @@ export type Database = {
         Returns: Json;
       };
       redeem_code: {
-        Args: { p_user: string; p_code: string };
+        Args: { p_user: string; p_code: string; p_ip_hash?: string | null };
         Returns: Json;
       };
       is_admin: {
