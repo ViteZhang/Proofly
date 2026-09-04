@@ -31,6 +31,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ACTION_PRICES, FREE_FOREVER, FREE_QUOTA, LIMITS } from "@/config/plan";
+import { createSink, totals, withUsageSink } from "@/lib/telemetry/usage";
 import type { Database, FreeReason, Json } from "@/types/database";
 
 export type BillingClient = SupabaseClient<Database>;
@@ -88,6 +89,11 @@ export type WithCreditsOpts<T> = {
    */
   validate?: (result: T) => boolean;
   run: (ctx: RunContext) => Promise<T>;
+  /**
+   * 成本并进了另一个动作的标价（例如 JD 拆解并进「解析并评估」）。
+   * 不 HOLD、不扣分，但写一条 bundled 的留痕 —— 它确实烧了 token。
+   */
+  bundled?: boolean;
   /** 只给单测注入假客户端用。业务代码不要传。 */
   client?: BillingClient;
 };
@@ -151,13 +157,32 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
     opts.client ??
     (((await (await import("@/lib/supabase/server")).createClient()) as unknown) as BillingClient);
 
-  let usage: UsageMeta = {};
+  // 环境收集单：run() 里发出的每次模型调用都会自动记进来，业务代码
+  // 一个字不用改。ctx.report() 仍然可用，用来补收集单看不到的东西
+  // （比如日后接上单价表算出的 cost_cents），显式传的优先。
+  const sink = createSink();
+  let reported: UsageMeta = {};
   const ctx = (holdId: string | null): RunContext => ({
     holdId,
     report: (m) => {
-      usage = { ...usage, ...m };
+      reported = { ...reported, ...m };
     },
   });
+
+  /** 动作执行到此刻为止的用量。失败路径也要调它 —— 失败一样烧 token。 */
+  const usageJson = (): Json => {
+    const t = totals(sink);
+    return metaToJson({
+      inputTokens: reported.inputTokens ?? t.inputTokens ?? undefined,
+      outputTokens: reported.outputTokens ?? t.outputTokens ?? undefined,
+      durationMs: reported.durationMs ?? (t.callCount > 0 ? t.durationMs : undefined),
+      costCents: reported.costCents,
+      llmCallIds: reported.llmCallIds,
+    });
+  };
+
+  const execute = (holdId: string | null): Promise<T> =>
+    withUsageSink(sink, () => run(ctx(holdId)));
 
   const balance = async (): Promise<number> => {
     const { data } = await supabase
@@ -170,7 +195,7 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
 
   const freePath = async (reason: FreeReason): Promise<BillingResult<T>> => {
     try {
-      const data = await run(ctx(null));
+      const data = await execute(null);
       if (validate && !validate(data)) {
         await supabase.rpc("log_free_usage", {
           p_user: userId,
@@ -178,7 +203,7 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
           p_reason: reason,
           p_fingerprint: fingerprint ?? null,
           p_succeeded: false,
-          p_usage_meta: metaToJson(usage),
+          p_usage_meta: usageJson(),
         });
         return { ok: false, code: "FAILED", message: "生成结果不完整，请重试。" };
       }
@@ -188,7 +213,7 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
         p_reason: reason,
         p_fingerprint: fingerprint ?? null,
         p_succeeded: true,
-        p_usage_meta: metaToJson(usage),
+        p_usage_meta: usageJson(),
       });
       return { ok: true, data, charged: 0, freeReason: reason, balanceAfter: await balance() };
     } catch (e) {
@@ -199,7 +224,7 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
         p_reason: reason,
         p_fingerprint: fingerprint ?? null,
         p_succeeded: false,
-        p_usage_meta: metaToJson(usage),
+        p_usage_meta: usageJson(),
       });
       if (e instanceof CancelledError) {
         return { ok: false, code: "CANCELLED", message: e.message };
@@ -227,6 +252,10 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
 
   // ---- 2 永久免费 ----
   if (FREE_SET.has(actionCode)) return freePath("free_forever");
+
+  // 并入别的动作计费：不 HOLD，但留痕记的是 bundled 而不是 free_forever ——
+  // 「永久免费 = 纯代码功能」这个语义不能被一个烧模型的动作混进来。
+  if (opts.bundled) return freePath("bundled");
 
   // ---- 3 反滥用与限次免费 ----
   //
@@ -303,13 +332,13 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
       p_hold: hold.hold_id,
       p_reason: reason,
       p_release_token: hold.release_token,
-      p_usage_meta: metaToJson(usage),
+      p_usage_meta: usageJson(),
     });
   };
 
   try {
     // ---- 6 执行 ----
-    const data = await run(ctx(hold.hold_id));
+    const data = await execute(hold.hold_id);
 
     // ---- 7 完整性校验 ----
     if (validate && !validate(data)) {
@@ -324,7 +353,7 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
     // ---- 8 SETTLE ----
     await supabase.rpc("settle_hold", {
       p_hold: hold.hold_id,
-      p_usage_meta: metaToJson(usage),
+      p_usage_meta: usageJson(),
     });
     if (fingerprint) {
       await supabase.rpc("tag_usage_fingerprint", {

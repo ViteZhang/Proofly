@@ -66,7 +66,13 @@ export type HealthScanStatus = "running" | "done" | "failed";
 export type EntitlementSource =
   | "purchase" | "grant_signup" | "grant_monthly" | "redeem" | "adjust";
 export type HoldStatus = "held" | "settled" | "released";
-export type FreeReason = "free_forever" | "free_quota" | "regen_window" | "budget_grace";
+export type FreeReason =
+  | "free_forever"
+  | "free_quota"
+  | "regen_window"
+  | "budget_grace"
+  /** 成本并进了另一个动作的标价，例如 JD 拆解并进「解析并评估」 */
+  | "bundled";
 
 export type Database = {
   public: {

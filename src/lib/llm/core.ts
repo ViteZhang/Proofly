@@ -9,6 +9,8 @@
 // =============================================================
 
 import OpenAI from "openai";
+
+import { reportCall } from "@/lib/telemetry/usage";
 import type { ZodType } from "zod";
 
 import {
@@ -236,6 +238,8 @@ async function complete(
         promptTokens: res.usage?.prompt_tokens ?? null,
         completionTokens: res.usage?.completion_tokens ?? null,
         durationMs: ms,
+        model,
+        succeeded: true,
       });
 
       if (res.choices[0]?.finish_reason === "length") {
@@ -253,6 +257,8 @@ async function complete(
         promptTokens: null,
         completionTokens: null,
         durationMs: Date.now() - t0,
+        model,
+        succeeded: false,
       });
       return { ok: false, error: apiError(e), failover: shouldFailover(e) };
     }
@@ -379,6 +385,8 @@ async function embed(
       promptTokens: res.usage?.prompt_tokens ?? null,
       completionTokens: null,
       durationMs: ms,
+      model,
+      succeeded: true,
     });
 
     const vector = res.data[0]?.embedding;
@@ -410,6 +418,8 @@ async function embed(
       promptTokens: null,
       completionTokens: null,
       durationMs: Date.now() - t0,
+      model,
+      succeeded: false,
     });
     return { ok: false, error: apiError(e), failover: shouldFailover(e) };
   }
@@ -427,6 +437,10 @@ type CallLog = {
   promptTokens: number | null;
   completionTokens: number | null;
   durationMs: number;
+  /** 型号。落 llm_calls 时用不到，转给用量收集单用。 */
+  model?: string;
+  /** 这次请求本身成没成。失败的一样烧 token，一样要记。 */
+  succeeded?: boolean;
 };
 
 export type CallLogger = (entry: CallLog) => Promise<void>;
@@ -442,6 +456,18 @@ export function setCallLogger(fn: CallLogger): void {
 // 失败也烧钱，漏记会让「哪个环节贵」这个问题答错。
 // 记账本身永远不该让业务调用失败。
 async function logCall(entry: CallLog): Promise<void> {
+  // 顺手记进当前的用量收集单（如果计费层铺了一张）。
+  // 这里是 llm 与 billing 唯一的交汇点，而交汇发生在一个中立模块上：
+  // 两边都 import telemetry，谁也不 import 谁。
+  reportCall({
+    purpose: entry.purpose,
+    provider: entry.provider,
+    model: entry.model ?? "",
+    promptTokens: entry.promptTokens,
+    completionTokens: entry.completionTokens,
+    durationMs: entry.durationMs,
+    succeeded: entry.succeeded ?? false,
+  });
   if (!sink) return;
   try {
     await sink(entry);

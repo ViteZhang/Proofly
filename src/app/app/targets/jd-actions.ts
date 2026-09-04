@@ -8,6 +8,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { billedAction, idempotencyKey } from "@/lib/billing/action";
 import { callLLM } from "@/lib/llm";
 import { PARSE_SYSTEM, parseUser } from "@/lib/llm/jd-prompts";
 import { createClient } from "@/lib/supabase/server";
@@ -83,7 +84,23 @@ export async function deleteJd(jdId: string): Promise<ActionResult> {
  * 解析 JD。重新解析会先清掉旧的要求项 —— 要求项是解析结果的投影，
  * 留着旧的会和新的混在一起，分母就错了。
  */
+/**
+ * JD 拆解。
+ *
+ * 不单独收费：用户点的是「解析并评估 ⬡5」，拆解与匹配是同一个动作的
+ * 两步，收两次 5 分是欺负人。但它确实烧 token，所以记一条 bundled
+ * 的留痕 —— 记成 free_forever 会污染「永久免费 = 纯代码功能」这个语义。
+ */
 export async function parseJd(jdId: string): Promise<ActionResult<RequirementRow[]>> {
+  return billedAction({
+    actionCode: "target_assess",
+    bundled: true,
+    idempotencyKey: idempotencyKey("target_assess:split", [jdId]),
+    run: () => runParseJd(jdId),
+  });
+}
+
+async function runParseJd(jdId: string): Promise<ActionResult<RequirementRow[]>> {
   if (!z.uuid().safeParse(jdId).success) return fail("这份 JD 不存在");
   const supabase = await createClient();
 

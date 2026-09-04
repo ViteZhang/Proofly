@@ -9,6 +9,8 @@
 // =============================================================
 
 import { NextResponse } from "next/server";
+
+import { logFree } from "@/lib/billing/action";
 import { getPrintDoc } from "@/lib/queries/resume";
 import { healthSummary } from "@/lib/queries/health";
 import { exportFilename, renderMarkdown } from "@/lib/resume/markdown";
@@ -44,6 +46,9 @@ export async function GET(
     })),
     skills: doc.skills,
   });
+
+  // 导出永远不消耗积分（承诺 4）。留痕是为了让它出现在消费记录里。
+  await logFree("data_export");
 
   const filename = exportFilename(doc.name, doc.roleLabel, "md");
   return new NextResponse(md, {

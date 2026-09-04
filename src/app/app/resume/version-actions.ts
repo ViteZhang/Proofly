@@ -14,6 +14,7 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
+import { billedAction, fingerprintFor, idempotencyKey } from "@/lib/billing/action";
 import { blockingBeforeGeneration, runQuickScan } from "@/lib/queries/health";
 import { z } from "zod";
 import { callLLM } from "@/lib/llm";
@@ -77,7 +78,25 @@ function metricValue(m: { fromValue: string | null; toValue: string | null; delt
   return parts.join("") || "（没填数值）";
 }
 
+/**
+ * 计费入口：生成投递版本 ⬡8。
+ *
+ * 指纹在基线那套之上再加 JD —— 换一份 JD 就是另一份输入。
+ */
 export async function generateVersion(
+  jdId: string,
+  seedFromVersionId?: string,
+  clientReqId?: string,
+): Promise<ActionResult<VersionOutcome>> {
+  return billedAction({
+    actionCode: "resume_delta",
+    fingerprint: await fingerprintFor("resume_delta", { jdId }),
+    idempotencyKey: idempotencyKey("resume_delta", [jdId, seedFromVersionId], clientReqId),
+    run: () => runGenerateVersion(jdId, seedFromVersionId),
+  });
+}
+
+async function runGenerateVersion(
   jdId: string,
   seedFromVersionId?: string,
 ): Promise<ActionResult<VersionOutcome>> {

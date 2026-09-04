@@ -10,6 +10,7 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
+import { billedAction, fingerprintFor, idempotencyKey } from "@/lib/billing/action";
 import { z } from "zod";
 import { callLLM } from "@/lib/llm";
 import { MATCH_SYSTEM, matchUser } from "@/lib/llm/jd-prompts";
@@ -60,7 +61,29 @@ export async function recallAtoms(
  * 故意做成一次性全局调用。逐条调用时每条要求都会去抢同一条最强的经历，
  * 模型看不到全局就没法合理分配；而且成本翻十几倍。
  */
+/**
+ * 计费入口：解析并评估 ⬡5。
+ *
+ * 5 分覆盖 JD 拆解与匹配两步（C2 接入清单）。拆解那一次调用记成
+ * bundled（见 jd-actions），钱只在这里收一次。
+ *
+ * 只加包装，业务逻辑一行没动 —— 下面的 runMatchAndScore 就是原来的
+ * matchAndScore。
+ */
 export async function matchAndScore(
+  jdId: string,
+  atomIds: string[],
+  clientReqId?: string,
+): Promise<ActionResult<{ assessmentId: string; matchScore: number }>> {
+  return billedAction({
+    actionCode: "target_assess",
+    fingerprint: await fingerprintFor("target_assess", { jdId }),
+    idempotencyKey: idempotencyKey("target_assess", [jdId], clientReqId),
+    run: () => runMatchAndScore(jdId, atomIds),
+  });
+}
+
+async function runMatchAndScore(
   jdId: string,
   atomIds: string[],
 ): Promise<ActionResult<{ assessmentId: string; matchScore: number }>> {

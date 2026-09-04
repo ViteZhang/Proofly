@@ -17,6 +17,7 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
+import { billedAction, fingerprintFor, idempotencyKey } from "@/lib/billing/action";
 import { callLLM } from "@/lib/llm";
 import { PLAN_SYSTEM, planUser } from "@/lib/llm/task-prompts";
 import { createClient } from "@/lib/supabase/server";
@@ -47,7 +48,27 @@ export async function countOpenGaps(): Promise<ActionResult<{ count: number }>> 
   return ok({ count: gaps.length });
 }
 
-export async function generatePlan(): Promise<ActionResult<PlanSummary>> {
+/**
+ * 计费入口：生成行动清单 ⬡3。
+ *
+ * 指纹按「全部未解决 gap 的 id 集合」算 —— 缺口没变就是同一份输入，
+ * 24 小时内重新生成不扣分。
+ */
+export async function generatePlan(clientReqId?: string): Promise<ActionResult<PlanSummary>> {
+  const gaps = await listOpenGaps();
+  // 一条缺口都没有 → 不调模型也就不该产生任何计费记录，直接返回。
+  if (gaps.length === 0) {
+    return ok({ created: 0, updated: 0, gapsIn: 0, droppedGapIds: [] });
+  }
+  return billedAction({
+    actionCode: "task_plan",
+    fingerprint: await fingerprintFor("task_plan", { gapIds: gaps.map((g) => g.id) }),
+    idempotencyKey: idempotencyKey("task_plan", [], clientReqId),
+    run: () => runGeneratePlan(),
+  });
+}
+
+async function runGeneratePlan(): Promise<ActionResult<PlanSummary>> {
   const supabase = await createClient();
 
   const gaps = await listOpenGaps();

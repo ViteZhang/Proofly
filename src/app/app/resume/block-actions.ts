@@ -12,6 +12,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { billedAction, idempotencyKey } from "@/lib/billing/action";
 import { callLLM } from "@/lib/llm";
 import { BASELINE_SYSTEM, baselineUser } from "@/lib/llm/resume-prompts";
 import { createClient } from "@/lib/supabase/server";
@@ -218,7 +219,13 @@ export async function setBlockWeight(
     return ok({ removed: true });
   }
 
-  const r = await regenerateOne(owner, row.atom_id, weight);
+  // 计费入口：重写这一块 ⬡2。不带指纹 —— 用户改的就是这一块的呈现权重，
+  // 每次都是新输入，没有「同一份输入重跑」这回事。
+  const r = await billedAction({
+    actionCode: "resume_block",
+    idempotencyKey: idempotencyKey("resume_block", [blockId, weight]),
+    run: () => regenerateOne(owner, row.atom_id as string, weight),
+  });
   if (!r.ok) return fail(r.error);
   refresh();
   return ok({ removed: false });

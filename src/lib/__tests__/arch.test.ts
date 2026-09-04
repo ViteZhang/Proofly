@@ -69,6 +69,43 @@ test("分值只从 config/plan 来，别处不许写死", () => {
   assert.deepEqual(offenders, [], "价目表只能有一份，在 src/config/plan.ts");
 });
 
+test("调了模型的业务代码必须同时接了计费", () => {
+  // 《商业化 C2》七、2：禁止绕过 withCredits 直接调 callLLM。
+  //
+  // 静态能查的最强形式：凡是 import 了 callLLM 的业务文件，必须同时
+  // import 计费入口。挡不住「import 了但那次调用没包进去」，但能挡住
+  // 「新接一个动作时压根忘了计费」——那才是会真实发生的事。
+  //
+  // 下面这批是还没接的，按 C2 的切片顺序排。接完一个删一行；
+  // 这张表就是「计费还差哪些动作」的唯一真相。
+  const pending = new Set([
+    "lib/parse/index.ts", // C2.3 文档解析
+    "lib/chat/classify.ts", // C2.2 随手记 · Stage A 分类
+    "lib/chat/pipeline.ts", // C2.2 随手记
+    "lib/nudge/index.ts", // C2.2 主动追问，跟随手记同一条链
+    "lib/interview/job.ts", // C2.5 面试题包
+    "lib/health/deep-job.ts", // C2.6 体检深扫
+    "lib/ingest/pipeline.ts", // C2.3 文档解析
+    "lib/ingest/embedding.ts", // 向量召回，随文档解析与方向评估一起接
+  ]);
+
+  const offenders: string[] = [];
+  for (const f of [...walk(LIB), ...walk(path.resolve(LIB, "..", "app"))]) {
+    if (f.endsWith(".test.ts")) continue;
+    const rel = path.relative(path.resolve(LIB, ".."), f);
+    const src = readFileSync(f, "utf8");
+    if (!/from\s+["']@\/lib\/llm["']/.test(src)) continue;
+    if (/from\s+["']@\/lib\/billing\//.test(src)) continue;
+    if (pending.has(rel)) continue;
+    offenders.push(rel);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    "这些文件调了模型却没接计费。要么包进 withCredits，要么写进上面的待接清单",
+  );
+});
+
 test("业务代码不直接调 hold/settle/release，只走 withCredits", () => {
   const allowed = new Set(["billing/withCredits.ts"]);
   const offenders: string[] = [];

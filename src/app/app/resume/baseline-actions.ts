@@ -13,6 +13,7 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
+import { billedAction, fingerprintFor, idempotencyKey } from "@/lib/billing/action";
 import { z } from "zod";
 import { callLLM } from "@/lib/llm";
 import { BASELINE_SYSTEM, baselineUser } from "@/lib/llm/resume-prompts";
@@ -97,7 +98,26 @@ function periodLabel(atom: ResumeAtom): string {
   return `${start} – ${end}`;
 }
 
+/**
+ * 计费入口：生成基线简历 ⬡10。
+ *
+ * 指纹认事实层与策略层的版本号加方向 id。改了经历或改了这个方向的
+ * 呈现策略都会让指纹变，那时重新生成收费；只是想再跑一次的，24 小时
+ * 内免费。
+ */
 export async function generateBaseline(
+  targetId: string,
+  clientReqId?: string,
+): Promise<ActionResult<GenerateOutcome>> {
+  return billedAction({
+    actionCode: "resume_baseline",
+    fingerprint: await fingerprintFor("resume_baseline", { targetId }),
+    idempotencyKey: idempotencyKey("resume_baseline", [targetId], clientReqId),
+    run: () => runGenerateBaseline(targetId),
+  });
+}
+
+async function runGenerateBaseline(
   targetId: string,
 ): Promise<ActionResult<GenerateOutcome>> {
 

@@ -5,6 +5,8 @@
 // =============================================================
 
 import { NextResponse } from "next/server";
+
+import { logFree } from "@/lib/billing/action";
 import { getKitById } from "@/lib/queries/interview";
 import {
   buildCheatSheet,
@@ -27,6 +29,9 @@ export async function GET(
     numbers: kit.numbers,
   });
   const md = renderCheatSheetMd(sheet);
+  // 导出永远不消耗积分（承诺 4）。留痕是为了让它出现在消费记录里。
+  await logFree("data_export");
+
   const filename = cheatSheetFilename(kit.company, sheet.date, "md");
 
   return new NextResponse(md, {

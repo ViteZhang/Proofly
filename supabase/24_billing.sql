@@ -117,7 +117,7 @@ create table if not exists usage_logs (
   credits_charged int not null default 0 check (credits_charged >= 0),
   free_reason text
     check (free_reason is null or free_reason in
-      ('free_forever','free_quota','regen_window','budget_grace')),
+      ('free_forever','free_quota','regen_window','budget_grace','bundled')),
   llm_call_ids jsonb not null default '[]'::jsonb,
   input_tokens int,
   output_tokens int,

@@ -58,6 +58,40 @@ export const ACTION_PRICES = {
 export type ActionCode = keyof typeof ACTION_PRICES;
 
 /**
+ * 动作的中文名。
+ *
+ * 界面文案与消费记录都从这里取 —— 同一个动作在按钮上叫「生成基线简历」、
+ * 在流水里叫「基线生成」的话，用户对不上账。
+ */
+export const ACTION_LABELS: Record<string, string> = {
+  doc_parse_base: "解析文档",
+  chat_record: "对话式维护",
+  chat_record_overage: "对话式维护",
+  chat_smalltalk: "对话",
+  target_assess: "解析并评估",
+  task_plan: "生成行动清单",
+  resume_baseline: "生成基线简历",
+  resume_delta: "生成投递版本",
+  resume_block: "重写这一块",
+  interview_kit: "生成面试题包",
+  health_deep_scan: "深度扫描",
+  health_check_fast: "一致性体检",
+  evidence_derive: "证据等级推导",
+  skill_strength: "技能证据强度",
+  task_priority: "行动排序",
+  resume_score_fact: "评分·事实一致性",
+  resume_score_evidence: "评分·证据强度",
+  resume_score_clarity: "评分·表达清晰度",
+  data_export: "数据导出",
+};
+
+/** 二次确认的门槛。以下直接执行 —— 5 分以下反复确认会很烦。 */
+export const CONFIRM_THRESHOLD = 10;
+
+/** 余额低于这个数变橙并提示一次。 */
+export const LOW_BALANCE = 30;
+
+/**
  * 永久免费的动作。
  *
  * 共同点：要么是纯代码算的（不花钱），要么是「让用户知道自己
