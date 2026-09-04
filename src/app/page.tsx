@@ -22,7 +22,8 @@ export const metadata: Metadata = {
     "Proofly 把你的简历、项目材料和零散笔记整理成一份完整的职业档案，按不同求职方向生成定制简历，并提供岗位匹配、简历评分与面试题准备。AI 只整理，不编造。",
   openGraph: {
     title: "Proofly · 一份档案，投遍所有方向",
-    description: "经历录一次，简历生成无数次。AI 只整理，不编造。",
+    description:
+      "把经历做成资产，让每一次努力都不被浪费。经历录一次，简历生成无数次，AI 只整理，不编造。",
     type: "website",
   },
 };
@@ -32,6 +33,10 @@ export const metadata: Metadata = {
 //
 // 每块第三条 bullet 固定处理一个顾虑（会不会越录越乱 / 格式能不能直接投 /
 // 分析完了然后呢 / 会不会又给我编），不是凑数。
+//
+// 04 和 05 各多一条计费与耗时的交代。这两句本可以放进定价节，
+// 但读到功能的人未必会往下滑 —— 「评分不要钱」是首次价值的钩子，
+// 「面试题要等几分钟」是预期管理，都得在人还在看这块的时候说。
 const FEATURES = [
   {
     n: "01",
@@ -78,6 +83,7 @@ const FEATURES = [
       "不是笼统的「良好」，而是具体到哪一条 bullet",
       "发现前后口径不一致会直接标红",
       "改完可以再跑一次，分数变化看得见",
+      "不带 JD 的评分永久免费，不消耗积分",
     ],
     diagram: <ScoreDiagram />,
   },
@@ -90,6 +96,7 @@ const FEATURES = [
       "题目来自简历本身，不是通用题库",
       "证据薄弱的地方会被优先出题，因为面试官也会盯那里",
       "答题骨架只引用你档案里已有的事实",
+      "内容量大，后台生成，完成后通知你",
     ],
     diagram: <InterviewDiagram />,
   },
@@ -102,6 +109,61 @@ const GRADES = [
   { dot: "e", name: "估算", en: "ESTIMATED", can: "带「约」「测算」的表述", limit: "不许写成精确百分比" },
   { dot: "d", name: "仅设计", en: "DESIGNED ONLY", can: "你做了什么设计", limit: "任何结果数字都不许出现" },
   { dot: "a", name: "无证据", en: "ABSENT", can: "你做了什么动作", limit: "任何暗示效果的词都不许出现" },
+];
+
+// 免费与付费的分界线不按功能重要性划，按「要不要调用大模型」划。
+// 这条线本身就是卖点：能用代码算准的不交给模型，所以这部分不收钱。
+const FREE_ITEMS = [
+  { name: "投递前的硬伤自查", quota: "不限次" },
+  { name: "简历评分（不带 JD 时）", quota: "不限次" },
+  { name: "证据等级判定", quota: "不限次" },
+  { name: "待办优先级排序", quota: "不限次" },
+  { name: "随时导出全部数据", quota: "不限次" },
+  { name: "对话式更新档案", quota: "20 次 / 月" },
+];
+
+// 付费栏一律只写「按次」，不写分值。分值目前是初值，
+// 展示一个后续要改的数字，等于给正式版预约一次「涨价了」的观感。
+const PAID_ITEMS = [
+  { name: "解析一份材料", quota: "新用户送 3 份" },
+  { name: "岗位匹配分析", quota: "按次" },
+  { name: "生成基线简历", quota: "按次" },
+  { name: "按 JD 生成投递版本", quota: "按次" },
+  { name: "改写单个段落", quota: "按次 · 最低" },
+  { name: "生成面试题包", quota: "按次" },
+];
+
+// 三档封顶。四档以上会引发比价瘫痪，而买的人多半正焦虑着，决策带宽有限。
+// 描述写在积分数前面：积分制没有价格锚，得先说这个包能干成什么。
+const PACKS = [
+  { name: "体验包", credits: 50, desc: "先试试水。够解析 2 份材料，再生成 1 版基线简历。" },
+  {
+    name: "求职包",
+    credits: 200,
+    desc: "够完整跑通一个方向：5 份材料、5 次岗位匹配、8 版简历，外加一套面试题。",
+    hot: true,
+  },
+  { name: "长期包", credits: 600, desc: "同时推进 3 个方向，含全部面试准备。适合长线找工作的人。" },
+];
+
+// 定价模块要在内测 / 公测 / 正式版三个阶段复用，结构一模一样，
+// 变的只有积分包的价格位。抽成配置是策划方案 7.2 点名的要求：
+// 切阶段只动这两行，模板不用碰。正式版要长购买按钮时也从这里接，
+// 单价取商业化方案，别写死进 JSX。
+const PRICE_SLOT = {
+  beta: "内测期不开放购买",
+  preview: "即将开放 · 单价上线前公布",
+  ga: "",
+} as const;
+const PRICING_STAGE: keyof typeof PRICE_SLOT = "beta";
+
+// 第三条是积分制最要紧的一条：按次计费的心理阻力本质是
+// 「怕花了钱没拿到东西」，这条把风险整个搬到产品这边。
+const VOWS = [
+  { t: "积分不过期", d: "买了就一直在，空窗期放着不用也不清零" },
+  { t: "不会贬值", d: "以后调价只影响新购买，不影响你手里的积分" },
+  { t: "失败不扣分", d: "生成失败、超时，或 24 小时内重试，都不扣" },
+  { t: "导出不要钱", d: "随时把全部数据带走，不消耗积分" },
 ];
 
 const FAQS = [
@@ -128,6 +190,22 @@ const FAQS = [
   {
     q: "手机上能用吗？",
     a: "手机上可以随时查看档案、看简历、翻面试题。编辑和生成建议在电脑上做，因为这是需要专注的活儿。",
+  },
+  {
+    q: "为什么不做订阅制？",
+    a: "因为找工作是一段有起止的事，通常两到四个月。订阅制会让你为空窗期付费，或者拿到 offer 后立刻退订——两种结果都不好。按动作计费更贴合这个节奏：忙的时候多用，闲的时候放着，档案还在，钱也还在。",
+  },
+  {
+    q: "积分会过期吗？",
+    a: "购买的积分永久有效，不清零。以后如果调整价格，只影响新的购买，不影响你手里已有的积分。赠送类积分（比如活动发放的）会标明有效期。",
+  },
+  {
+    q: "内测期要花钱吗？",
+    a: "不用。内测期不收费也不开放购买，全部功能可用，注册即送 3 份材料解析额度。积分单价会在正式版上线前公布。",
+  },
+  {
+    q: "生成一次要等多久？",
+    a: "简历生成和岗位匹配通常在一分钟内。面试题包内容量大，需要几分钟，所以它是后台跑的——你可以先去做别的，生成完会通知你。中途失败或超时不扣积分。",
   },
   {
     q: "申请内测后多久能用上？",
@@ -158,7 +236,7 @@ export default function SitePage() {
           <div>
             <div className="tag">
               <i />
-              内测中 · 内测期完全免费
+              内测中 · 注册送 3 份材料解析
             </div>
             <h1 className="h1">
               一份档案，
@@ -374,54 +452,89 @@ export default function SitePage() {
         </div>
       </section>
 
-      {/* ── 定价 ── */}
+      {/* ── 定价 ──
+          四层的顺序是说服顺序，不能调换：先给观点，再给机制，
+          然后才给商品，最后消除顾虑。用户没先理解「按动作计费」，
+          看到 200 分只会问这是什么单位。 ── */}
       <section className="sec" id="pricing">
         <div className="wrap">
           <Reveal>
             <p className="eyebrow">定价</p>
-            <h2 className="h2">内测期完全免费。</h2>
+            {/* ① 论点。标题给的是观点不是价格 —— 观点会被记住，价格表不会。 */}
+            <h2 className="h2">不是订阅。你只在用的时候花钱。</h2>
             <p className="lede">
-              正式版上线时，内测用户锁定早鸟价，并保留一段免费使用期。不会出现「用着用着突然要付费」的情况。
+              找工作是有窗口的，通常两到四个月。为一整年付费、拿到 offer
+              就退订，这笔账对谁都不划算。所以 Proofly
+              按动作计费：用一次扣一次，没用完的一直留着。空窗期不花一分钱，档案照样能维护。
             </p>
 
-            <div className="price">
-              <div className="pc now">
-                <div className="pc-lab">现在 · 内测</div>
-                <div className="pc-amt">
-                  ¥0<small>全部功能</small>
-                </div>
-                <p className="pc-d">
-                  名额有限，按申请顺序发邀请。用得上的功能全部开放，没有次数限制。
-                </p>
-                <ul>
-                  <li>职业档案，容量不设限</li>
-                  <li>不限求职方向、不限简历版本</li>
-                  <li>岗位匹配、简历评分、面试题全开</li>
-                  <li>直接影响产品走向：你的反馈会被采纳</li>
+            {/* ② 分界。全页第二处可以讲机制的地方（第一处是证明度）。 */}
+            <div className="split">
+              <div className="sp free">
+                <h3 className="sp-h" id="pricing-free">
+                  <i />
+                  永久免费
+                </h3>
+                <p className="sp-s">这些功能由代码算出来，不调用大模型，所以不向你收费。</p>
+                <ul aria-labelledby="pricing-free">
+                  {FREE_ITEMS.map((it) => (
+                    <li key={it.name}>
+                      <span>{it.name}</span>
+                      <em>{it.quota}</em>
+                    </li>
+                  ))}
                 </ul>
-                <a href="#join" className="btn">
-                  免费加入内测
-                </a>
               </div>
-              <div className="pc later">
-                <div className="pc-lab">正式版</div>
-                <div className="pc-amt">
-                  早鸟价<small>上线前公布</small>
-                </div>
-                <p className="pc-d">
-                  具体价格会在上线前提前通知，内测用户享受早鸟折扣。免费额度会保留，轻度使用不必付费。
+              <div className="sp paid">
+                <h3 className="sp-h" id="pricing-paid">
+                  <i />
+                  消耗积分
+                </h3>
+                <p className="sp-s">
+                  需要大模型工作的动作。每个动作明码标价，不按 token 浮动计费。
                 </p>
-                <ul>
-                  <li>内测用户锁定早鸟价</li>
-                  <li>提前 30 天告知，不搞突然收费</li>
-                  <li>保留免费额度</li>
-                  <li>随时导出你的全部数据</li>
+                <ul aria-labelledby="pricing-paid">
+                  {PAID_ITEMS.map((it) => (
+                    <li key={it.name}>
+                      <span>{it.name}</span>
+                      <em>{it.quota}</em>
+                    </li>
+                  ))}
                 </ul>
-                <a href="#join" className="btn ghost">
-                  先加入内测锁定价格
-                </a>
               </div>
             </div>
+
+            {/* ③ 积分包。内测期不放禁用态按钮 —— 没有按钮就没有失败的点击。
+                卡片也不是链接不是按钮，屏幕阅读器不该提示它可交互。 */}
+            <div className="packs">
+              {PACKS.map((pk) => (
+                <div className={`pk${pk.hot ? " hot" : ""}`} key={pk.name}>
+                  {pk.hot && <span className="pk-tag">最常用</span>}
+                  <div className="pk-n">{pk.name}</div>
+                  <div className="pk-c">
+                    {pk.credits}
+                    <small>积分</small>
+                  </div>
+                  <p className="pk-d">{pk.desc}</p>
+                  <p className="pk-p">{PRICE_SLOT[PRICING_STAGE]}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* ④ 承诺。 */}
+            <div className="vows">
+              {VOWS.map((v) => (
+                <div className="vow" key={v.t}>
+                  <b>{v.t}</b>
+                  {v.d}
+                </div>
+              ))}
+            </div>
+
+            <p className="note">
+              内测期不收费，也不开放购买——全部功能可用，注册即送 3
+              份材料解析额度。积分单价会在正式版上线前公布。
+            </p>
           </Reveal>
         </div>
       </section>
@@ -461,7 +574,9 @@ export default function SitePage() {
             <br />
             看看你的经历到底有多少。
           </h2>
-          <p className="cta-lede">内测期完全免费，留个邮箱就行。</p>
+          <p className="cta-lede">
+            内测期不收费，注册即送 3 份材料解析额度。留个邮箱就行。
+          </p>
 
           <JoinForm />
 
@@ -472,7 +587,7 @@ export default function SitePage() {
       <footer className="foot">
         <div className="foot-in">
           <LogoWordmark height={18} />
-          <span>让你的经历真正产生价值</span>
+          <span>把经历做成资产，让每一次努力都不被浪费</span>
         </div>
       </footer>
     </div>

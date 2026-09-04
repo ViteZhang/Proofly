@@ -604,81 +604,180 @@
 }
 
 /* ── 定价 ── */
-.site .price {
+/* 纵向四层，顺序即说服顺序：论点 → 分界 → 包 → 承诺。
+   包放第三位不是排版偏好 —— 用户没先理解「按动作计费」，
+   看到 200 分只会问「这是什么单位」。分界双栏负责教这个单位。 */
+
+/* ① 分界双栏。免费栏实底有分量，付费栏虚线退后一步。 */
+.site .split {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
-  margin-top: 44px;
+  margin-top: 40px;
 }
-.site .pc {
+.site .sp {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  padding: 28px 30px;
+}
+.site .sp.paid {
+  background: transparent;
+  border-style: dashed;
+}
+.site .sp-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.site .sp-h i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--proof);
+  display: block;
+  flex: none;
+}
+.site .sp.paid .sp-h i {
+  background: transparent;
+  border: 1.5px solid var(--ghost);
+}
+.site .sp-s {
+  font-size: 13.5px;
+  color: var(--mute);
+  margin-top: 8px;
+  line-height: 1.7;
+}
+.site .sp ul {
+  list-style: none;
+  margin-top: 18px;
+  padding: 0;
+}
+.site .sp li {
+  font-size: 14.5px;
+  color: var(--slate);
+  padding: 11px 0;
+  border-top: 1px solid var(--line-soft);
+  line-height: 1.6;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: baseline;
+}
+.site .sp li:first-child {
+  border-top: none;
+}
+.site .sp li em {
+  font-style: normal;
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--mute);
+  flex: none;
+}
+.site .sp.free li em {
+  color: var(--proof-ink);
+}
+
+/* ② 积分包三卡。内测期没有可点的动作，所以整块不给 hover 反馈 ——
+   给了就是骗一次点击。同理不放禁用态按钮：没有按钮就没有失败的点击。 */
+.site .packs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-top: 22px;
+}
+.site .pk {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 32px;
+  border-radius: 14px;
+  padding: 24px 22px;
+  position: relative;
 }
-.site .pc.now {
+.site .pk.hot {
   border-color: var(--proof-mid);
   box-shadow: 0 0 0 3px var(--proof-soft);
 }
-.site .pc-lab {
-  font-size: 11px;
-  letter-spacing: 0.13em;
-  color: var(--mute);
-  font-weight: 500;
-  margin-bottom: 14px;
+.site .pk-tag {
+  position: absolute;
+  top: -9px;
+  left: 22px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: var(--proof);
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
 }
-.site .pc.now .pc-lab {
-  color: var(--proof-ink);
+.site .pk-n {
+  font-size: 14.5px;
+  font-weight: 600;
 }
-.site .pc-amt {
+.site .pk-c {
   font-family: var(--font-display);
-  font-size: 38px;
+  font-size: 30px;
   font-weight: 600;
   letter-spacing: -0.03em;
+  margin-top: 8px;
   line-height: 1.1;
 }
-.site .pc-amt small {
+.site .pk-c small {
   font-family: var(--font-ui);
-  font-size: 15px;
+  font-size: 13px;
   color: var(--mute);
   font-weight: 400;
-  margin-left: 8px;
+  margin-left: 6px;
   letter-spacing: 0;
 }
-.site .pc-d {
-  font-size: 14px;
+/* 三张卡的描述长短不一，min-height 把价格位对齐到同一条线上。 */
+.site .pk-d {
+  font-size: 13.5px;
   color: var(--slate);
+  margin-top: 12px;
+  line-height: 1.7;
+  min-height: 64px;
+}
+.site .pk-p {
+  font-size: 12.5px;
+  color: var(--mute);
   margin-top: 14px;
-  line-height: 1.8;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
 }
-.site .pc ul {
-  list-style: none;
-  margin-top: 20px;
-  padding: 0;
+
+/* ③ 承诺条。一行四格，最后一步消除顾虑。 */
+.site .vows {
+  margin-top: 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
 }
-.site .pc li {
-  font-size: 14px;
+.site .vow {
+  padding: 20px 22px;
+  font-size: 13.5px;
   color: var(--slate);
-  padding: 8px 0 8px 20px;
-  position: relative;
-  line-height: 1.6;
+  line-height: 1.65;
 }
-.site .pc li::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 16px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--proof);
+.site .vow + .vow {
+  border-left: 1px solid var(--line-soft);
 }
-.site .pc.later li::before {
-  background: var(--ghost);
+.site .vow b {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: 5px;
 }
-.site .pc .btn {
-  margin-top: 24px;
-  width: 100%;
+.site .note {
+  font-size: 13px;
+  color: var(--mute);
+  margin-top: 18px;
+  line-height: 1.7;
 }
 
 /* ── FAQ ── */
@@ -959,8 +1058,22 @@
   }
   .site .pains,
   .site .fit,
-  .site .price {
+  .site .split,
+  .site .packs {
     grid-template-columns: 1fr;
+  }
+  /* 承诺条竖排后分隔线要跟着转向，否则四格会黏成一坨。
+     窄屏不给横向滚动 —— 四条承诺是并列的，滑动会让最后一条被埋掉。 */
+  .site .vows {
+    grid-template-columns: 1fr;
+  }
+  .site .vow + .vow {
+    border-left: none;
+    border-top: 1px solid var(--line-soft);
+  }
+  /* 单列之后卡片各自换行，不再需要靠 min-height 对齐价格位。 */
+  .site .pk-d {
+    min-height: 0;
   }
   .site .steps-in {
     grid-template-columns: 1fr;
