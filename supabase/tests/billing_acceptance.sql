@@ -22,6 +22,19 @@ begin
   raise notice '✓ %', p_label;
 end $$;
 
+-- 切换「当前是谁在调用」。
+--
+-- 两个设置都写：真 Supabase 的 auth.uid() 先看 request.jwt.claim.sub，
+-- 没有再解 request.jwt.claims 这个 JSON；本地测试库的桩只认前者。
+-- 只写一个，这套断言就只在其中一边成立。
+create or replace function _as(p_user uuid)
+returns void language plpgsql as $$
+begin
+  perform set_config('request.jwt.claim.sub', coalesce(p_user::text, ''), true);
+  perform set_config('request.jwt.claims',
+    case when p_user is null then '' else json_build_object('sub', p_user)::text end, true);
+end $$;
+
 create or replace function assert_raises(p_label text, p_sql text, p_match text)
 returns void language plpgsql as $$
 begin
@@ -37,7 +50,8 @@ end $$;
 
 -- ---- 归零 ----
 truncate usage_logs, credit_holds, entitlements, quota_counters,
-        redeem_records, user_profiles restart identity cascade;
+        redeem_attempts, redeem_redemptions, redeem_codes, redeem_batches,
+        user_profiles restart identity cascade;
 delete from auth.users where id = :'U';
 insert into auth.users (id, email) values (:'U', 'acceptance@test.local');
 
@@ -594,38 +608,51 @@ begin
 end $$;
 
 -- =============================================================
--- 兑换码（C3 验收 27–31）
+-- 兑换码（C3 验收 27–31，随兑换码后台 A0–A5 重写）
+--
+-- 表结构从 redeem_codes 一张扩成 batches / codes / redemptions 三张，
+-- 话术也换了 —— 不存在 / 已停用 / 已作废三种归并成 UNUSABLE，不再
+-- 单独报 NOT_FOUND。
 -- =============================================================
 do $$
 declare
-  u  uuid := '99999999-9999-9999-9999-999999999999';
-  u2 uuid := '88888888-8888-8888-8888-888888888888';
-  r jsonb;
+  u   uuid := '99999999-9999-9999-9999-999999999999';
+  u2  uuid := '88888888-8888-8888-8888-888888888888';
+  adm uuid := '77777777-7777-7777-7777-777777777777';
+  r jsonb; bid uuid; cid uuid;
 begin
-  delete from redeem_records;
-  delete from redeem_codes where code like 'TEST-%';
+  delete from redeem_attempts;
+  delete from redeem_redemptions;
+  delete from redeem_codes;
+  delete from redeem_batches;
   delete from entitlements where user_id in (u, u2);
   update quota_counters set credits_available = 0, credits_held = 0 where user_id in (u, u2);
   insert into auth.users (id, email) values (u2, 'other@test.local')
     on conflict (id) do nothing;
+  insert into auth.users (id, email) values (adm, 'admin@test.local')
+    on conflict (id) do nothing;
   perform ensure_quota_counter(u2);
 
-  insert into redeem_codes (code, credits, max_uses, note)
-  values ('TEST-JOB-A1', 200, 1, '求职包 ¥68 · 微信 someone 2026-09-05'),
-         ('TEST-OLD-A2', 50, 1, '过期用'),
-         ('TEST-MANY-A3', 50, 2, '两人份');
-  update redeem_codes set expires_at = now() - interval '1 day' where code = 'TEST-OLD-A2';
+  insert into redeem_batches
+    (name, purpose, reason, credits_each, max_uses_each, code_count, created_by)
+  values ('验收批', 'purchase', '求职包 ¥68 · 微信 someone 2026-09-05', 200, 1, 3, adm)
+  returning id into bid;
 
-  -- 30 不存在的码
+  insert into redeem_codes (batch_id, code, credits, max_uses, code_expires_at)
+  values (bid, 'PF-JOBA-0001', 200, 1, null),
+         (bid, 'PF-OLDA-0002',  50, 1, now() - interval '1 day'),
+         (bid, 'PF-MANY-0003',  50, 2, null);
+
+  -- 30 不存在的码 —— 现在和「已停用」「已作废」共用一句话
   perform assert_eq('C3 验收 30 · 不存在的码',
-    redeem_code(u, 'TEST-NOPE')->>'reason', 'NOT_FOUND');
+    redeem_code(u, 'PF-NOPE-9999')->>'reason', 'UNUSABLE');
 
   -- 31 过期
   perform assert_eq('C3 验收 31 · 过期的码',
-    redeem_code(u, 'TEST-OLD-A2')->>'reason', 'EXPIRED');
+    redeem_code(u, 'PF-OLDA-0002')->>'reason', 'EXPIRED');
 
   -- 27 正常兑换
-  r := redeem_code(u, 'TEST-JOB-A1');
+  r := redeem_code(u, 'PF-JOBA-0001');
   perform assert_eq('C3 验收 27 · 兑换成功', (r->>'credits')::int, 200);
   perform assert_eq('C3 验收 27 · source 是 redeem',
     (select source from entitlements where user_id=u order by created_at desc limit 1), 'redeem');
@@ -637,20 +664,83 @@ begin
 
   -- 28 同一人二次兑换
   perform assert_eq('C3 验收 28 · 自己再兑一次',
-    redeem_code(u, 'TEST-JOB-A1')->>'reason', 'ALREADY_USED_BY_ME');
+    redeem_code(u, 'PF-JOBA-0001')->>'reason', 'ALREADY_USED_BY_ME');
 
   -- 29 别人来兑一张已用完的
   perform assert_eq('C3 验收 29 · 被别人用完了',
-    redeem_code(u2, 'TEST-JOB-A1')->>'reason', 'USED_UP');
+    redeem_code(u2, 'PF-JOBA-0001')->>'reason', 'USED_UP');
 
-  -- 34 追溯：记录能回答「发给了谁、哪个包」
-  perform assert_eq('C3 验收 34 · 兑换记录能追溯到人',
-    (select count(*)::int from redeem_records rr join redeem_codes rc on rc.code = rr.code
-      where rr.user_id = u and rc.note like '求职包%'), 1);
+  -- 34 追溯：核销 → 码 → 批次，一路走到一句人写的发放理由
+  perform assert_eq('C3 验收 34 · 兑换记录能追溯到发放理由',
+    (select count(*)::int
+       from redeem_redemptions rr
+       join redeem_codes rc   on rc.id = rr.code_id
+       join redeem_batches rb on rb.id = rc.batch_id
+      where rr.user_id = u and rb.reason like '求职包%'), 1);
 
-  -- 大小写与空格容错
+  -- 大小写、空格、缺连字符都要兑得动
   perform assert_eq('码不区分大小写与首尾空格',
-    (redeem_code(u2, '  test-many-a3  ')->>'ok')::boolean, true);
+    (redeem_code(u2, '  pf many 0003  ')->>'ok')::boolean, true);
+end $$;
+
+-- =============================================================
+-- 兑换码后台（A0–A5）
+-- =============================================================
+do $$
+declare
+  u   uuid := '99999999-9999-9999-9999-999999999999';
+  adm uuid := '77777777-7777-7777-7777-777777777777';
+  bid uuid; cid uuid; r jsonb;
+begin
+  -- A0 · 四张表对客户端零权限
+  perform assert_eq('A0 · redeem_codes 对 authenticated 不可读',
+    has_table_privilege('authenticated', 'redeem_codes', 'select'), false);
+  perform assert_eq('A0 · redeem_batches 对 anon 不可读',
+    has_table_privilege('anon', 'redeem_batches', 'select'), false);
+  perform assert_eq('A0 · admin_users 对 authenticated 不可写',
+    has_table_privilege('authenticated', 'admin_users', 'insert'), false);
+  perform assert_eq('A0 · redeem_attempts 对 authenticated 不可读',
+    has_table_privilege('authenticated', 'redeem_attempts', 'select'), false);
+
+  -- A2 · 不是管理员就抛，且和「接口不存在」用同一种失败
+  insert into admin_users (user_id, email) values (adm, 'admin@test.local')
+    on conflict do nothing;
+  perform _as(u);
+  perform assert_eq('A2 · 非管理员 is_admin() 为假', is_admin(), false);
+  perform assert_raises('A2 · 非管理员调 admin_overview 被拒',
+    'select admin_overview()', 'NOT_ADMIN');
+
+  perform _as(adm);
+  perform assert_eq('A2 · 管理员 is_admin() 为真', is_admin(), true);
+
+  -- A3 · 生成批次的三道护栏
+  perform assert_eq('A3 · 生成成功',
+    (admin_create_batch('A 批','internal_beta','验收用', 100, 1, null, null, null,
+      array['PF-AAAA-0001','PF-AAAA-0002'])->>'count')::int, 2);
+  select id into bid from redeem_batches where name = 'A 批';
+
+  -- A4 · 停用可逆、作废不可逆
+  select id into cid from redeem_codes where code = 'PF-AAAA-0001';
+  perform assert_eq('A4 · 停用', admin_toggle_code(cid, '发错人了')->>'status', 'disabled');
+  perform _as(u);
+  perform assert_eq('A4 · 停用的码兑换返回 UNUSABLE',
+    redeem_code(u, 'PF-AAAA-0001')->>'reason', 'UNUSABLE');
+  perform _as(adm);
+  perform assert_eq('A4 · 恢复', admin_toggle_code(cid, null)->>'status', 'active');
+  perform assert_eq('A4 · 整批作废',
+    (admin_revoke_batch(bid, '验收用，不再发', 'A 批')->>'revoked_codes')::int, 2);
+
+  -- A5 · 孤儿额度是这套设计的自检项
+  perform assert_eq('A5 · 没有孤儿额度',
+    jsonb_array_length(admin_anomalies() -> 'orphan'), 0);
+  -- grant_credits 会走 billing_assert_owner，得以 u 自己的身份调
+  perform _as(u);
+  perform grant_credits(u, 'adjust', 100, null, '手工改余额');
+  perform _as(adm);
+  perform assert_eq('A5 · 手工调整会被扫出来',
+    jsonb_array_length(admin_anomalies() -> 'orphan'), 1);
+
+  perform _as(null);
 end $$;
 
 \echo ''
