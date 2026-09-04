@@ -10,7 +10,12 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
-import { billedAction, fingerprintFor, idempotencyKey } from "@/lib/billing/action";
+import {
+  billedAction,
+  fingerprintFor,
+  idempotencyKey,
+  type BilledResult,
+} from "@/lib/billing/action";
 import { z } from "zod";
 import { callLLM } from "@/lib/llm";
 import { MATCH_SYSTEM, matchUser } from "@/lib/llm/jd-prompts";
@@ -74,7 +79,7 @@ export async function matchAndScore(
   jdId: string,
   atomIds: string[],
   clientReqId?: string,
-): Promise<ActionResult<{ assessmentId: string; matchScore: number }>> {
+): Promise<BilledResult<{ assessmentId: string; matchScore: number }>> {
   return billedAction({
     actionCode: "target_assess",
     fingerprint: await fingerprintFor("target_assess", { jdId }),

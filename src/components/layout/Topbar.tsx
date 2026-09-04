@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { BalancePill, type BalanceProps } from "@/components/billing/BalancePill";
 import { isGlobalPath } from "@/lib/nav";
 
 export type TargetOption = { id: string; name: string };
@@ -17,16 +18,19 @@ export function Topbar({
   blockingCount,
   scanned,
   targets,
+  balance,
 }: {
   blockingCount: number;
   /** 一次都没扫过时不能说「一切正常」—— 那是撒谎。 */
   scanned: boolean;
   targets: TargetOption[];
+  balance: BalanceProps;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const global = isGlobalPath(pathname);
+  const hideBalance = pathname.startsWith("/app/notes");
 
   // ?target= 认不出来（换了账号、方向删了）就退回第一个，跟 resolveTarget 同一套规则。
   const wanted = searchParams.get("target");
@@ -102,9 +106,15 @@ export function Topbar({
         {blockingCount > 0 ? `${blockingCount} 处待解决` : scanned ? "一切正常" : "还没体检过"}
       </Link>
 
+      {/*
+        随手记页面不显示余额（交互方案 1.4、5）。
+        这是唯一一处例外，理由见 BalancePill 的注释。
+      */}
+      <div className="ml-auto">{!hideBalance && <BalancePill {...balance} />}</div>
+
       {/* 全局搜索占位：显示 ⌘K，本步不实现 */}
       <div
-        className="ml-auto flex h-8 min-w-0 items-center gap-2 rounded-btn px-3 text-[13px]"
+        className="flex h-8 min-w-0 items-center gap-2 rounded-btn px-3 text-[13px]"
         style={{ background: "var(--bg)", border: "1px solid var(--line)", color: "var(--mute)" }}
       >
         <span className="truncate">搜索经历、技能、任务</span>

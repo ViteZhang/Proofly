@@ -14,7 +14,12 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
-import { billedAction, fingerprintFor, idempotencyKey } from "@/lib/billing/action";
+import {
+  billedAction,
+  fingerprintFor,
+  idempotencyKey,
+  type BilledResult,
+} from "@/lib/billing/action";
 import { blockingBeforeGeneration, runQuickScan } from "@/lib/queries/health";
 import { z } from "zod";
 import { callLLM } from "@/lib/llm";
@@ -87,7 +92,7 @@ export async function generateVersion(
   jdId: string,
   seedFromVersionId?: string,
   clientReqId?: string,
-): Promise<ActionResult<VersionOutcome>> {
+): Promise<BilledResult<VersionOutcome>> {
   return billedAction({
     actionCode: "resume_delta",
     fingerprint: await fingerprintFor("resume_delta", { jdId }),

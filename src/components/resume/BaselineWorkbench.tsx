@@ -18,6 +18,12 @@ import { Button } from "@/components/ui/Button";
 import { ResumePaper } from "./ResumePaper";
 import { InspectPanel } from "./InspectPanel";
 import { RENDER_WEIGHT_LABEL } from "@/lib/targets/strategy";
+import { quoteAction, type ChargeQuote } from "@/app/app/billing-actions";
+import { ConfirmCost } from "@/components/billing/ConfirmCost";
+import { CreditCost, FreeTag } from "@/components/billing/CreditTag";
+import { useBillingFeedback } from "@/components/billing/BillingFeedback";
+import { Modal } from "@/components/billing/Modal";
+import { ACTION_PRICES } from "@/config/plan";
 import {
   generateBaseline,
   prepareBaseline,
@@ -104,6 +110,21 @@ export function BaselineWorkbench({
     };
   }, [menu]);
 
+  // 「点之前就知道要花多少」：进页面先问一句这次要不要钱。
+  const [quote, setQuote] = useState<ChargeQuote | null>(null);
+  const [asking, setAsking] = useState(false);
+  const feedback = useBillingFeedback();
+
+  useEffect(() => {
+    let alive = true;
+    void quoteAction("resume_baseline", { targetId }).then((q) => {
+      if (alive) setQuote(q);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [targetId, phase]);
+
   function run() {
     setError(null);
     setBlocked([]);
@@ -122,10 +143,12 @@ export function BaselineWorkbench({
       setPhase("rendering");
       const r = await generateBaseline(targetId);
       if (!r.ok) {
-        setError(r.error);
+        feedback.report("生成基线简历", r, run);
+        setError(r.code === "INSUFFICIENT" ? null : r.error);
         setPhase("idle");
         return;
       }
+      feedback.report("基线简历", r);
       if (r.data.status === "blocked") {
         setBlocked(r.data.results.filter((x) => x.level === "blocking"));
         setPhase("blocked");
@@ -181,9 +204,76 @@ export function BaselineWorkbench({
 
   return (
     <div className="mt-5">
+      {feedback.node}
+
+      {asking &&
+        quote &&
+        (blocks.length > 0 ? (
+          // 收费态的重新生成：说清为什么要钱，并主动给省钱建议。
+          // 产品主动告诉用户怎么少花钱，是这个品类里最便宜的信任建设。
+          <Modal
+            title="重新生成基线简历"
+            onClose={() => setAsking(false)}
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setAsking(false)}>
+                  取消
+                </Button>
+                <Button
+                  onClick={() => {
+                    setAsking(false);
+                    run();
+                  }}
+                >
+                  重新生成
+                  <CreditCost credits={quote.credits} />
+                </Button>
+              </>
+            }
+          >
+            <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--slate)" }}>
+              你在上次生成之后改过经历或呈现策略，所以这次要重新跑，消耗{" "}
+              <b className="font-display">{quote.credits}</b> 分。
+            </p>
+            <div
+              className="my-3.5 rounded-btn px-3.5 py-3 text-[13px] leading-relaxed"
+              style={{ background: "var(--proof-soft)", color: "#0A7355" }}
+            >
+              如果只是想调措辞、事实没变，可以用
+              <b className="font-semibold">「重写这一块」</b>，只要{" "}
+              {ACTION_PRICES.resume_block} 分。
+            </div>
+          </Modal>
+        ) : (
+          <ConfirmCost
+            title="生成基线简历"
+            credits={quote.credits}
+            balance={quote.balance}
+            onCancel={() => setAsking(false)}
+            onConfirm={() => {
+              setAsking(false);
+              run();
+            }}
+          />
+        ))}
+
       <div className="flex items-center gap-3">
-        <Button size="sm" variant="secondary" onClick={run} disabled={busy || locked}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            // 免费态直接跑，不做二次确认 —— 不花钱的事没什么好确认的。
+            if (quote?.free || !quote || quote.credits < 10) return run();
+            setAsking(true);
+          }}
+          disabled={busy || locked}
+        >
           {blocks.length > 0 ? "重新生成" : "生成基线"}
+          {quote?.free ? (
+            <FreeTag>这次不扣分</FreeTag>
+          ) : (
+            <CreditCost credits={quote?.credits ?? ACTION_PRICES.resume_baseline} />
+          )}
         </Button>
         {blocks.length > 0 && (
           <Button size="sm" onClick={() => setConfirm(locked ? "unlock" : "lock")} disabled={busy}>
@@ -433,8 +523,13 @@ function ContextMenu({
       onPointerDown={(e) => e.stopPropagation()}
       role="menu"
     >
+      {/*
+        「压缩为一行」会重跑这一块 —— 那是一次模型调用，所以带分值。
+        「省略」只是删掉，不调模型，不收钱。
+      */}
       <MenuItem disabled={busy} onClick={() => apply("one_line")}>
         压缩为一行
+        <CreditCost credits={ACTION_PRICES.resume_block} />
       </MenuItem>
       <MenuItem disabled={busy} onClick={() => apply("omit")}>
         省略

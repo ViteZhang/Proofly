@@ -6,10 +6,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useBillingFeedback } from "@/components/billing/BillingFeedback";
+import { CreditCost } from "@/components/billing/CreditTag";
+import { ACTION_PRICES } from "@/config/plan";
 import { Button } from "@/components/ui/Button";
 import { generateVersion } from "@/app/app/resume/version-actions";
 
 export function GenerateResumeButton({ jdId }: { jdId: string }) {
+  const feedback = useBillingFeedback();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, start] = useTransition();
@@ -25,7 +29,8 @@ export function GenerateResumeButton({ jdId }: { jdId: string }) {
           start(async () => {
             const r = await generateVersion(jdId);
             if (!r.ok) {
-              setError(r.error);
+              feedback.report("生成投递版本", r);
+              setError(r.code === "INSUFFICIENT" ? null : r.error);
               return;
             }
             router.push(`/app/resume/${r.data.versionId}`);
@@ -33,7 +38,9 @@ export function GenerateResumeButton({ jdId }: { jdId: string }) {
         }}
       >
         {busy ? "生成中…" : "生成简历"}
+        {!busy && <CreditCost credits={ACTION_PRICES.resume_delta} />}
       </Button>
+      {feedback.node}
       {error && (
         <p className="mt-2 w-full text-[12.5px]" style={{ color: "var(--danger)" }}>
           {error}

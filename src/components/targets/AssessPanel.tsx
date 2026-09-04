@@ -3,6 +3,9 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useBillingFeedback } from "@/components/billing/BillingFeedback";
+import { CreditCost } from "@/components/billing/CreditTag";
+import { ACTION_PRICES } from "@/config/plan";
 import { Button } from "@/components/ui/Button";
 import { ProofDot } from "@/components/library/ProofDot";
 import { matchAndScore, recallAtoms } from "@/app/app/targets/assess-actions";
@@ -33,6 +36,7 @@ export function AssessPanel({
   taskLinks?: Record<number, TaskLink>;
 }) {
   const router = useRouter();
+  const feedback = useBillingFeedback();
   const [step, setStep] = useState<Step>(0);
   const [error, setError] = useState<string | null>(null);
   const [running, start] = useTransition();
@@ -79,10 +83,12 @@ export function AssessPanel({
 
   return (
     <div id="assess-panel" className="mt-6">
+      {feedback.node}
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="text-[16px] font-semibold">匹配评估</h2>
         <Button variant="secondary" size="sm" onClick={run} disabled={running}>
           {running ? "评估中…" : assessment ? "重新评估" : "开始评估"}
+          {!running && <CreditCost credits={ACTION_PRICES.target_assess} />}
         </Button>
       </div>
 
@@ -143,6 +149,7 @@ function PlanPrompt({ count, onDone }: { count: number; onDone: () => void }) {
       <span className="text-[13px]">发现 {count} 处缺口，要生成行动清单吗？</span>
       <Button size="sm" onClick={run} disabled={busy}>
         {busy ? "生成中…" : "生成行动清单"}
+        {!busy && <CreditCost credits={ACTION_PRICES.task_plan} />}
       </Button>
       <Link href="/app/actions" className="text-[12.5px] hover:underline" style={{ color: "var(--slate)" }}>
         先去看看清单

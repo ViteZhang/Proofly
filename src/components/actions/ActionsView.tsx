@@ -3,6 +3,9 @@
 import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useBillingFeedback } from "@/components/billing/BillingFeedback";
+import { CreditCost } from "@/components/billing/CreditTag";
+import { ACTION_PRICES } from "@/config/plan";
 import { Button } from "@/components/ui/Button";
 import { generatePlan } from "@/app/app/actions/plan-actions";
 import { dismissGap, dropTask, pinTask } from "@/app/app/actions/task-actions";
@@ -41,15 +44,19 @@ export function ActionsView({
   const [showDone, setShowDone] = useState(false);
   const [draft, setDraft] = useState<TaskDraft | null>(null);
 
+  const feedback = useBillingFeedback();
+
   function regenerate() {
     setError(null);
     setNote(null);
     start(async () => {
       const r = await generatePlan();
       if (!r.ok) {
-        setError(r.error);
+        feedback.report("生成行动清单", r);
+        setError(r.code === "INSUFFICIENT" ? null : r.error);
         return;
       }
+      feedback.report("行动清单", r);
       setNote(
         r.data.gapsIn === 0
           ? "现在没有待处理的缺口，没什么可生成的。"
@@ -69,6 +76,7 @@ export function ActionsView({
 
   return (
     <div>
+      {feedback.node}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-[26px] font-semibold tracking-tight">行动清单</h1>
@@ -88,6 +96,7 @@ export function ActionsView({
           </Button>
           <Button variant="secondary" size="sm" onClick={regenerate} disabled={busy}>
             {busy ? "生成中…" : "重新生成"}
+            {!busy && <CreditCost credits={ACTION_PRICES.task_plan} />}
           </Button>
         </div>
       </div>

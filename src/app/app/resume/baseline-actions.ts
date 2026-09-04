@@ -13,7 +13,12 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
-import { billedAction, fingerprintFor, idempotencyKey } from "@/lib/billing/action";
+import {
+  billedAction,
+  fingerprintFor,
+  idempotencyKey,
+  type BilledResult,
+} from "@/lib/billing/action";
 import { z } from "zod";
 import { callLLM } from "@/lib/llm";
 import { BASELINE_SYSTEM, baselineUser } from "@/lib/llm/resume-prompts";
@@ -108,7 +113,7 @@ function periodLabel(atom: ResumeAtom): string {
 export async function generateBaseline(
   targetId: string,
   clientReqId?: string,
-): Promise<ActionResult<GenerateOutcome>> {
+): Promise<BilledResult<GenerateOutcome>> {
   return billedAction({
     actionCode: "resume_baseline",
     fingerprint: await fingerprintFor("resume_baseline", { targetId }),

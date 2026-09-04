@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { getBalance, getEntitlements } from "@/lib/queries/billing";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { countOpenTasks } from "@/lib/queries/tasks";
 import { Topbar } from "@/components/layout/Topbar";
@@ -26,6 +27,8 @@ export default async function AppLayout({
     countOpenTasks(),
   ]);
 
+  const [balance, ent] = await Promise.all([getBalance(), getEntitlements()]);
+
   return (
     <div className="flex min-h-screen" style={{ background: "var(--bg)" }}>
       {/* data-chrome：打印页要把外壳整个藏掉，靠这个标记，不靠猜类名 */}
@@ -40,6 +43,16 @@ export default async function AppLayout({
               blockingCount={health.blockingCount}
               scanned={health.scanned}
               targets={targets}
+              balance={{
+                available: balance.available,
+                low: balance.low,
+                zero: balance.zero,
+                purchased: ent.purchased,
+                granted: ent.granted,
+                grantExpiresAt: ent.grantExpiresAt,
+                freeChatLeft: balance.freeChatLeft,
+                freeChatLimit: balance.freeChatLimit,
+              }}
             />
           </Suspense>
         </div>

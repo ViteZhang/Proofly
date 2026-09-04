@@ -13,6 +13,12 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  useBillingFeedback,
+  type BilledOutcome,
+} from "@/components/billing/BillingFeedback";
+import { CreditCost } from "@/components/billing/CreditTag";
+import { ACTION_PRICES } from "@/config/plan";
 import { Button } from "@/components/ui/Button";
 import {
   ackOverThreshold,
@@ -48,6 +54,7 @@ export function VersionSection({
   );
   const [submitting, setSubmitting] = useState<VersionSummary | null>(null);
   const [, start] = useTransition();
+  const feedback = useBillingFeedback();
 
   function run(jdId: string, fromVersionId?: string) {
     setError(null);
@@ -60,8 +67,15 @@ export function VersionSection({
         : await generateVersion(jdId);
       setRunning(null);
       if (!r.ok) {
-        setError(r.error);
+        // 复制版本走的是 ActionResult，生成走的是 BilledResult，
+        // 这里统一按后者的形状读，缺字段就当没有。
+        const billed = r as BilledOutcome & { ok: false };
+        feedback.report("生成投递版本", billed);
+        setError(billed.code === "INSUFFICIENT" ? null : r.error);
         return;
+      }
+      if ("charged" in r) {
+        feedback.report("投递版本", r as unknown as BilledOutcome);
       }
       setOutcome(r.data);
       router.refresh();
@@ -72,6 +86,7 @@ export function VersionSection({
 
   return (
     <section className="mt-9">
+      {feedback.node}
       <div className="flex items-baseline justify-between gap-4" style={{ maxWidth: 720 }}>
         <h2 className="text-[16px] font-semibold">
           投递版本 <span style={{ color: "var(--mute)" }}>{versions.length} 份</span>
@@ -83,6 +98,7 @@ export function VersionSection({
           onClick={() => setPicker({ mode: "new" })}
         >
           ＋ 为新 JD 生成
+          <CreditCost credits={ACTION_PRICES.resume_delta} />
         </Button>
       </div>
 

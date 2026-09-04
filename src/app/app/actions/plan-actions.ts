@@ -17,7 +17,13 @@
 // =============================================================
 
 import { revalidatePath } from "next/cache";
-import { billedAction, fingerprintFor, idempotencyKey } from "@/lib/billing/action";
+import { getBalance } from "@/lib/queries/billing";
+import {
+  billedAction,
+  fingerprintFor,
+  idempotencyKey,
+  type BilledResult,
+} from "@/lib/billing/action";
 import { callLLM } from "@/lib/llm";
 import { PLAN_SYSTEM, planUser } from "@/lib/llm/task-prompts";
 import { createClient } from "@/lib/supabase/server";
@@ -54,11 +60,17 @@ export async function countOpenGaps(): Promise<ActionResult<{ count: number }>> 
  * 指纹按「全部未解决 gap 的 id 集合」算 —— 缺口没变就是同一份输入，
  * 24 小时内重新生成不扣分。
  */
-export async function generatePlan(clientReqId?: string): Promise<ActionResult<PlanSummary>> {
+export async function generatePlan(clientReqId?: string): Promise<BilledResult<PlanSummary>> {
   const gaps = await listOpenGaps();
   // 一条缺口都没有 → 不调模型也就不该产生任何计费记录，直接返回。
   if (gaps.length === 0) {
-    return ok({ created: 0, updated: 0, gapsIn: 0, droppedGapIds: [] });
+    // 没有缺口就不调模型，也就不产生任何计费记录。
+    return {
+      ok: true,
+      data: { created: 0, updated: 0, gapsIn: 0, droppedGapIds: [] },
+      charged: 0,
+      balanceAfter: (await getBalance()).available,
+    };
   }
   return billedAction({
     actionCode: "task_plan",
