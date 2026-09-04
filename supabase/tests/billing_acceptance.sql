@@ -542,5 +542,56 @@ begin
   perform assert_eq('重复结算被挡下', (r->>'ok')::boolean, false);
 end $$;
 
+-- =============================================================
+-- 异步作业超时（C2 验收 24）
+-- =============================================================
+do $$
+declare
+  u uuid := '99999999-9999-9999-9999-999999999999';
+  j uuid := gen_random_uuid();
+  a int; r jsonb;
+begin
+  delete from async_jobs where user_id = u;
+  delete from job_holds where user_id = u;
+  update quota_counters set credits_available = 0, credits_held = 0 where user_id = u;
+  delete from entitlements where user_id = u;
+  perform grant_credits(u, 'purchase', 100);
+
+  r := hold_for_job(u, j, 'interview_kit', 25, 'job-timeout');
+  insert into async_jobs (id, user_id, kind, status, hold_id, expires_at)
+  values (j, u, 'interview_kit', 'running', (r->>'hold_id')::uuid, now() - interval '1 minute');
+
+  select credits_available into a from quota_counters where user_id=u;
+  perform assert_eq('预扣后余额 75', a, 75);
+
+  perform assert_eq('C2 验收 24 · 扫到一个超时作业', sweep_expired_jobs(100), 1);
+  perform assert_eq('C2 验收 24 · 作业标为失败',
+    (select status from async_jobs where id=j), 'failed');
+  perform assert_eq('C2 验收 24 · 25 分退回',
+    (select credits_available from quota_counters where user_id=u), 100);
+  perform assert_eq('C2 验收 24 · 预扣归零',
+    (select credits_held from quota_counters where user_id=u), 0);
+  perform assert_eq('C2 验收 24 · 退回也写消费明细',
+    (select count(*)::int from usage_logs
+      where user_id=u and action_code='interview_kit' and succeeded=false), 1);
+
+  perform assert_eq('重复扫不重复退', sweep_expired_jobs(100), 0);
+
+  -- 没跑过头的不该被误伤
+  delete from async_jobs where user_id = u;
+  delete from job_holds where user_id = u;
+  r := hold_for_job(u, j, 'interview_kit', 25, 'job-alive');
+  insert into async_jobs (id, user_id, kind, status, hold_id, expires_at)
+  values (j, u, 'interview_kit', 'running', (r->>'hold_id')::uuid, now() + interval '10 minutes');
+  perform assert_eq('还在跑的作业不被扫', sweep_expired_jobs(100), 0);
+  perform assert_eq('它的钱还预扣着',
+    (select credits_held from quota_counters where user_id=u), 25);
+
+  -- billing_sweep 把作业超时也算进去
+  update async_jobs set expires_at = now() - interval '1 minute' where id = j;
+  r := billing_sweep(500);
+  perform assert_eq('billing_sweep 报告了超时作业数', (r->>'jobs_timed_out')::int, 1);
+end $$;
+
 \echo ''
 \echo '全部通过。'

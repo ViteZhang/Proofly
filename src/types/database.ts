@@ -1752,6 +1752,49 @@ export type Database = {
         };
         Relationships: [];
       };
+      async_jobs: {
+        Row: {
+          id: string;
+          user_id: string;
+          kind: "interview_kit" | "health_deep_scan";
+          status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+          hold_id: string | null;
+          input_ref: Json;
+          segments: Json;
+          current_segment: number;
+          error_message: string | null;
+          started_at: string | null;
+          finished_at: string | null;
+          expires_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          user_id?: string;
+          kind: "interview_kit" | "health_deep_scan";
+          status?: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+          hold_id?: string | null;
+          input_ref?: Json;
+          segments?: Json;
+          current_segment?: number;
+          error_message?: string | null;
+          started_at?: string | null;
+          finished_at?: string | null;
+          expires_at: string;
+        };
+        Update: {
+          status?: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+          hold_id?: string | null;
+          segments?: Json;
+          current_segment?: number;
+          error_message?: string | null;
+          started_at?: string | null;
+          finished_at?: string | null;
+          expires_at?: string;
+        };
+        Relationships: [];
+      };
       entitlements: {
         Row: {
           id: string;
@@ -2017,6 +2060,10 @@ export type Database = {
       billing_sweep: {
         Args: { p_limit?: number };
         Returns: Json;
+      };
+      sweep_expired_jobs: {
+        Args: { p_limit?: number };
+        Returns: number;
       };
       sweep_expired_holds: {
         Args: { p_limit?: number };
