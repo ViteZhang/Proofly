@@ -62,6 +62,11 @@ export type CheckLevel = "blocking" | "warning" | "info" | "pass";
 export type CheckOrigin = "gate" | "health";
 export type HealthScanKind = "quick" | "deep";
 export type HealthScanStatus = "running" | "done" | "failed";
+// ---- 计费（Step C1）----
+export type EntitlementSource =
+  | "purchase" | "grant_signup" | "grant_monthly" | "redeem" | "adjust";
+export type HoldStatus = "held" | "settled" | "released";
+export type FreeReason = "free_forever" | "free_quota" | "regen_window" | "budget_grace";
 
 export type Database = {
   public: {
@@ -1738,6 +1743,145 @@ export type Database = {
         };
         Relationships: [];
       };
+      entitlements: {
+        Row: {
+          id: string;
+          user_id: string;
+          source: EntitlementSource;
+          credits_total: number;
+          credits_used: number;
+          expires_at: string | null;
+          order_ref: string | null;
+          note: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          source: EntitlementSource;
+          credits_total: number;
+          credits_used?: number;
+          expires_at?: string | null;
+          order_ref?: string | null;
+          note?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          credits_used?: number;
+          expires_at?: string | null;
+          order_ref?: string | null;
+          note?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      quota_counters: {
+        Row: {
+          user_id: string;
+          credits_available: number;
+          credits_held: number;
+          free_chat_month: string;
+          free_chat_used: number;
+          chat_day: string;
+          chat_day_used: number;
+          fact_revision: number;
+          strategy_revision: number;
+          updated_at: string;
+        };
+        Insert: {
+          user_id?: string;
+          credits_available?: number;
+          credits_held?: number;
+          free_chat_month?: string;
+          free_chat_used?: number;
+          chat_day?: string;
+          chat_day_used?: number;
+          fact_revision?: number;
+          strategy_revision?: number;
+          updated_at?: string;
+        };
+        Update: {
+          credits_available?: number;
+          credits_held?: number;
+          free_chat_month?: string;
+          free_chat_used?: number;
+          chat_day?: string;
+          chat_day_used?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      credit_holds: {
+        // release_token 不在 Row 里：客户端按列级 GRANT 就读不到它，
+        // 类型上也别给出来，免得有人写了个 select 死在运行时。
+        Row: {
+          id: string;
+          user_id: string;
+          action_code: string;
+          credits: number;
+          status: HoldStatus;
+          idempotency_key: string;
+          job_ref: string | null;
+          fingerprint: string | null;
+          expires_at: string;
+          settled_at: string | null;
+          released_at: string | null;
+          release_reason: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      usage_logs: {
+        Row: {
+          id: string;
+          user_id: string;
+          hold_id: string | null;
+          action_code: string;
+          credits_charged: number;
+          free_reason: FreeReason | null;
+          llm_call_ids: Json;
+          input_tokens: number | null;
+          output_tokens: number | null;
+          cost_cents: number | null;
+          duration_ms: number | null;
+          succeeded: boolean;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      redeem_records: {
+        Row: {
+          id: string;
+          user_id: string;
+          code: string;
+          entitlement_id: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      user_profiles: {
+        Row: {
+          user_id: string;
+          nickname: string | null;
+          signup_source: string;
+          signup_grant_issued: boolean;
+          signup_grant_issued_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        // 只有 nickname 是列级授权可写的，其余客户端改不了。
+        Update: { nickname?: string | null };
+        Relationships: [];
+      };
     };
     Views: {
       task_priority: {
@@ -1802,6 +1946,73 @@ export type Database = {
           pending_metrics: Json;
           similarity: number;
         }[];
+      };
+      ensure_quota_counter: {
+        Args: { p_user?: string };
+        Returns: undefined;
+      };
+      hold_credits: {
+        Args: {
+          p_user: string;
+          p_action: string;
+          p_credits: number;
+          p_key: string;
+          p_fingerprint?: string | null;
+          p_ttl_min?: number;
+          p_job_ref?: string | null;
+        };
+        // { hold_id, release_token, balance_after, idempotent }
+        Returns: Json;
+      };
+      settle_hold: {
+        Args: { p_hold: string; p_usage_meta?: Json };
+        Returns: undefined;
+      };
+      release_hold: {
+        Args: {
+          p_hold: string;
+          p_reason: string;
+          p_release_token?: string | null;
+          p_usage_meta?: Json;
+        };
+        Returns: undefined;
+      };
+      reconcile_quota: {
+        Args: { p_user?: string };
+        Returns: Json;
+      };
+      log_free_usage: {
+        Args: {
+          p_user: string;
+          p_action: string;
+          p_reason: string;
+          p_fingerprint?: string | null;
+          p_succeeded?: boolean;
+          p_usage_meta?: Json;
+        };
+        Returns: undefined;
+      };
+      tag_usage_fingerprint: {
+        Args: { p_hold: string; p_fingerprint: string };
+        Returns: undefined;
+      };
+      consume_free_chat: {
+        Args: { p_user: string; p_limit: number };
+        Returns: boolean;
+      };
+      bump_chat_day: {
+        Args: { p_user: string; p_cap: number };
+        Returns: boolean;
+      };
+      check_regen_free: {
+        Args: {
+          p_user: string;
+          p_action: string;
+          p_fingerprint: string;
+          p_window_hours: number;
+          p_max: number;
+        };
+        Returns: boolean;
       };
       recompute_atom_evidence: {
         Args: { p_atom: string };
