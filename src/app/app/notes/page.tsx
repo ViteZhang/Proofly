@@ -1,11 +1,16 @@
 import { NotesChat } from "@/components/notes/NotesChat";
+import { getBalance } from "@/lib/queries/billing";
 import { loadMessages } from "@/lib/queries/chat";
 import { chatBusy } from "./actions";
 
 // 单列 760，底部固定输入框。外壳是 Topbar 56 + main 上下各 28，
 // 所以这里减掉 112 才能让消息区自己滚、输入框钉在底下。
 export default async function NotesPage() {
-  const [initial, busy] = await Promise.all([loadMessages(), chatBusy()]);
+  const [initial, busy, balance] = await Promise.all([
+    loadMessages(),
+    chatBusy(),
+    getBalance(),
+  ]);
 
   return (
     <div className="mx-auto flex h-[calc(100vh-112px)] max-w-[760px] flex-col">
@@ -17,7 +22,12 @@ export default async function NotesPage() {
       </div>
 
       <div className="min-h-0 flex-1">
-        <NotesChat initial={initial} busy={busy} />
+        <NotesChat
+          initial={initial}
+          busy={busy}
+          freeLeft={balance.freeChatLeft}
+          freeLimit={balance.freeChatLimit}
+        />
       </div>
     </div>
   );

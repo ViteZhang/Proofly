@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 
+import { billedAction, chatDailyGate, idempotencyKey } from "@/lib/billing/action";
 import { chitchatReply } from "@/lib/chat/chitchat";
 import { classifyMessage } from "@/lib/chat/classify";
 import {
@@ -16,6 +17,7 @@ import { formatTurns } from "@/lib/chat/turns";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import { markNudgeResponded, maybeNudge } from "@/lib/nudge";
 import { loadMessages, signImages } from "@/lib/queries/chat";
+import { createSink, totals, withUsageSink } from "@/lib/telemetry/usage";
 import { createClient } from "@/lib/supabase/server";
 import type { ChatKind, Json } from "@/types/database";
 
@@ -184,11 +186,29 @@ export async function retryMessage(messageId: string): Promise<ActionResult<Send
 
 // ---- 四个分支 ----
 
+/**
+ * 一轮对话的计费归属（C2.2）。
+ *
+ *   Stage A 分类
+ *     ├ CHITCHAT / QUERY / AMBIGUOUS → chat_smalltalk（免费，计入日上限）
+ *     └ RECORD                        → chat_record（每月前 20 轮免费）
+ *
+ * 顺序上有两处讲究：
+ *
+ * 1. **先过日上限，再调模型。** 闸门是防刷，被拦下的那一轮不该已经
+ *    烧掉一次分类调用。
+ * 2. **分类调用的用量并进这一轮的账。** 它跑在计费决定之前 —— 得先
+ *    知道用户说的是什么，才知道这轮算记录还是闲聊 —— 但那笔 token
+ *    属于这一轮，不能凭空消失。OCR 同理。
+ */
 async function process(
   userMessageId: string,
   body: string,
   imagePath: string | null,
 ): Promise<ActionResult<ChatMessageView[]>> {
+  const gate = await chatDailyGate();
+  if (!gate.ok) return fail(gate.message);
+
   const history = await loadMessages();
   const recentTurns = formatTurns(
     history.filter((m) => m.id !== userMessageId).map((m) => ({ role: m.role, content: m.content })),
@@ -196,9 +216,12 @@ async function process(
 
   // 图先认字。Stage A 的提示词里没有图片这一格，所以只有一种情况需要它：
   // 用户光贴了张图什么都没说——那就拿认出来的字当他说的话。
+  // 这张收集单收着「计费决定之前」的调用：认字与分类。
+  const preSink = createSink();
+
   let ocr = "";
   if (imagePath !== null) {
-    const r = await ocrChatImage(imagePath);
+    const r = await withUsageSink(preSink, () => ocrChatImage(imagePath));
     if (r.error !== null) return fail(r.error);
     ocr = r.text;
   }
@@ -211,13 +234,50 @@ async function process(
 
   const said = body.trim() === "" ? ocr : body;
 
-  const r = await classifyMessage({ userMessage: said, recentTurns });
+  const r = await withUsageSink(preSink, () =>
+    classifyMessage({ userMessage: said, recentTurns }),
+  );
   if (!r.ok) return fail(r.error);
 
-  switch (r.data.intent) {
+  const pre = totals(preSink);
+  const priorUsage = {
+    inputTokens: pre.inputTokens,
+    outputTokens: pre.outputTokens,
+    durationMs: pre.durationMs,
+  };
+  // 日上限上面已经过了，别让计费层再加一次。
+  const billing = { priorUsage, skipChatCap: true } as const;
+
+  if (r.data.intent !== "RECORD") {
+    // 闲聊、查询、说不清 —— 都算 chat_smalltalk：不收费、不吃记录额度，
+    // 但它确实调了模型（分类那一次），所以照样留痕、照样计入日上限。
+    return billedAction({
+      actionCode: "chat_smalltalk",
+      idempotencyKey: idempotencyKey("chat_smalltalk", [userMessageId]),
+      ...billing,
+      run: () => runSmalltalk(r.data, said),
+    });
+  }
+
+  return billedAction({
+    actionCode: "chat_record",
+    idempotencyKey: idempotencyKey("chat_record", [userMessageId]),
+    ...billing,
+    run: () => runRecordTurn(said, recentTurns, imagePath, ocr),
+  });
+}
+
+type Classified = { intent: string; clarify: string; query_subject: string };
+
+/** 非记录的三个分支。原样搬过来，一行没动。 */
+async function runSmalltalk(
+  data: Classified,
+  said: string,
+): Promise<ActionResult<ChatMessageView[]>> {
+  switch (data.intent) {
     case "QUERY": {
       const answer = await answerQuery({
-        subject: r.data.query_subject,
+        subject: data.query_subject,
         userMessage: said,
       });
       return say(renderQueryAnswer(answer), "query_answer", answer as unknown as Json);
@@ -229,28 +289,37 @@ async function process(
     case "AMBIGUOUS": {
       // clarify 空了也不能默认往 RECORD 走——那正是这个分支要挡住的事。
       const q =
-        r.data.clarify.trim() === ""
+        data.clarify.trim() === ""
           ? "这条我没太看明白说的是哪个项目，能补一句吗？"
-          : r.data.clarify.trim();
+          : data.clarify.trim();
       return say(q, "clarify");
     }
 
-    case "RECORD": {
-      const run = await runRecord({
-        userMessage: said,
-        recentTurns,
-        imagePath,
-        imageOcrText: ocr,
-      });
-      if (!run.ok) return fail(run.error);
-      if (run.data.units === 0) {
-        // Stage A 说这是要记的事，Stage B 却拆不出东西来。
-        // 两边不一致时不猜，问一句。
-        return say("这句我没拆出能记进档案的东西，能再说具体点吗？", "clarify");
-      }
-      return ok(run.data.messages);
-    }
+    default:
+      return say("这条我没太看明白说的是哪个项目，能补一句吗？", "clarify");
   }
+}
+
+/** RECORD 分支。原样搬过来，一行没动。 */
+async function runRecordTurn(
+  said: string,
+  recentTurns: string,
+  imagePath: string | null,
+  ocr: string,
+): Promise<ActionResult<ChatMessageView[]>> {
+  const run = await runRecord({
+    userMessage: said,
+    recentTurns,
+    imagePath,
+    imageOcrText: ocr,
+  });
+  if (!run.ok) return fail(run.error);
+  if (run.data.units === 0) {
+    // Stage A 说这是要记的事，Stage B 却拆不出东西来。
+    // 两边不一致时不猜，问一句。
+    return say("这句我没拆出能记进档案的东西，能再说具体点吗？", "clarify");
+  }
+  return ok(run.data.messages);
 }
 
 async function say(

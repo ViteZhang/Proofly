@@ -12,13 +12,18 @@
 // 上游：《商业化 C2》切片 C2.1
 // =============================================================
 
-import { ACTION_LABELS, ACTION_PRICES } from "@/config/plan";
+import { ACTION_LABELS, ACTION_PRICES, FREE_QUOTA } from "@/config/plan";
 import { PROMPT_VERSION } from "@/config/prompts";
 import { fail, type ActionResult } from "@/lib/domain";
 import type { FreeReason } from "@/types/database";
 
 import { computeFingerprint, type FingerprintCtx } from "./fingerprint";
-import { CancelledError, withCredits, type RunContext } from "./withCredits";
+import {
+  CancelledError,
+  DAILY_CAP_MESSAGE,
+  withCredits,
+  type RunContext,
+} from "./withCredits";
 
 /** run 里业务判定失败时抛它。计费层会 RELEASE，然后把这条消息原样带回。 */
 // 动态 import：这个模块要能在 Next 之外被单测加载，而
@@ -75,6 +80,10 @@ export type BilledActionOpts<T> = {
   idempotencyKey: string;
   isAsync?: boolean;
   jobRef?: string | null;
+  /** 发生在 run() 之外、但属于这一轮的用量（随手记的分类调用） */
+  priorUsage?: { inputTokens: number | null; outputTokens: number | null; durationMs: number };
+  /** 调用方已经自己过过每日对话上限了 */
+  skipChatCap?: boolean;
   /** 成本并进了别的动作的标价 —— 记一笔 bundled，不收费。 */
   bundled?: boolean;
   validate?: (result: T) => boolean;
@@ -110,6 +119,8 @@ export async function billedAction<T>(
     idempotencyKey: opts.idempotencyKey,
     isAsync: opts.isAsync,
     jobRef: opts.jobRef,
+    priorUsage: opts.priorUsage,
+    skipChatCap: opts.skipChatCap,
     validate: opts.validate,
     run: async (ctx) => {
       const r = await opts.run(ctx);
@@ -142,6 +153,28 @@ export async function billedAction<T>(
   }
 
   return { ok: false, code: res.code, error: res.message };
+}
+
+/**
+ * 每日对话总轮次的闸门。
+ *
+ * 单独拎出来是因为顺序要紧：**先拦，再花钱**。随手记要先调模型分类才
+ * 知道这一轮算记录还是闲聊，如果把闸门留在计费层里，被拦下的那一轮
+ * 已经白烧了一次分类调用。
+ *
+ * 这是防刷不是计费 —— 不看余额、不扣分，付费用户撞上一样被拦。
+ */
+export async function chatDailyGate(): Promise<{ ok: boolean; message: string }> {
+  const userId = await currentUserId();
+  if (!userId) return { ok: false, message: "登录状态过期了，刷新一下页面" };
+  const supabase = await db();
+  const { data: allowed } = await supabase.rpc("bump_chat_day", {
+    p_user: userId,
+    p_cap: FREE_QUOTA.chat_daily_hard_cap,
+  });
+  return allowed
+    ? { ok: true, message: "" }
+    : { ok: false, message: DAILY_CAP_MESSAGE };
 }
 
 /** 免费动作的留痕。不 HOLD、不扣分，但成本要看得见。 */

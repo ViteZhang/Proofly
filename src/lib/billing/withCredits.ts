@@ -90,6 +90,16 @@ export type WithCreditsOpts<T> = {
   validate?: (result: T) => boolean;
   run: (ctx: RunContext) => Promise<T>;
   /**
+   * 已经发生、但发生在 run() 之外的用量。
+   *
+   * 随手记是唯一需要它的地方：得先调模型分类，才知道这一轮该算记录
+   * 还是闲聊。分类那次调用的 token 属于这一轮，不能因为它跑在计费决定
+   * 之前就凭空消失。
+   */
+  priorUsage?: { inputTokens: number | null; outputTokens: number | null; durationMs: number };
+  /** 调用方已经自己过过每日对话上限了，别再加一次。 */
+  skipChatCap?: boolean;
+  /**
    * 成本并进了另一个动作的标价（例如 JD 拆解并进「解析并评估」）。
    * 不 HOLD、不扣分，但写一条 bundled 的留痕 —— 它确实烧了 token。
    */
@@ -172,10 +182,15 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
   /** 动作执行到此刻为止的用量。失败路径也要调它 —— 失败一样烧 token。 */
   const usageJson = (): Json => {
     const t = totals(sink);
+    const prior = opts.priorUsage;
+    const add = (a: number | null, b: number | null | undefined) =>
+      a === null && (b === null || b === undefined) ? undefined : (a ?? 0) + (b ?? 0);
     return metaToJson({
-      inputTokens: reported.inputTokens ?? t.inputTokens ?? undefined,
-      outputTokens: reported.outputTokens ?? t.outputTokens ?? undefined,
-      durationMs: reported.durationMs ?? (t.callCount > 0 ? t.durationMs : undefined),
+      inputTokens: reported.inputTokens ?? add(t.inputTokens, prior?.inputTokens),
+      outputTokens: reported.outputTokens ?? add(t.outputTokens, prior?.outputTokens),
+      durationMs:
+        reported.durationMs ??
+        (t.callCount > 0 || prior ? t.durationMs + (prior?.durationMs ?? 0) : undefined),
       costCents: reported.costCents,
       llmCallIds: reported.llmCallIds,
     });
@@ -262,7 +277,7 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
   // 日上限先于一切对话分支：闲聊不计费也有真实成本（约 ¥0.008 一次），
   // 得有个刹车。它不看余额、不扣分，付费用户撞上一样被拦 ——
   // 这是防刷，不是计费。
-  if (CHAT_ACTIONS.has(actionCode)) {
+  if (CHAT_ACTIONS.has(actionCode) && !opts.skipChatCap) {
     const { data: allowed } = await supabase.rpc("bump_chat_day", {
       p_user: userId,
       p_cap: FREE_QUOTA.chat_daily_hard_cap,
