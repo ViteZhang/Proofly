@@ -81,3 +81,44 @@ export async function createBatch(raw: NewBatchInput): Promise<ActionResult<NewB
   }
   return fail("连着三次都撞了码，这不正常，先别重试，看一眼日志");
 }
+
+/**
+ * 单码停用 / 恢复。
+ *
+ * 理由只在停用时必填 —— 恢复是撤销，不是决策。
+ */
+export async function toggleCode(
+  codeId: string,
+  reason: string | null,
+): Promise<ActionResult<{ status: "active" | "disabled" }>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_toggle_code", {
+    p_id: codeId,
+    p_reason: reason,
+  });
+  if (error) return fail(adminError(error.message));
+  revalidatePath("/admin", "layout");
+  return ok(data as unknown as { status: "active" | "disabled" });
+}
+
+/**
+ * 整批作废。不可逆。
+ *
+ * confirmName 要和批次名一字不差。这一条数据库里也验一遍 —— 只在弹窗
+ * 里做的硬要求，是一句自我要求。
+ */
+export async function revokeBatch(
+  batchId: string,
+  reason: string,
+  confirmName: string,
+): Promise<ActionResult<{ revokedCodes: number }>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_revoke_batch", {
+    p_id: batchId,
+    p_reason: reason,
+    p_confirm_name: confirmName,
+  });
+  if (error) return fail(adminError(error.message));
+  revalidatePath("/admin", "layout");
+  return ok({ revokedCodes: (data as unknown as { revoked_codes: number }).revoked_codes });
+}

@@ -2187,6 +2187,14 @@ export type Database = {
         Args: { p_id: string };
         Returns: Json;
       };
+      admin_toggle_code: {
+        Args: { p_id: string; p_reason?: string | null };
+        Returns: Json;
+      };
+      admin_revoke_batch: {
+        Args: { p_id: string; p_reason: string; p_confirm_name: string };
+        Returns: Json;
+      };
       admin_create_batch: {
         Args: {
           p_name: string;

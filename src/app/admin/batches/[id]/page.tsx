@@ -8,6 +8,9 @@
 
 import { notFound } from "next/navigation";
 
+import { CodeActions } from "@/components/admin/CodeActions";
+import { RevokeBatch } from "@/components/admin/RevokeBatch";
+
 import {
   Card,
   Code,
@@ -63,6 +66,18 @@ export default async function BatchDetailPage({
         >
           导出未核销
         </a>
+        {/*
+          作废在页头、红色实心、还要打字确认；停用在行内、文字按钮。
+          可逆与不可逆必须一眼分得开（方案 8.2 二）。
+        */}
+        {!b.revoked_at && (
+          <RevokeBatch
+            batchId={b.id}
+            batchName={b.name}
+            liveCodes={codes.filter((c) => c.status !== "revoked").length}
+            redeemedCount={b.redeemed}
+          />
+        )}
       </PageHead>
 
       {b.revoked_at && (
@@ -124,6 +139,7 @@ export default async function BatchDetailPage({
                   <Th>状态</Th>
                   <Th>核销账号</Th>
                   <Th>核销时间</Th>
+                  <Th right>操作</Th>
                 </tr>
               </thead>
               <tbody>
@@ -159,6 +175,13 @@ export default async function BatchDetailPage({
                         {done
                           ? c.redemptions!.map((r, i) => <div key={i}>{when(r.at).main}</div>)
                           : "—"}
+                      </Td>
+                      <Td top right>
+                        {c.status === "revoked" ? (
+                          <span style={{ color: "var(--mute)" }}>—</span>
+                        ) : (
+                          <CodeActions codeId={c.id} disabled={c.status === "disabled"} />
+                        )}
                       </Td>
                     </tr>
                   );
