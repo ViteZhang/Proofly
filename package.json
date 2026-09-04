@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "pnpm guard:plan && next build",
     "start": "next start",
     "lint": "eslint",
     "eval:extract": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/eval-extract.ts",
@@ -24,7 +24,8 @@
     "gate:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/resume/gate.test.ts",
     "interview:probe": "node --import ./scripts/ts-resolve.mjs scripts/interview-probe.ts",
     "health:probe": "node --import ./scripts/ts-resolve.mjs scripts/health-probe.ts",
-    "assess:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/assess-probe.ts"
+    "assess:probe": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/assess-probe.ts",
+    "guard:plan": "node --import ./scripts/ts-resolve.mjs --test src/config/plan.guard.test.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.8",
