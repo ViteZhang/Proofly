@@ -34,7 +34,15 @@ export default async function BatchesPage({
       <PageHead
         title="批次"
         desc="一个批次是一次发放决策。码只是它的实例，所以「为什么发」记在批次上，且必填。"
-      />
+      >
+        <Link
+          href="/admin/new"
+          className="inline-flex h-9 flex-none items-center rounded-btn px-4 text-[13.5px] font-medium"
+          style={{ background: "var(--ink)", color: "#fff" }}
+        >
+          新建批次
+        </Link>
+      </PageHead>
 
       <Filters base="/admin/batches" purpose={purpose} q={q} placeholder="搜批次名或码" />
 

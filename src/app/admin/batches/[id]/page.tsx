@@ -54,7 +54,16 @@ export default async function BatchDetailPage({
         title={b.name}
         back={{ href: "/admin/batches", label: "批次" }}
         desc={`${PURPOSE_LABEL[b.purpose] ?? b.purpose} · ${b.codes} 张 × ${b.credits_each} 分 · ${date(b.created_at)} 创建 · ${b.creator}`}
-      />
+      >
+        {/* 导出只带未核销的明文码 —— 已核销的在页面上就是打码的 */}
+        <a
+          href={`/admin/batches/${b.id}/export`}
+          className="inline-flex h-9 flex-none items-center rounded-btn px-4 text-[13.5px] font-medium"
+          style={{ background: "var(--card)", border: "1px solid var(--line)" }}
+        >
+          导出未核销
+        </a>
+      </PageHead>
 
       {b.revoked_at && (
         <div

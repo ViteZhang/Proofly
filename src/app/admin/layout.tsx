@@ -38,7 +38,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           { title: "总览", items: [{ href: "/admin", label: "概览" }] },
           {
             title: "发放",
-            items: [{ href: "/admin/batches", label: "批次" }],
+            items: [
+              { href: "/admin/batches", label: "批次" },
+              { href: "/admin/new", label: "新建批次" },
+            ],
           },
           {
             title: "追踪",

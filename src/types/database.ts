@@ -2183,6 +2183,24 @@ export type Database = {
         Args: { p_purpose?: string | null; p_q?: string | null; p_limit?: number };
         Returns: Json;
       };
+      admin_batch_codes: {
+        Args: { p_id: string };
+        Returns: Json;
+      };
+      admin_create_batch: {
+        Args: {
+          p_name: string;
+          p_purpose: string;
+          p_reason: string;
+          p_credits_each: number;
+          p_max_uses_each: number | null;
+          p_code_expires_at: string | null;
+          p_credit_valid_days: number | null;
+          p_bound_email: string | null;
+          p_codes: string[];
+        };
+        Returns: Json;
+      };
       claim_signup_grant: {
         Args: {
           p_user: string;
