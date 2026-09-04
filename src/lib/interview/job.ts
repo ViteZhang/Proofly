@@ -30,6 +30,14 @@ import {
   caseUser,
   probeUser,
 } from "@/lib/llm/interview-prompts";
+import {
+  createSink,
+  failJob as billingFailJob,
+  markSegment,
+  segmentDone,
+  succeedJob,
+} from "@/lib/billing/job";
+import { withUsageSink } from "@/lib/telemetry/usage";
 import { createClient } from "@/lib/supabase/server";
 import { parseStringList } from "@/lib/domain";
 import {
@@ -366,10 +374,72 @@ async function stage(kitId: string, s: KitJobStage): Promise<void> {
  * 可重入：从头再跑一次是安全的，落库按题型整批替换，练习状态照样继承。
  * 重入会重花一次模型钱，所以只在心跳停了、用户明确要求时才续。
  */
+/**
+ * 完整性校验的下限。
+ *
+ * 提示词要的是深挖题 15–20 道、案例题 15–24 道，这里各留出被门禁刷掉
+ * 几道的余量。低于这个数说明这次生成不完整 —— **付了 25 分拿到半个
+ * 题包是最差的体验**，比彻底失败还差：失败至少钱还在。
+ */
+const MIN_PROBE = 12;
+const MIN_CASE = 12;
+
+/**
+ * 截断的嗅探。
+ *
+ * 硬截断（撞上 max_tokens）在 callLLM 那层就报错了，走不到这里。
+ * 这条是补一层：最后一道题的应答骨架空着或只剩个开头，多半是输出
+ * 在收尾时被砍了。
+ */
+function lastQuestionComplete(outline: string[] | null | undefined): boolean {
+  if (!outline || outline.length === 0) return false;
+  const last = outline[outline.length - 1]?.trim() ?? "";
+  return outline.length >= 2 || last.length >= 8;
+}
+
+/**
+ * 完整性校验（技术方案 0.2）。
+ *
+ * 不通过就退分，不接受「给用户一部分总比没有好」—— 他付的是一整套
+ * 题包的钱，拿到半套是最差的结果：既没准备好，钱也没了。
+ */
+async function verifyKit(
+  kitId: string,
+  probeCount: number,
+  caseCount: number,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (probeCount < MIN_PROBE) {
+    return { ok: false, reason: `项目深挖题只出了 ${probeCount} 道，这套题包不完整` };
+  }
+  if (caseCount < MIN_CASE) {
+    return { ok: false, reason: `案例题只出了 ${caseCount} 道，这套题包不完整` };
+  }
+
+  const supabase = await createClient();
+  const { data: last } = await supabase
+    .from("interview_questions")
+    .select("answer_outline")
+    .eq("kit_id", kitId)
+    .order("order_index", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const outline = Array.isArray(last?.answer_outline)
+    ? (last.answer_outline as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+  if (!lastQuestionComplete(outline)) {
+    return { ok: false, reason: "最后一道题的应答骨架不完整，这次生成多半被截断了" };
+  }
+  return { ok: true };
+}
+
 export async function runKitJob(kitId: string): Promise<void> {
   const beat = setInterval(() => {
     void patch(kitId, { heartbeat_at: new Date().toISOString() });
   }, HEARTBEAT_MS);
+
+  // 这一轮所有模型调用的用量都记进这张单子，结算时一起落账。
+  const sink = createSink();
 
   try {
     const supabase = await createClient();
@@ -398,38 +468,66 @@ export async function runKitJob(kitId: string): Promise<void> {
     const rejected: RejectedQuestion[] = [];
 
     // ---- 阶段一：项目深挖题 ----
-    await stage(kitId, "probing");
-    const probeResult = await runProbes(input, atoms);
-    if (typeof probeResult === "string") {
-      await failJob(kitId, `出项目深挖题时失败：${probeResult}`);
-      return;
+    //
+    // 断点续跑：上次已经出好的深挖题不重跑。用户已经等过那十分钟了，
+    // 让他再等一遍是第二次伤害，而且这一段的模型钱也白花。
+    let probeWritten = 0;
+    if (await segmentDone(kitId, "probe")) {
+      const { count } = await supabase
+        .from("interview_questions")
+        .select("id", { count: "exact", head: true })
+        .eq("kit_id", kitId)
+        .eq("kind", "project_probe");
+      // 落库的题数对不上就当那段没跑成，重跑。
+      if ((count ?? 0) >= MIN_PROBE) {
+        probeWritten = count ?? 0;
+        warnings.push("项目深挖题沿用上次已经生成好的，这次只跑案例题");
+      }
     }
-    warnings.push(...probeResult.warnings);
-    rejected.push(...probeResult.rejected);
 
-    const probeWrite = await writeKind(kitId, ["project_probe"], probeResult.questions, 0);
-    if (!probeWrite) {
-      await failJob(kitId, "项目深挖题写入失败");
-      return;
+    if (probeWritten === 0) {
+      await stage(kitId, "probing");
+      const probeResult = await withUsageSink(sink, () => runProbes(input, atoms));
+      if (typeof probeResult === "string") {
+        await billingFailJob(kitId, `出项目深挖题时失败：${probeResult}`, sink);
+        await failJob(kitId, `出项目深挖题时失败：${probeResult}`);
+        return;
+      }
+      warnings.push(...probeResult.warnings);
+      rejected.push(...probeResult.rejected);
+
+      const probeWrite = await writeKind(kitId, ["project_probe"], probeResult.questions, 0);
+      if (!probeWrite) {
+        await billingFailJob(kitId, "项目深挖题写入失败", sink);
+        await failJob(kitId, "项目深挖题写入失败");
+        return;
+      }
+      probeWritten = probeWrite.written;
+      await markSegment(kitId, "probe", "done", `${probeWrite.written} 道已生成`);
+      if (probeWrite.inherited > 0) {
+        warnings.push(`${probeWrite.inherited} 道深挖题继承了上一版的练习状态`);
+      }
+      if (probeWrite.carried > 0) {
+        warnings.push(`${probeWrite.carried} 道标着「答不好」的旧深挖题这一版没再出，已原样保留`);
+      }
+      // 深挖题先落库先能看：这十几道题正是最该先准备的那些。
+      await patch(kitId, {
+        probe_count: probeWrite.written,
+        warnings: warnings as unknown as Json,
+        rejected: rejected as unknown as Json,
+        heartbeat_at: new Date().toISOString(),
+      });
     }
-    if (probeWrite.inherited > 0) {
-      warnings.push(`${probeWrite.inherited} 道深挖题继承了上一版的练习状态`);
-    }
-    if (probeWrite.carried > 0) {
-      warnings.push(`${probeWrite.carried} 道标着「答不好」的旧深挖题这一版没再出，已原样保留`);
-    }
-    // 深挖题先落库先能看：这十几道题正是最该先准备的那些。
-    await patch(kitId, {
-      probe_count: probeWrite.written,
-      warnings: warnings as unknown as Json,
-      rejected: rejected as unknown as Json,
-      heartbeat_at: new Date().toISOString(),
-    });
 
     // ---- 阶段二：案例题 ----
     await stage(kitId, "casing");
-    const caseResult = await runCases(input, atoms, probeWrite.written);
+    const caseResult = await withUsageSink(sink, () =>
+      runCases(input, atoms, probeWritten),
+    );
     if (typeof caseResult === "string") {
+      // 深挖题已经落库了，但题包不完整 —— 按失败处理，钱退回去。
+      // 「给用户一部分总比没有好」在这里不成立：他付的是完整题包的钱。
+      await billingFailJob(kitId, `案例题这次没出上：${caseResult}`, sink);
       // 深挖题已经落库了，不算全盘失败 —— 但要说清楚少了半边。
       await patch(kitId, {
         job_status: "failed",
@@ -449,10 +547,20 @@ export async function runKitJob(kitId: string): Promise<void> {
       kitId,
       ["product_case", "ai_tech", "data_case"],
       caseResult.questions,
-      probeWrite.written,
+      probeWritten,
     );
     if (!caseWrite) {
+      await billingFailJob(kitId, "案例题写入失败", sink);
       await failJob(kitId, "案例题写入失败");
+      return;
+    }
+    await markSegment(kitId, "case", "done", `${caseWrite.written} 道已生成`);
+
+    // ---- 完整性校验 ----
+    const verdict = await verifyKit(kitId, probeWritten, caseWrite.written);
+    if (!verdict.ok) {
+      await billingFailJob(kitId, verdict.reason, sink);
+      await failJob(kitId, verdict.reason);
       return;
     }
     if (caseWrite.inherited > 0) {
@@ -466,17 +574,21 @@ export async function runKitJob(kitId: string): Promise<void> {
       job_status: "done",
       job_stage: null,
       error_message: null,
-      probe_count: probeWrite.written,
+      probe_count: probeWritten,
       case_count: caseWrite.written,
       generated_at: new Date().toISOString(),
       warnings: warnings as unknown as Json,
       rejected: rejected as unknown as Json,
       heartbeat_at: new Date().toISOString(),
     });
+
+    await succeedJob(kitId, sink);
   } catch (e) {
     // 后台作业没人接住异常。吞掉但写进 error_message，
     // 否则作业会一直标着 running，界面看着跟死了一样还不报错。
-    await failJob(kitId, e instanceof Error ? e.message : "出题时出了意外");
+    const msg = e instanceof Error ? e.message : "出题时出了意外";
+    await billingFailJob(kitId, msg, sink);
+    await failJob(kitId, msg);
   } finally {
     clearInterval(beat);
   }

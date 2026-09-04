@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import {
+  cancelKitJob,
   getKitJobProgress,
   resumeKitJob,
   type KitJobProgress,
@@ -34,6 +35,7 @@ export function KitJobPanel({
   const [p, setP] = useState<KitJobProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const settledSent = useRef(false);
   // 深挖题刚落库那一下要刷一次页面，否则那十几道题在下面看不到。
   const probeShown = useRef(0);
@@ -132,11 +134,67 @@ export function KitJobPanel({
           </Button>
         )}
       </div>
-      {running && (
-        <p className="mt-1.5 text-[12.5px]" style={{ color: "var(--mute)" }}>
-          出题是两次大生成，一次十来分钟。可以关掉页面，作业在后台接着跑。
-        </p>
+      {p.segments.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+          {p.segments.map((s) => (
+            <span
+              key={s.name}
+              className="inline-flex items-center gap-1.5"
+              style={{ color: s.status === "done" ? "var(--proof)" : "var(--mute)" }}
+            >
+              <span
+                aria-hidden
+                className="inline-block h-[7px] w-[7px] rounded-full"
+                style={{
+                  background: s.status === "done" ? "var(--proof)" : "var(--line)",
+                }}
+              />
+              {s.label}
+              {s.status === "done" && s.note ? ` · ${s.note}` : ""}
+            </span>
+          ))}
+        </div>
       )}
+
+      {running && (
+        <>
+          <p className="mt-1.5 text-[12.5px]" style={{ color: "var(--mute)" }}>
+            出题是两次大生成，一次十来分钟。你可以先去别的页面，好了我会提示你。
+          </p>
+          <div className="mt-2.5">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={cancelling}
+              onClick={() => {
+                setCancelling(true);
+                void cancelKitJob(p.kitId).then(() => {
+                  setCancelling(false);
+                  settledSent.current = false;
+                  setNonce((n) => n + 1);
+                });
+              }}
+            >
+              {cancelling
+                ? "正在取消…"
+                : `取消（${p.heldCredits ?? 25} 分会退回）`}
+            </Button>
+          </div>
+        </>
+      )}
+
+      {/*
+        断点续跑的提示。已经跑完的段不会重跑，也不额外扣分 ——
+        这是「失败不由用户买单」在长任务上的落地，得让他看见。
+      */}
+      {!running && p.segments.some((s) => s.status === "done") &&
+        p.segments.some((s) => s.status !== "done") && (
+          <p className="mt-1.5 text-[12.5px]" style={{ color: "var(--slate)" }}>
+            上次跑到一半断了。
+            {p.segments.find((s) => s.status === "done")?.label}
+            已经生成好了，这次只跑剩下的，不额外扣分。
+          </p>
+        )}
     </Box>
   );
 }

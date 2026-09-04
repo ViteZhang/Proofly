@@ -15,6 +15,13 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { fingerprintFor } from "@/lib/billing/action";
+import {
+  cancelJob,
+  getJob,
+  startJob as startBilledJob,
+  type Segment,
+} from "@/lib/billing/job";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import { runKitJob, type RejectedQuestion } from "@/lib/interview/job";
 import { createClient } from "@/lib/supabase/server";
@@ -45,7 +52,29 @@ export type KitJobProgress = {
   settled: boolean;
   /** 还标着 running，但心跳早停了 —— 跑它的进程多半已经没了。 */
   stalled: boolean;
+  /** 分段进度。不是无限转圈，用户看得见跑到哪了。 */
+  segments: Segment[];
+  /** 预扣中的分数。没有就是已经结算或已经退回。 */
+  heldCredits: number | null;
 };
+
+/** 两段：项目深挖题、案例题。断点续跑按段跳。 */
+const KIT_SEGMENTS = [
+  { name: "probe", label: "项目深挖题" },
+  { name: "case", label: "案例题" },
+];
+
+/** 开工前先把 25 分预扣住。余额不够就别让作业跑起来。 */
+async function holdKit(kitId: string, versionId: string) {
+  return startBilledJob({
+    jobId: kitId,
+    kind: "interview_kit",
+    actionCode: "interview_kit",
+    fingerprint: await fingerprintFor("interview_kit", { resumeVersionId: versionId }),
+    inputRef: { resume_version_id: versionId },
+    segments: KIT_SEGMENTS,
+  });
+}
 
 const STAGE_COPY: Record<KitJobStage, string> = {
   probing: "正在出项目深挖题",
@@ -117,6 +146,9 @@ export async function startKitJob(versionId: string): Promise<ActionResult<strin
     const alive = existing.job_status === "running" && Date.now() - beat < STALE_MS;
     if (alive) return ok(existing.id);
 
+    const held = await holdKit(existing.id, versionId);
+    if (!held.ok) return fail(held.error);
+
     await supabase
       .from("interview_kits")
       .update({
@@ -150,9 +182,41 @@ export async function startKitJob(versionId: string): Promise<ActionResult<strin
     .single();
   if (error || !created) return fail(`没能建起出题作业：${error?.message ?? "未知原因"}`);
 
+  const held = await holdKit(created.id, versionId);
+  if (!held.ok) {
+    // 预扣没成就别把一个永远跑不动的题包留在库里。
+    await supabase.from("interview_kits").delete().eq("id", created.id);
+    return fail(held.error);
+  }
+
   after(() => runKitJob(created.id));
   revalidatePath("/app/interview");
   return ok(created.id);
+}
+
+/**
+ * 用户中途取消。
+ *
+ * 25 分退回，**已经跑完的段保留** —— 下次重新生成时跳过，不额外扣分。
+ */
+export async function cancelKitJob(kitId: string): Promise<ActionResult<{ refunded: number }>> {
+  if (!uuid.safeParse(kitId).success) return fail("题包标识不对");
+
+  const r = await cancelJob(kitId);
+
+  const supabase = await createClient();
+  await supabase
+    .from("interview_kits")
+    .update({
+      job_status: "failed",
+      job_stage: null,
+      error_message: "这次生成被取消了，分数已经退回",
+      heartbeat_at: new Date().toISOString(),
+    })
+    .eq("id", kitId);
+
+  revalidatePath("/app/interview");
+  return ok({ refunded: r.refunded });
 }
 
 export async function getKitJobProgress(kitId: string): Promise<ActionResult<KitJobProgress>> {
@@ -167,6 +231,8 @@ export async function getKitJobProgress(kitId: string): Promise<ActionResult<Kit
     .eq("id", kitId)
     .maybeSingle();
   if (!kit) return fail("找不到这个题包");
+
+  const job = await getJob(kitId);
 
   const beat = kit.heartbeat_at ? Date.parse(kit.heartbeat_at) : 0;
   const stalled = kit.job_status === "running" && Date.now() - beat > STALE_MS;
@@ -202,6 +268,8 @@ export async function getKitJobProgress(kitId: string): Promise<ActionResult<Kit
     headline,
     settled,
     stalled,
+    segments: job?.segments ?? [],
+    heldCredits: job?.heldCredits ?? null,
   });
 }
 
@@ -219,6 +287,10 @@ export async function resumeKitJob(kitId: string): Promise<ActionResult<null>> {
     .eq("id", kitId)
     .maybeSingle();
   if (!kit?.resume_version_id) return fail("找不到这个题包");
+
+  // 复用同一笔预扣，不重复扣分。已经跑完的段这次会被跳过。
+  const held = await holdKit(kitId, kit.resume_version_id);
+  if (!held.ok) return fail(held.error);
 
   const now = new Date().toISOString();
   await supabase
