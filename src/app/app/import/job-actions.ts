@@ -3,6 +3,9 @@
 import { after } from "next/server";
 import { z } from "zod";
 
+import { idempotencyKey } from "@/lib/billing/action";
+import { holdForJob, releaseJob } from "@/lib/billing/async";
+import { estimateSegments, quoteParse } from "@/lib/billing/estimate";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import {
   markCandidatePending,
@@ -40,6 +43,12 @@ export type JobProgress = {
   stalled: boolean;
 };
 
+/**
+ * 开始解析。
+ *
+ * 预扣的是**预估值**：段数要抽完才知道。少了在结算时退差额，多了不加价
+ * （C2 2.1）。预扣一成功余额立即减少，界面上标「预扣中」。
+ */
 export async function startJob(sourceDocId: string): Promise<ActionResult<string>> {
   if (!uuid.safeParse(sourceDocId).success) return fail("文档标识不对");
 
@@ -53,9 +62,19 @@ export async function startJob(sourceDocId: string): Promise<ActionResult<string
     .in("status", ["extracting", "awaiting_review"])
     .maybeSingle();
   if (existing) {
+    // 复用同一个作业就复用同一笔预扣，不重复扣分。
     after(() => runJob(existing.id));
     return ok(existing.id);
   }
+
+  // 预扣要按这份文档的预估值来，所以先把文本与扫描页数读回来。
+  const { data: doc } = await supabase
+    .from("source_docs")
+    .select("parsed_text,scan_pages")
+    .eq("id", sourceDocId)
+    .maybeSingle();
+  if (!doc) return fail("这份文档已经不在了");
+  const quote = quoteParse(estimateSegments(doc.parsed_text ?? ""), doc.scan_pages ?? 0);
 
   const { data, error } = await supabase
     .from("ingest_jobs")
@@ -69,6 +88,19 @@ export async function startJob(sourceDocId: string): Promise<ActionResult<string
     .select("id")
     .single();
   if (error || !data) return fail(`没能建起抽取作业：${error?.message ?? "未知原因"}`);
+
+  const held = await holdForJob({
+    jobRef: data.id,
+    actionCode: "doc_parse_base",
+    credits: quote.total,
+    idempotencyKey: idempotencyKey("doc_parse", [data.id]),
+  });
+  if (!held.ok) {
+    // 预扣没成就别把作业留在库里转圈 —— 用户看到的应该是「差多少分」，
+    // 不是一个永远跑不动的进度条。
+    await supabase.from("ingest_jobs").update({ status: "discarded" }).eq("id", data.id);
+    return fail(held.error);
+  }
 
   after(() => runJob(data.id));
   return ok(data.id);
@@ -197,6 +229,8 @@ export async function resumeJob(jobId: string): Promise<ActionResult<boolean>> {
 
 /** 放弃这个作业，回到上传区。Pass 1 就挂掉时，重试之外总得有条退路。 */
 export async function discardJob(jobId: string): Promise<ActionResult<null>> {
+  // 还没结算就被丢弃 → 退回。已经结算过的这一句是空操作。
+  await releaseJob(jobId, "discarded");
   if (!uuid.safeParse(jobId).success) return fail("作业标识不对");
   const supabase = await createClient();
   await supabase.from("drafts").delete().eq("ingest_job_id", jobId);

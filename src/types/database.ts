@@ -369,6 +369,7 @@ export type Database = {
           user_id: string;
           filename: string;
           storage_path: string | null;
+          scan_pages: number;
           doc_type: string | null;
           parsed_text: string | null;
           ingested_at: string | null;
@@ -380,6 +381,7 @@ export type Database = {
           user_id?: string;
           filename: string;
           storage_path?: string | null;
+          scan_pages?: number;
           doc_type?: string | null;
           parsed_text?: string | null;
           ingested_at?: string | null;
@@ -391,6 +393,7 @@ export type Database = {
           user_id?: string;
           filename?: string;
           storage_path?: string | null;
+          scan_pages?: number;
           doc_type?: string | null;
           parsed_text?: string | null;
           ingested_at?: string | null;
@@ -1985,6 +1988,30 @@ export type Database = {
       };
       reconcile_quota: {
         Args: { p_user?: string };
+        Returns: Json;
+      };
+      hold_for_job: {
+        Args: {
+          p_user: string;
+          p_job_ref: string;
+          p_action: string;
+          p_credits: number;
+          p_key: string;
+          p_fingerprint?: string | null;
+          p_ttl_min?: number;
+        };
+        Returns: Json;
+      };
+      settle_job: {
+        Args: { p_job_ref: string; p_actual_credits?: number | null; p_usage_meta?: Json };
+        Returns: Json;
+      };
+      release_job: {
+        Args: { p_job_ref: string; p_reason: string; p_usage_meta?: Json };
+        Returns: Json;
+      };
+      job_hold_status: {
+        Args: { p_job_ref: string };
         Returns: Json;
       };
       billing_sweep: {

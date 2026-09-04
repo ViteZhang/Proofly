@@ -79,13 +79,12 @@ test("调了模型的业务代码必须同时接了计费", () => {
   // 下面这批是还没接的，按 C2 的切片顺序排。接完一个删一行；
   // 这张表就是「计费还差哪些动作」的唯一真相。
   const pending = new Set([
-    "lib/parse/index.ts", // C2.3 文档解析
+    "lib/parse/index.ts", // 上传时的认字，由 registerUpload 的 bundled 留痕覆盖
     "lib/chat/classify.ts", // C2.2 已接：分类跑在计费决定之前，用量并进这一轮
     "lib/chat/pipeline.ts", // C2.2 已接：由 notes/actions 的 chat_record 分支包住
     "lib/nudge/index.ts", // 主动追问：系统发起，不是用户动作，不计费
     "lib/interview/job.ts", // C2.5 面试题包
     "lib/health/deep-job.ts", // C2.6 体检深扫
-    "lib/ingest/pipeline.ts", // C2.3 文档解析
     "lib/ingest/embedding.ts", // 向量召回，随文档解析与方向评估一起接
   ]);
 

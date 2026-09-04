@@ -20,6 +20,8 @@ import {
   pass2User,
   pass3User,
 } from "@/lib/llm/prompts";
+import { releaseJob, settleJob } from "@/lib/billing/async";
+import { quoteParse } from "@/lib/billing/estimate";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
 import { findSimilarAtoms } from "./embedding";
@@ -116,6 +118,8 @@ export async function runJob(jobId: string): Promise<void> {
     // 直接标 discarded：没有草稿可校对，留在 awaiting_review 会让导入页
     // 每次打开都把这个空作业顶出来，挡住上传区。
     if (candidates.length === 0) {
+      // 一条都没切出来，用户什么也没得到 —— 全额退回。
+      await releaseJob(jobId, "no_segments");
       await supabase
         .from("ingest_jobs")
         .update({ status: "discarded", progress_stage: "finishing" })
@@ -425,6 +429,10 @@ async function finishIfDone(jobId: string, all: Candidate[]): Promise<void> {
   const supabase = await createClient();
   const failed = all.filter((c) => c.state === "failed");
 
+  // 按**真实段数**结算。少于预估就退差额，多于预估仍按预估收 ——
+  // 预估偏差是我们的问题，不该用户买单（C2 2.1）。
+  await settleParse(jobId, all.filter((c) => c.state === "done").length);
+
   // 一条草稿都没产出（全失败，或候选全被判定为不可用）→ 没什么可校对的。
   // 但如果是「有失败可重试」，就还得留在 awaiting_review，否则重试按钮没了。
   const { count } = await supabase
@@ -447,7 +455,29 @@ async function finishIfDone(jobId: string, all: Candidate[]): Promise<void> {
     .eq("id", jobId);
 }
 
+/** 按真实段数结算这次解析。 */
+async function settleParse(jobId: string, doneSegments: number): Promise<void> {
+  const supabase = await createClient();
+  const { data: job } = await supabase
+    .from("ingest_jobs")
+    .select("source_doc_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  let scanPages = 0;
+  if (job?.source_doc_id) {
+    const { data: doc } = await supabase
+      .from("source_docs")
+      .select("scan_pages")
+      .eq("id", job.source_doc_id)
+      .maybeSingle();
+    scanPages = doc?.scan_pages ?? 0;
+  }
+  await settleJob(jobId, quoteParse(Math.max(doneSegments, 1), scanPages).total);
+}
+
 async function failJob(jobId: string, message: string): Promise<void> {
+  // 解析失败全额退回。用户没拿到东西，就不该付钱。
+  await releaseJob(jobId, "failed");
   const supabase = await createClient();
   await supabase
     .from("ingest_jobs")

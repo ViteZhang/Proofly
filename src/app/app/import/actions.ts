@@ -2,7 +2,10 @@
 
 import { z } from "zod";
 
+import { billedAction, idempotencyKey } from "@/lib/billing/action";
+import { estimateSegments, quoteParse, type ParseQuote } from "@/lib/billing/estimate";
 import { fail, ok, type ActionResult } from "@/lib/domain";
+import { getBalance } from "@/lib/queries/billing";
 import { SUPPORTED_HINT, extensionOf, parseDocument } from "@/lib/parse";
 import { createClient } from "@/lib/supabase/server";
 
@@ -22,6 +25,10 @@ export type UploadSummary = {
   chars: number;
   note: string | null;
   preview: string;
+  /** 解析这份文档预计消耗多少分，逐项可核对（交互方案 2.2） */
+  quote: ParseQuote;
+  /** 当前余额，用来显示「余额 156 → 120」 */
+  balance: number;
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -32,7 +39,29 @@ const KIND_LABEL: Record<string, string> = {
   image: "图片",
 };
 
+/**
+ * 上传后的预扫。
+ *
+ * 计费上这一步记 bundled：它确实烧 token（扫描件要逐页过视觉模型），
+ * 但它的成本已经算在「解析文档」的标价里，不单独收费。真正的预扣发生
+ * 在用户看过预估、点了「开始解析」之后（见 job-actions.startJob）。
+ *
+ * **已知敞口**：扫描件的逐页识别发生在这一步，也就是在用户确认之前。
+ * 用户传完就走人的话，这次识别的钱我们自己吃。要堵住得把识别挪到确认
+ * 之后 —— 那是 Step 2 的结构调整，不在 C2「只加计费包装」的范围里。
+ */
 export async function registerUpload(
+  input: z.input<typeof registerSchema>,
+): Promise<ActionResult<UploadSummary>> {
+  return billedAction({
+    actionCode: "doc_parse_base",
+    bundled: true,
+    idempotencyKey: idempotencyKey("doc_parse:probe", [input.storagePath]),
+    run: () => runRegisterUpload(input),
+  });
+}
+
+async function runRegisterUpload(
   input: z.input<typeof registerSchema>,
 ): Promise<ActionResult<UploadSummary>> {
   const parsed = registerSchema.safeParse(input);
@@ -57,6 +86,9 @@ export async function registerUpload(
     return fail(result.error);
   }
 
+  // 扫描件按页计价。页数只有这一刻手上有，结算时文件早不在了。
+  const scanPages = result.kind === "pdf_scan" ? (result.pages ?? 0) : 0;
+
   const { data: row, error } = await supabase
     .from("source_docs")
     .insert({
@@ -64,6 +96,7 @@ export async function registerUpload(
       storage_path: storagePath,
       doc_type: result.kind,
       parsed_text: result.text,
+      scan_pages: scanPages,
     })
     .select("id")
     .single();
@@ -71,6 +104,8 @@ export async function registerUpload(
   if (error || !row) {
     return fail(`解析出来了但没存住：${error?.message ?? "未知原因"}`);
   }
+
+  const balance = await getBalance();
 
   return ok({
     sourceDocId: row.id,
@@ -80,6 +115,8 @@ export async function registerUpload(
     chars: result.text.length,
     note: result.note,
     preview: result.text.slice(0, 1200),
+    quote: quoteParse(estimateSegments(result.text), scanPages),
+    balance: balance.available,
   });
 }
 

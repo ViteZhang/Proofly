@@ -486,5 +486,61 @@ begin
   perform assert_eq('打标后不再重复捞', sweep_expired_entitlements(500), 0);
 end $$;
 
+-- =============================================================
+-- 长任务的预扣与按实际结算（C2 验收 13、14、17、22）
+-- =============================================================
+do $$
+declare
+  u uuid := '99999999-9999-9999-9999-999999999999';
+  j1 uuid := gen_random_uuid();
+  j2 uuid := gen_random_uuid();
+  j3 uuid := gen_random_uuid();
+  h jsonb; r jsonb; a int;
+begin
+  delete from job_holds where user_id = u;
+  delete from usage_logs where user_id = u;
+  delete from credit_holds where user_id = u;
+  delete from entitlements where user_id = u;
+  update quota_counters set credits_available = 0, credits_held = 0 where user_id = u;
+  perform grant_credits(u, 'purchase', 300);
+
+  -- 预估 36（6 段 + 18 扫描页），实际 4 段 → 按 24 结算，退 12
+  h := hold_for_job(u, j1, 'doc_parse_base', 36, 'p1');
+  select credits_available into a from quota_counters where user_id=u;
+  perform assert_eq('预扣 36 后余额 264', a, 264);
+  r := settle_job(j1, 24);
+  perform assert_eq('C2 验收 13 · 按真实值结算', (r->>'charged')::int, 24);
+  perform assert_eq('C2 验收 13 · 差额退回', (r->>'refunded')::int, 12);
+  select credits_available into a from quota_counters where user_id=u;
+  perform assert_eq('C2 验收 13 · 余额比预估多 12', a, 276);
+  perform assert_eq('C2 验收 13 · 消费明细记的是真实值',
+    (select credits_charged from usage_logs where hold_id=(h->>'hold_id')::uuid), 24);
+
+  -- 预估 36，实际 48 → 仍按 36 收，超出不加价
+  h := hold_for_job(u, j2, 'doc_parse_base', 36, 'p2');
+  r := settle_job(j2, 48);
+  perform assert_eq('C2 验收 14 · 超出预估仍按预估收', (r->>'charged')::int, 36);
+  perform assert_eq('C2 验收 14 · 没有多扣', (r->>'refunded')::int, 0);
+
+  -- 解析失败 → 全额退回
+  h := hold_for_job(u, j3, 'doc_parse_base', 36, 'p3');
+  select credits_available into a from quota_counters where user_id=u;
+  r := release_job(j3, 'failed');
+  perform assert_eq('C2 验收 17 · 失败全额退回', (r->>'refunded')::int, 36);
+  perform assert_eq('C2 验收 17 · 余额复原',
+    (select credits_available from quota_counters where user_id=u), a + 36);
+  perform assert_eq('C2 验收 17 · 失败也写消费明细',
+    (select count(*)::int from usage_logs
+      where hold_id=(h->>'hold_id')::uuid and succeeded=false), 1);
+
+  -- 断点续跑：同一个作业重复预扣不重复扣分
+  h := hold_for_job(u, j2, 'interview_kit', 25, 'p4');
+  perform assert_eq('C2 验收 22 · 同一作业复用原来那笔', (h->>'reused')::boolean, true);
+
+  -- 重复结算不重复扣
+  r := settle_job(j2, 10);
+  perform assert_eq('重复结算被挡下', (r->>'ok')::boolean, false);
+end $$;
+
 \echo ''
 \echo '全部通过。'
