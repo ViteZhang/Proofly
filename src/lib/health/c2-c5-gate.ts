@@ -49,16 +49,16 @@ function resolveLink(ctx: HealthContext, code: string, row: GateRow): string {
     // 挂了它的经历并展开技能区；一条都没挂就跳经历库，那正是要做的事：
     // 要么把它挂到一条经历上，要么删掉它。
     const atomId = skill?.atomIds[0];
-    return atomId ? `/library?atom=${atomId}&highlight=skills` : "/library?highlight=skills";
+    return atomId ? `/app/library?atom=${atomId}&highlight=skills` : "/app/library?highlight=skills";
   }
   const target = ctx.resumes.find((x) => `${x.kind}:${x.id}` === row.owner)?.targetId;
   if (code === "C5") {
-    return target ? `/targets/strategy?target=${target}&section=strategy` : "/targets";
+    return target ? `/app/targets/strategy?target=${target}&section=strategy` : "/app/targets";
   }
   const parts = [target ? `target=${target}` : "", row.blockId ? `block=${row.blockId}` : ""].filter(
     Boolean,
   );
-  return parts.length > 0 ? `/resume?${parts.join("&")}` : "/resume";
+  return parts.length > 0 ? `/app/resume?${parts.join("&")}` : "/app/resume";
 }
 
 function issuesFor(code: string, ctx: HealthContext): HealthIssue[] {

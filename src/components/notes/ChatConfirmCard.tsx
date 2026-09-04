@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/Button";
 
 import { EVIDENCE_LABEL, METRIC_KIND_LABEL, STATUS_LABEL } from "@/lib/domain";
 import type { CardDiff, CardMetric, ConfirmCardView } from "@/lib/chat/message-shape";
-import type { Choice } from "@/app/(app)/notes/commit-actions";
+import type { Choice } from "@/app/app/notes/commit-actions";
 import type { AtomStatus, EvidenceLevel, MetricKind } from "@/types/database";
 
 const INTENT_LABEL = {
@@ -89,7 +89,7 @@ export function ChatConfirmCard({
         <span style={{ color: "var(--mute)" }}>置信度 {card.confidence.toFixed(2)}</span>
         {card.targetAtomId !== null && (
           <Link
-            href={`/library?atom=${card.targetAtomId}`}
+            href={`/app/library?atom=${card.targetAtomId}`}
             className="underline"
             style={{ color: "var(--mute)" }}
           >

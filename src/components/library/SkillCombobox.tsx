@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { linkSkill, searchSkills, type SkillOption } from "@/app/(app)/library/actions";
+import { linkSkill, searchSkills, type SkillOption } from "@/app/app/library/actions";
 
 /**
  * 技能输入必须是 combobox，不能是纯文本框。

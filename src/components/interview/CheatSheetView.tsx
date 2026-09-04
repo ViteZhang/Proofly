@@ -154,8 +154,8 @@ export function CheatSheetView({
           <button type="button" onClick={() => window.print()}>
             打印
           </button>
-          <a href={`/interview/${kitId}/export`}>下载 MD</a>
-          <Link className="ghost" href={`/interview?v=${versionId}`}>
+          <a href={`/app/interview/${kitId}/export`}>下载 MD</a>
+          <Link className="ghost" href={`/app/interview?v=${versionId}`}>
             返回
           </Link>
         </div>

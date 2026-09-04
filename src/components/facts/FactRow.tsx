@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { resolveFact, updateFact } from "@/app/(app)/facts/actions";
+import { resolveFact, updateFact } from "@/app/app/facts/actions";
 import type { ProfileFact } from "@/lib/queries/facts";
 
 export function FactRow({ fact }: { fact: ProfileFact }) {

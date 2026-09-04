@@ -8,7 +8,7 @@ import {
   checkExtension,
   registerUpload,
   type UploadSummary,
-} from "@/app/(app)/import/actions";
+} from "@/app/app/import/actions";
 
 type Phase = "idle" | "uploading" | "parsing";
 

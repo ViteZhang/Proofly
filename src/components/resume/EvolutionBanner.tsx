@@ -11,7 +11,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { resolveSignal } from "@/app/(app)/resume/evolution-actions";
+import { resolveSignal } from "@/app/app/resume/evolution-actions";
 import type { Signal } from "@/lib/resume/evolution";
 
 export function EvolutionBanner({

@@ -1,12 +1,14 @@
 "use client";
 
+import { ACTION_PRICES } from "@/config/plan";
+import { CreditCost } from "@/components/billing/CreditTag";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getDeepScanProgress,
   startDeepScan,
   type DeepScanProgress,
-} from "@/app/(app)/health/job-actions";
+} from "@/app/app/health/job-actions";
 
 const POLL_MS = 3000;
 const MAX_MISSES = 3;
@@ -72,11 +74,22 @@ export function DeepScanPanel({ initialScanId }: { initialScanId: string | null 
         style={{ background: "var(--card)", border: "1px solid var(--line)" }}
       >
         {running ? "深度扫描中…" : "深度扫描"}
+        {!running && <CreditCost credits={ACTION_PRICES.health_deep_scan} />}
       </button>
 
       {progress && (
         <div className="mt-2 text-[13px]" style={{ color: "var(--slate)" }}>
           {progress.headline}
+          {/*
+            分批的收尾提示。单次最多扫 10 条 —— 成本随经历数线性增长，
+            而标价是固定的。剩下的要再来一次，这话得说在明处。
+          */}
+          {progress.settled && progress.remaining > 0 && (
+            <p className="mt-1 text-[12.5px]" style={{ color: "var(--mute)" }}>
+              这次扫了最近更新的 {progress.total} 条经历。还有 {progress.remaining} 条没扫，
+              再来一次 {ACTION_PRICES.health_deep_scan} 分。
+            </p>
+          )}
           {progress.warnings.length > 0 && (
             <ul className="mt-1 list-disc pl-5 text-[12px]" style={{ color: "var(--caution)" }}>
               {progress.warnings.map((w) => (

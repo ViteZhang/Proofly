@@ -15,7 +15,7 @@ export function AnswerLinks({ links }: { links: AnswerLink[] }) {
       {links.map((l) => (
         <Link
           key={l.atomId}
-          href={`/library?atom=${l.atomId}`}
+          href={`/app/library?atom=${l.atomId}`}
           className="rounded-btn border px-2.5 py-1 text-[12px] transition-colors hover:bg-[var(--line-soft)]"
           style={{ borderColor: "var(--line)", color: "var(--slate)" }}
         >

@@ -7,7 +7,7 @@ import {
   promotePendingMetric,
   removePendingMetric,
   type EvidenceChange,
-} from "@/app/(app)/library/actions";
+} from "@/app/app/library/actions";
 import type { PendingMetric } from "@/lib/domain";
 import { MetricForm, type MetricValues } from "./MetricForm";
 

@@ -26,6 +26,50 @@ export function atomsToScan(ctx: HealthContext): HealthAtom[] {
   return ctx.atoms.filter((a) => a.sourceDocIds.length >= MIN_SOURCES);
 }
 
+/** 单次深扫最多扫这么多条。成本随经历数线性增长，标价却是固定的。 */
+export const DEEP_SCAN_BATCH = 10;
+
+export type DeepScanBatch = {
+  /** 这次真正要调模型的 */
+  batch: HealthAtom[];
+  /** 扫过且此后没改过，这次跳过 */
+  skipped: HealthAtom[];
+  /** 该扫但这次装不下，还得再来一次 */
+  remaining: number;
+};
+
+/**
+ * 挑出这次要扫的。
+ *
+ * 两步：先把「扫过且此后没改过」的剔掉 —— 它们的结论不会变，重扫
+ * 纯属烧钱；剩下的按最近更新排序取前 10 条 —— 刚改过的最可能有冲突。
+ *
+ * 跳过的部分让第二次扫描便宜很多，而标价不变。对用户是纯赚。
+ */
+export function selectDeepScanBatch(
+  ctx: HealthContext,
+  limit: number = DEEP_SCAN_BATCH,
+): DeepScanBatch {
+  const all = atomsToScan(ctx);
+  const skipped: HealthAtom[] = [];
+  const fresh: HealthAtom[] = [];
+
+  for (const a of all) {
+    if (a.lastDeepScanRev && Date.parse(a.lastDeepScanRev) >= Date.parse(a.updatedAt)) {
+      skipped.push(a);
+    } else {
+      fresh.push(a);
+    }
+  }
+
+  fresh.sort((x, y) => Date.parse(y.updatedAt) - Date.parse(x.updatedAt));
+  return {
+    batch: fresh.slice(0, limit),
+    skipped,
+    remaining: Math.max(fresh.length - limit, 0),
+  };
+}
+
 // ---- 输入组装 ----
 
 export function atomJson(a: HealthAtom): string {
@@ -130,7 +174,7 @@ export function buildConflictIssues(
         (act ? `建议：${act}\n\n` : "") +
         `这是语义比对找出来的，可能有误报 —— 拿不准就当没看见，它不会拦住任何事。`,
       refIds: [atom.id],
-      resolveLink: `/library?atom=${atom.id}`,
+      resolveLink: `/app/library?atom=${atom.id}`,
       fingerprint: `C8:${atom.id}:${c.subject.trim()}`,
       autoFixable: false,
     });

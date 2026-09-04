@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { ignore, restore } from "@/app/(app)/health/actions";
+import { ignore, restore } from "@/app/app/health/actions";
 import type { ReportIssue } from "@/lib/health/report";
 
 const TONE = {

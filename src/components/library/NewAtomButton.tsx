@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { createAtom } from "@/app/(app)/library/actions";
+import { createAtom } from "@/app/app/library/actions";
 
 // 新建一条经历（project），建完直接跳过去开编辑态。
 export function NewAtomButton({
@@ -39,7 +39,7 @@ export function NewAtomButton({
         actions: [],
         sort_order: sortOrder,
       });
-      if (res.ok) router.push(`/library?atom=${res.data.id}&edit=1`, { scroll: false });
+      if (res.ok) router.push(`/app/library?atom=${res.data.id}&edit=1`, { scroll: false });
       else setError(res.error);
     });
   }

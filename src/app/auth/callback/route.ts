@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ensureOnboarded } from "@/lib/billing/onboard";
 import { createClient } from "@/lib/supabase/server";
 
 // Magic Link 落地：交换 code 换 session，成功后回首页；失败/过期回登录页给提示。
@@ -11,6 +12,9 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // 登录落地就开户：建计数器、发注册赠送。幂等，老用户走这里是空操作。
+      // 放在这里而不是数据库触发器里，因为护栏触顶要走降级分支。
+      await ensureOnboarded();
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

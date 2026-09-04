@@ -6,7 +6,7 @@ import {
   deleteTarget,
   getTargetDeleteImpact,
   type TargetDeleteImpact,
-} from "@/app/(app)/targets/actions";
+} from "@/app/app/targets/actions";
 
 // 二次确认。牵连数量必须是查库算出来的——「将一并删除 3 份 JD」这句话
 // 只有在数字是真的时候才有意义。

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createAtom } from "@/app/(app)/library/actions";
+import { createAtom } from "@/app/app/library/actions";
 import { useSettle } from "@/lib/useSettle";
 import type { AtomDetail as Detail } from "@/lib/queries/atoms";
 import type { AtomStrategyRow } from "@/lib/queries/strategy";
@@ -35,7 +35,7 @@ export function AtomPane({
   function leaveEdit() {
     setEditing(false);
     if (searchParams.get("edit")) {
-      router.replace(`/library?atom=${detail.id}`, { scroll: false });
+      router.replace(`/app/library?atom=${detail.id}`, { scroll: false });
     }
   }
 
@@ -63,7 +63,7 @@ export function AtomPane({
         actions: [],
         sort_order: detail.children.length,
       });
-      if (res.ok) router.push(`/library?atom=${res.data.id}&edit=1`, { scroll: false });
+      if (res.ok) router.push(`/app/library?atom=${res.data.id}&edit=1`, { scroll: false });
       else setAddError(res.error);
     });
   }
@@ -76,7 +76,7 @@ export function AtomPane({
         settling={settling}
         onSaved={afterSave}
         onCancel={leaveEdit}
-        onDeleted={() => router.replace("/library", { scroll: false })}
+        onDeleted={() => router.replace("/app/library", { scroll: false })}
       />
     );
   }

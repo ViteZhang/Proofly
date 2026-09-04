@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { rescan } from "@/app/(app)/health/actions";
+import { rescan } from "@/app/app/health/actions";
 
 /**
  * 进体检页自动跑一次快扫（§五-8.6 自动扫描时机）。

@@ -6,7 +6,7 @@ import {
   createTarget,
   updateTarget,
   type TargetInput,
-} from "@/app/(app)/targets/actions";
+} from "@/app/app/targets/actions";
 
 export type TargetDraft = {
   id: string | null; // null = 新建

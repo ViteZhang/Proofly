@@ -11,13 +11,20 @@
 // 失败不清空已有结果：跑到第 6 条挂了，前 5 条查出来的冲突照样落库。
 // =============================================================
 
+import { releaseJob } from "@/lib/billing/async";
+import {
+  createSink,
+  failJob as billingFailJob,
+  succeedJob,
+} from "@/lib/billing/job";
 import { callLLM } from "@/lib/llm";
 import { CONFLICT_SYSTEM, conflictUser } from "@/lib/llm/health-prompts";
 import { createClient } from "@/lib/supabase/server";
+import { withUsageSink } from "@/lib/telemetry/usage";
 import { conflictSetSchema } from "./c8-schema";
 import {
   atomJson,
-  atomsToScan,
+  selectDeepScanBatch,
   buildConflictIssues,
   resumeTextsJson,
   sourceExcerptsJson,
@@ -76,10 +83,23 @@ async function scanOne(
  * 深扫主流程。可重入、不抛异常 —— 它跑在 after() 里，抛出去没人接得住，
  * 用户只会看到进度永远停在某一条。
  */
+/** 这条经历这次扫过了，记下当时的版本，下次没改就跳过。 */
+async function markScanned(atomId: string, rev: string): Promise<void> {
+  const supabase = await createClient();
+  await supabase
+    .from("atoms")
+    .update({ last_deep_scan_at: new Date().toISOString(), last_deep_scan_rev: rev })
+    .eq("id", atomId);
+}
+
 export async function runDeepScan(scanId: string): Promise<void> {
+  // 这一轮所有模型调用的用量记进这张单子，结算时一起落账。
+  const sink = createSink();
+
   try {
     const ctx = await loadHealthContext();
-    const targets = atomsToScan(ctx);
+    // 单次最多 10 条，扫过且没改过的跳过（C2 2.3）。
+    const { batch: targets, skipped, remaining } = selectDeepScanBatch(ctx);
 
     await patch(scanId, {
       total_count: targets.length,
@@ -89,11 +109,14 @@ export async function runDeepScan(scanId: string): Promise<void> {
 
     if (targets.length === 0) {
       // 一条都不用扫也是一次有效的深扫：它说明「没有多来源的经历」，
-      // 不是「没扫」。结果清空，通过项照记。
+      // 或者「该扫的上次都扫过了、之后一个字没改」。
+      // 这两种都没调模型 —— 不该收钱。
       await replaceHealthIssues(["C8"], []);
+      await releaseJob(scanId, "nothing_to_scan");
       await patch(scanId, {
         status: "done",
         finished_at: new Date().toISOString(),
+        coverage: { scanned: 0, skipped: skipped.length, remaining } as unknown as Json,
       });
       return;
     }
@@ -107,9 +130,10 @@ export async function runDeepScan(scanId: string): Promise<void> {
       for (;;) {
         const i = cursor++;
         if (i >= targets.length) return;
-        const r = await scanOne(ctx, targets[i]);
+        const r = await withUsageSink(sink, () => scanOne(ctx, targets[i]));
         issues.push(...r.issues);
         warnings.push(...r.warnings);
+        await markScanned(targets[i].id, targets[i].updatedAt);
         done++;
         // 每条完成都打点：进度是这一步唯一能给的确定感。
         await patch(scanId, { done_count: done, heartbeat_at: new Date().toISOString() });
@@ -119,18 +143,26 @@ export async function runDeepScan(scanId: string): Promise<void> {
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
 
     await replaceHealthIssues(["C8"], issues);
+    await succeedJob(scanId, sink);
     await patch(scanId, {
       status: "done",
       done_count: done,
       finished_at: new Date().toISOString(),
       error_message: warnings.length > 0 ? warnings.join("\n") : null,
-      coverage: { atoms: targets.length } as unknown as Json,
+      coverage: {
+        atoms: targets.length,
+        scanned: done,
+        skipped: skipped.length,
+        remaining,
+      } as unknown as Json,
     });
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await billingFailJob(scanId, msg, sink);
     await patch(scanId, {
       status: "failed",
       finished_at: new Date().toISOString(),
-      error_message: e instanceof Error ? e.message : String(e),
+      error_message: msg,
     });
   }
 }

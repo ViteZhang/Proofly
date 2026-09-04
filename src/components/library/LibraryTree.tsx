@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { reorderAtoms } from "@/app/(app)/library/actions";
+import { reorderAtoms } from "@/app/app/library/actions";
 import { EVIDENCE_LABEL, EVIDENCE_ORDER } from "@/lib/domain";
 import type { AtomGroup, AtomNode, AtomTree, ProofSummary } from "@/lib/queries/atoms";
 import type { EvidenceLevel } from "@/types/database";
@@ -99,7 +99,7 @@ export function LibraryTree({
     const params = new URLSearchParams(searchParams.toString());
     params.set("atom", id);
     params.delete("edit");
-    router.replace(`/library?${params.toString()}`, { scroll: false });
+    router.replace(`/app/library?${params.toString()}`, { scroll: false });
   }
 
   function drop(setKey: string, targetId: string) {

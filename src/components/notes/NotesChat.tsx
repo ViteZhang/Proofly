@@ -32,17 +32,17 @@ import {
   pollChat,
   retryMessage,
   sendMessage,
-} from "@/app/(app)/notes/actions";
+} from "@/app/app/notes/actions";
 import {
   commitCard,
   rejectCard,
   undoCard,
   type Choice,
-} from "@/app/(app)/notes/commit-actions";
+} from "@/app/app/notes/commit-actions";
 import { AnswerLinks } from "./AnswerLinks";
 import { UndoToast } from "./UndoToast";
 import { ReassessNotice } from "@/components/actions/ReassessNotice";
-import type { ReassessPlan } from "@/app/(app)/actions/reassess-actions";
+import type { ReassessPlan } from "@/app/app/actions/reassess-actions";
 import { AtomPicker, type PickerAtom } from "./AtomPicker";
 import { Composer } from "./Composer";
 
@@ -53,9 +53,13 @@ const NEW_PLACEHOLDER = "这条经历叫什么、在哪做的、你负责哪部�
 export function NotesChat({
   initial,
   busy,
+  freeLeft,
+  freeLimit,
 }: {
   initial: ChatMessageView[];
   busy: boolean;
+  freeLeft: number;
+  freeLimit: number;
 }) {
   const [messages, setMessages] = useState(initial);
   const [thinking, setThinking] = useState(busy);
@@ -399,6 +403,24 @@ export function NotesChat({
             {hint}
           </p>
         )}
+
+        {/*
+          免费额度用「还剩」不用「已用」——剩余感比消耗感友好，
+          不制造消费焦虑（交互方案 1.4）。
+          这一页不显示余额，只显示额度：维护动作在用户眼里价值感极低，
+          只要余额数字在视野里，他就会犹豫要不要记这一条。
+        */}
+        <div className="flex items-center gap-2 pb-2">
+          <span
+            className="rounded-pill px-2.5 py-[3px] text-[11.5px] font-medium"
+            style={{ background: "var(--line-soft)", color: "var(--slate)" }}
+          >
+            本月还剩 {freeLeft} / {freeLimit} 次免费记录
+          </span>
+          <span className="text-[11.5px]" style={{ color: "var(--mute)" }}>
+            闲聊不算次数
+          </span>
+        </div>
 
         <Composer
           ref={composer}

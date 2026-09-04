@@ -7,13 +7,18 @@
 // 生成顺序。高风险不参与筛选之外的任何折叠 —— 它们是这一步存在的理由。
 // =============================================================
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { QuestionCard } from "./QuestionCard";
 import { KitJobPanel } from "./KitJobPanel";
-import { startKitJob, type KitJobProgress } from "@/app/(app)/interview/job-actions";
+import { quoteAction } from "@/app/app/billing-actions";
+import { useBillingFeedback } from "@/components/billing/BillingFeedback";
+import { ConfirmCost } from "@/components/billing/ConfirmCost";
+import { CreditCost } from "@/components/billing/CreditTag";
+import { ACTION_PRICES } from "@/config/plan";
+import { startKitJob, type KitJobProgress } from "@/app/app/interview/job-actions";
 import { overviewOf } from "@/lib/interview/view";
 import type { KitView, VersionOption } from "@/lib/queries/interview";
 import type { InterviewKind, PracticeStatus, RiskLevel } from "@/types/database";
@@ -75,6 +80,21 @@ export function InterviewBoard({
 
   // 起作业只是插一行 + after()，秒回。真正的等待交给 KitJobPanel 轮询，
   // 页面关掉作业照样在后台跑完。
+  const feedback = useBillingFeedback();
+  const [asking, setAsking] = useState(false);
+  const [balance, setBalance] = useState(0);
+
+  // 二次确认要显示「余额 156 → 131」，所以进页面先把余额读回来。
+  useEffect(() => {
+    let alive = true;
+    void quoteAction("interview_kit").then((q) => {
+      if (alive) setBalance(q.balance);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [jobKitId]);
+
   function run() {
     if (!selected) return;
     setError(null);
@@ -85,6 +105,14 @@ export function InterviewBoard({
       const r = await startKitJob(selected.id);
       setRunning(false);
       if (!r.ok) {
+        // 余额不足走弹窗，说清差多少；其余错误留在原地。
+        feedback.report("生成面试题包", {
+          ok: false,
+          error: r.error,
+          ...(r.error.includes("差") && r.error.includes("分")
+            ? { code: "INSUFFICIENT" as const }
+            : {}),
+        });
         setError(r.error);
         return;
       }
@@ -108,7 +136,7 @@ export function InterviewBoard({
     return (
       <Empty>
         <p className="text-[14px]">还没有题目。先生成一份投递版本，我按它出题。</p>
-        <Link href="/resume" className="mt-3 inline-block">
+        <Link href="/app/resume" className="mt-3 inline-block">
           <Button size="sm">去生成投递版本</Button>
         </Link>
       </Empty>
@@ -136,6 +164,21 @@ export function InterviewBoard({
 
   return (
     <>
+      {feedback.node}
+      {asking && (
+        <ConfirmCost
+          title="生成面试题包"
+          credits={ACTION_PRICES.interview_kit}
+          balance={balance}
+          note="大概需要 5–10 分钟，可以先去做别的，好了我会提示你。"
+          onCancel={() => setAsking(false)}
+          onConfirm={() => {
+            setAsking(false);
+            run();
+          }}
+        />
+      )}
+
       {/* 版本切换 */}
       <div className="mt-4 flex flex-wrap items-center gap-2.5">
         <span className="text-[13.5px]" style={{ color: "var(--slate)" }}>
@@ -155,19 +198,20 @@ export function InterviewBoard({
             size="sm"
             variant="secondary"
             disabled={running || (jobKitId !== null && !jobFailed)}
-            onClick={run}
+            onClick={() => setAsking(true)}
           >
             {jobKitId && !jobFailed ? "正在出题…" : "重新出题"}
+            {!jobKitId && <CreditCost credits={ACTION_PRICES.interview_kit} />}
           </Button>
         )}
         {kit && (
           <>
-            <Link href={`/interview/${kit.id}/print`}>
+            <Link href={`/app/interview/${kit.id}/print`}>
               <Button size="sm" variant="secondary">
                 面试小抄
               </Button>
             </Link>
-            <a href={`/interview/${kit.id}/export`}>
+            <a href={`/app/interview/${kit.id}/export`}>
               <Button size="sm" variant="text">
                 导出 MD
               </Button>
@@ -181,7 +225,7 @@ export function InterviewBoard({
           {versions.map((v) => (
             <li key={v.id}>
               <Link
-                href={`/interview?v=${v.id}`}
+                href={`/app/interview?v=${v.id}`}
                 onClick={() => setPicking(false)}
                 className="flex items-center gap-2.5 rounded-btn border px-3 py-2 text-[13px] hover:bg-[var(--line-soft)]"
                 style={{
@@ -226,9 +270,10 @@ export function InterviewBoard({
             size="sm"
             className="mt-3"
             disabled={running || (jobKitId !== null && !jobFailed) || !selected}
-            onClick={run}
+            onClick={() => setAsking(true)}
           >
             {jobKitId && !jobFailed ? "正在出题…" : "出一套题"}
+            {!jobKitId && <CreditCost credits={ACTION_PRICES.interview_kit} />}
           </Button>
         </Empty>
       ) : (

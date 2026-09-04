@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
-import { createJd } from "@/app/(app)/targets/jd-actions";
+import { createJd } from "@/app/app/targets/jd-actions";
 
 // 「＋ 添加 JD」展开的表单。四个字段：公司、岗位、正文、来源链接（选填）。
 export function JdForm({

@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 
 import { UploadZone } from "./UploadZone";
 import { JobProgressPanel } from "./JobProgressPanel";
-import { startJob, type JobProgress } from "@/app/(app)/import/job-actions";
-import type { UploadSummary } from "@/app/(app)/import/actions";
+import { ParseQuoteDialog } from "./ParseQuoteDialog";
+import { startJob, type JobProgress } from "@/app/app/import/job-actions";
+import type { UploadSummary } from "@/app/app/import/actions";
 import { Button } from "@/components/ui/Button";
 
 export function ImportFlow({
@@ -21,13 +22,26 @@ export function ImportFlow({
   const [jobId, setJobId] = useState<string | null>(resumeJobId);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<JobProgress | null>(null);
+  // 传完不直接开跑：先把预估明细摆出来让用户核对（交互方案 2.2）。
+  const [pendingDoc, setPendingDoc] = useState<UploadSummary | null>(null);
+  const [starting, setStarting] = useState(false);
 
-  async function onUploaded(s: UploadSummary) {
-    const r = await startJob(s.sourceDocId);
+  function onUploaded(s: UploadSummary) {
+    setError(null);
+    setPendingDoc(s);
+  }
+
+  async function confirmParse() {
+    if (!pendingDoc) return;
+    setStarting(true);
+    const r = await startJob(pendingDoc.sourceDocId);
+    setStarting(false);
     if (!r.ok) {
+      setPendingDoc(null);
       setError(r.error);
       return;
     }
+    setPendingDoc(null);
     setJobId(r.data);
   }
 
@@ -47,7 +61,7 @@ export function ImportFlow({
         {done && (
           <div className="mt-4 flex items-center gap-2">
             {done.draftCount > 0 ? (
-              <Button onClick={() => router.push(`/import/review/${jobId}${taskId ? `?task=${taskId}` : ""}`)}>
+              <Button onClick={() => router.push(`/app/import/review/${jobId}${taskId ? `?task=${taskId}` : ""}`)}>
                 去确认这 {done.draftCount} 条
               </Button>
             ) : (
@@ -73,6 +87,14 @@ export function ImportFlow({
   return (
     <>
       <UploadZone onDone={onUploaded} />
+      {pendingDoc && (
+        <ParseQuoteDialog
+          summary={pendingDoc}
+          pending={starting}
+          onCancel={() => setPendingDoc(null)}
+          onConfirm={() => void confirmParse()}
+        />
+      )}
       {error && (
         <p
           className="mt-3 rounded-card px-4 py-3 text-[13.5px]"

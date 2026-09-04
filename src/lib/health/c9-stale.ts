@@ -36,7 +36,7 @@ export const c9Stale: HealthCheck = {
             `如果它其实已经上线了，改成 shipped 之后证明度会跟着升——现在简历上是按「开发中」的口径写的，说轻了。\n` +
             `如果它真的停了，那简历里也不该再按在做的说法写。`,
           refIds: [a.id],
-          resolveLink: `/library?atom=${a.id}&highlight=metrics`,
+          resolveLink: `/app/library?atom=${a.id}&highlight=metrics`,
           fingerprint: `C9:${a.id}`,
           autoFixable: false,
         };

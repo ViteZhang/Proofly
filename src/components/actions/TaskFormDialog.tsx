@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
-import { createTask, updateTask, type TaskInput } from "@/app/(app)/actions/task-actions";
+import { createTask, updateTask, type TaskInput } from "@/app/app/actions/task-actions";
 import { ACTION_COPY } from "@/lib/planning/labels";
 import { LEARN_MIN_HOURS } from "@/lib/planning/config";
 import type { TaskActionType } from "@/types/database";

@@ -257,7 +257,7 @@ export function textSources(ctx: HealthContext): TextSource[] {
       id: r.id,
       where: r.label,
       text: r.renderedMd,
-      resolveLink: `/resume?target=${r.targetId}`,
+      resolveLink: `/app/resume?target=${r.targetId}`,
     });
   }
 
@@ -269,7 +269,7 @@ export function textSources(ctx: HealthContext): TextSource[] {
       id: a.id,
       where: `经历「${a.title}」`,
       text,
-      resolveLink: `/library?atom=${a.id}`,
+      resolveLink: `/app/library?atom=${a.id}`,
     });
   }
 
@@ -280,7 +280,7 @@ export function textSources(ctx: HealthContext): TextSource[] {
       id: d.id,
       where: `源材料《${d.filename}》`,
       text: d.parsedText,
-      resolveLink: `/import`,
+      resolveLink: `/app/import`,
     });
   }
 
@@ -290,7 +290,7 @@ export function textSources(ctx: HealthContext): TextSource[] {
       id: q.id,
       where: "面试题的应答骨架",
       text: q.text,
-      resolveLink: `/interview`,
+      resolveLink: `/app/interview`,
     });
   }
 

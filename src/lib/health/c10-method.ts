@@ -47,7 +47,7 @@ export const c10Method: HealthCheck = {
             `面试官会问这个数怎么算的——分母是什么、时间窗口多长、有没有对照组。现在答不上来。\n` +
             `补一句口径就行，不用很长：「按周活跃用户算，对比上线前四周均值」这种程度就够。`,
           refIds: [atom.id, m.id],
-          resolveLink: `/library?atom=${atom.id}&metric=${m.id}&highlight=metrics`,
+          resolveLink: `/app/library?atom=${atom.id}&metric=${m.id}&highlight=metrics`,
           fingerprint: `C10:${m.id}`,
           autoFixable: false,
         });
