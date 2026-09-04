@@ -83,6 +83,9 @@ create table if not exists credit_holds (
   job_ref uuid,
   -- 生成指纹，免费重生成判定用
   fingerprint text,
+  -- 释放口令。只回给服务端，客户端按列级 GRANT 读不到 —— 见 25 的
+  -- release_hold：没有它，用户可以在长任务跑到一半时自己把钱退了。
+  release_token uuid not null default gen_random_uuid(),
   -- 超时自动释放：同步动作 5 分钟，异步 25 分钟
   expires_at timestamptz not null,
   settled_at timestamptz,
