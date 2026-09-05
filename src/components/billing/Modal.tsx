@@ -14,11 +14,14 @@ export function Modal({
   onClose,
   children,
   footer,
+  /** 码墙那种一次要摊开几十行的内容用它 */
+  wide,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  wide?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -36,7 +39,7 @@ export function Modal({
       role="presentation"
     >
       <div
-        className="w-full max-w-[400px] rounded-card p-[22px] shadow-lg"
+        className={`w-full ${wide ? "max-w-[660px]" : "max-w-[400px]"} max-h-[88vh] overflow-y-auto rounded-card p-[22px] shadow-lg`}
         style={{ background: "var(--card)" }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"

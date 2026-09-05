@@ -10,7 +10,11 @@ export function RedeemForm() {
   const router = useRouter();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [okMsg, setOkMsg] = useState<{ credits: number; balance: number } | null>(null);
+  const [okMsg, setOkMsg] = useState<{
+    credits: number;
+    balance: number;
+    expiresAt: string | null;
+  } | null>(null);
   const [busy, start] = useTransition();
 
   function submit() {
@@ -22,7 +26,11 @@ export function RedeemForm() {
         setError(r.error);
         return;
       }
-      setOkMsg({ credits: r.data.credits, balance: r.data.balanceAfter });
+      setOkMsg({
+        credits: r.data.credits,
+        balance: r.data.balanceAfter,
+        expiresAt: r.data.expiresAt,
+      });
       setCode("");
       router.refresh();
     });
@@ -40,7 +48,7 @@ export function RedeemForm() {
           onKeyDown={(e) => {
             if (e.key === "Enter" && !busy) submit();
           }}
-          placeholder="PROOFLY-JOB-XXXXXX"
+          placeholder="PF-XXXX-XXXX"
           className="w-full rounded-btn px-3.5 py-2.5 font-display tracking-wide outline-none"
           style={{ border: "1px solid var(--line)", background: "var(--bg)" }}
         />
@@ -64,7 +72,9 @@ export function RedeemForm() {
             到账 {okMsg.credits} 分，余额 {okMsg.balance}
           </b>
           <br />
-          这批是购买积分，永不过期。
+          {okMsg.expiresAt
+            ? `这批分 ${new Date(okMsg.expiresAt).toLocaleDateString("zh-CN")} 到期。`
+            : "这批分永不过期。"}
         </div>
       )}
     </>

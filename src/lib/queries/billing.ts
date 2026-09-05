@@ -73,7 +73,10 @@ export async function getEntitlements(): Promise<EntitlementView> {
     const left = e.credits_total - e.credits_used;
     if (left <= 0) continue;
     if (e.expires_at && Date.parse(e.expires_at) < now) continue;
-    if (e.source === "purchase" || e.source === "redeem") {
+    // 分桶看的是「会不会过期」，不是「从哪来的」。兑换码现在可以带
+    // 有效期（补偿码可能只给当季），把它按 source 一律算进「永不过期」
+    // 那一栏，页面上那句「永不过期」就成了假话。
+    if ((e.source === "purchase" || e.source === "redeem") && e.expires_at === null) {
       purchased += left;
     } else {
       granted += left;
