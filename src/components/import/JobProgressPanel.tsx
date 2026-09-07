@@ -9,6 +9,7 @@ import {
   restartJob,
   resumeJob,
   retryOne,
+  stopJob,
   type JobProgress,
 } from "@/app/app/import/job-actions";
 
@@ -36,6 +37,10 @@ export function JobProgressPanel({
   // 续过还断，就交给使用者决定，别在后台反复烧钱。
   const triedResume = useRef(false);
   const [resumed, setResumed] = useState<"no" | "once" | "stuck">("no");
+
+  // 点了停之后按钮要立刻变样，不能等下一次轮询——那要 2 秒，
+  // 这 2 秒里人会以为没点上，再点一次。
+  const [stopping, setStopping] = useState(false);
 
   // 重试 / 重来会把作业推回 extracting，但那时轮询已经停了。
   // 用一个计数把 effect 重新点着，否则界面会一直停在旧数字上。
@@ -96,6 +101,14 @@ export function JobProgressPanel({
     };
   }, [jobId, onSettled, nonce]);
 
+  // 停：只改状态，不去掐 after() 里那次调用（掐不了）。改完之后轮询下一拍
+  // 就会看到终态，界面自己往下走——已经抽好的进校对，一条都没有的回上传区。
+  async function stop() {
+    setStopping(true);
+    await stopJob(jobId);
+    setStopping(false);
+  }
+
   async function rerun(fn: () => Promise<unknown>) {
     settledSent.current = false;
     triedResume.current = false;
@@ -131,11 +144,26 @@ export function JobProgressPanel({
     >
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[15px] font-medium">{p.headline}</p>
-        {!p.settled && p.total > 0 && (
-          <span className="shrink-0 font-mono text-[12px]" style={{ color: "var(--mute)" }}>
-            {pct}%
-          </span>
-        )}
+        <div className="flex shrink-0 items-baseline gap-3">
+          {!p.settled && p.total > 0 && (
+            <span className="font-mono text-[12px]" style={{ color: "var(--mute)" }}>
+              {pct}%
+            </span>
+          )}
+          {/* 抽取途中一直有退路。以前只有「续跑过一次还是不动」和「Pass 1 挂了」
+              两种情况才给按钮，作业跑得慢又没断的时候，人是被关在里面的。 */}
+          {!p.settled && (
+            <Button
+              variant="text"
+              size="sm"
+              className="!px-0"
+              disabled={stopping}
+              onClick={() => void stop()}
+            >
+              {stopping ? "正在停…" : "停下"}
+            </Button>
+          )}
+        </div>
       </div>
 
       {p.total > 0 && (

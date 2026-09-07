@@ -205,6 +205,10 @@ async function runCandidates(
   const beat = setInterval(() => void touch(jobId), HEARTBEAT_MS);
   try {
     await inBatches(todo.length, PASS2_CONCURRENCY, async (i) => {
+      // 排队中的候选每条开跑前都要回头看一眼。跑在 after() 里的这次调用
+      // 没有句柄能从外面掐掉，所以「停」只能靠它自己自觉：人点了停，
+      // 后面那几条就不该再烧钱了。
+      if (!(await stillRunning(jobId))) return;
       const c = todo[i];
       // handleOne 约定是返回错误而不是抛，但它下面还有一串调用。
       // 真抛出来一个，Promise.all 会整批拒掉，剩下的候选全留在 pending——
@@ -303,6 +307,10 @@ async function handleOne(
     parent !== null && atom.level === "project"
       ? { ...atom, level: "capability_slice" as const, children: [] }
       : atom;
+
+  // Pass 2 + Pass 3 走下来要几十秒到几分钟，这中间人可能已经点了停。
+  // 这时候再写草稿，校对队列里就会冒出一条属于已停作业的孤儿。
+  if (!(await stillRunning(jobId))) return "抽的过程中被停掉了";
 
   const supabase = await createClient();
 
@@ -424,8 +432,81 @@ async function bumpProgress(jobId: string, all: Candidate[]): Promise<void> {
     .eq("id", jobId);
 }
 
+/**
+ * 作业还在跑吗。
+ *
+ * 「停」这个动作只改数据库里的状态——after() 里那次调用没有句柄能从外面
+ * 掐掉。所以每一步落库之前都回头问一句：我还该干活吗。
+ */
+async function stillRunning(jobId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("ingest_jobs")
+    .select("status")
+    .eq("id", jobId)
+    .maybeSingle();
+  return data?.status === "extracting";
+}
+
+/**
+ * 人工中止：没跑的那几条就地判失败，然后照常收尾。
+ *
+ * 不粗暴 discard——已经抽好的草稿是花了钱也花了时间的，不能因为后面几条慢
+ * 就一起扔掉。收尾按真正抽出来的条数结算，剩下的事后还能单独重试。
+ */
+export async function haltRemaining(jobId: string): Promise<void> {
+  const supabase = await createClient();
+  const { data: job } = await supabase
+    .from("ingest_jobs")
+    .select("status, candidates")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job || job.status !== "extracting") return;
+
+  const all = parseCandidates(job.candidates);
+
+  const { count } = await supabase
+    .from("drafts")
+    .select("id", { count: "exact", head: true })
+    .eq("ingest_job_id", jobId)
+    .eq("review_status", "pending");
+
+  // 一条草稿都还没产出就停 —— 等同于放弃，钱全退。
+  // 留成 awaiting_review 的话，导入页往后 24 小时每次打开都会把这个
+  // 空作业捡回来顶在上传区前面，而里面什么也没有。
+  if ((count ?? 0) === 0) {
+    await releaseJob(jobId, "discarded");
+    await supabase
+      .from("ingest_jobs")
+      .update({
+        status: "discarded",
+        progress_stage: "finishing",
+        error_message: "你中途停下了",
+      })
+      .eq("id", jobId);
+    return;
+  }
+
+  for (const c of all) {
+    if (c.state === "pending") {
+      c.state = "failed";
+      c.error = "你中途停下了";
+    }
+  }
+  await writeCandidates(jobId, all);
+  await bumpProgress(jobId, all);
+  await finishNow(jobId, all);
+}
+
 async function finishIfDone(jobId: string, all: Candidate[]): Promise<void> {
   if (all.some((c) => c.state === "pending")) return;
+  // 人已经点了停（或者作业被放弃）——这里不能把它改回 awaiting_review，
+  // 那等于「点了停，界面却又活过来了」。
+  if (!(await stillRunning(jobId))) return;
+  await finishNow(jobId, all);
+}
+
+async function finishNow(jobId: string, all: Candidate[]): Promise<void> {
   const supabase = await createClient();
   const failed = all.filter((c) => c.state === "failed");
 

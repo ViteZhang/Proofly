@@ -8,6 +8,7 @@ import { holdForJob, releaseJob } from "@/lib/billing/async";
 import { estimateSegments, quoteParse } from "@/lib/billing/estimate";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import {
+  haltRemaining,
   markCandidatePending,
   parseCandidates,
   retryCandidate,
@@ -164,7 +165,7 @@ function headline(
   if (status !== "extracting") {
     // 一条候选都没切出来、还带着错误 —— 那是「这次没读成」，不是
     // 「这份文档里没有经历」。把故障说成结论，人就不会再试了。
-    if (drafts === 0 && total === 0 && error !== null) return "这份没抽成";
+    if (drafts === 0 && error !== null) return "这份没抽成";
     return drafts === 0 ? "这份文档里没找到经历" : `抽出 ${drafts} 条，等你确认`;
   }
   if (stage === "segmenting" || total === 0) return "正在通读文档…";
@@ -229,6 +230,23 @@ export async function resumeJob(jobId: string): Promise<ActionResult<boolean>> {
 
   after(() => runJob(jobId));
   return ok(true);
+}
+
+/**
+ * 中途停下。
+ *
+ * 已经抽好的草稿留着——那是花了钱也花了时间的，不能因为后面几条慢就一起扔。
+ * 没跑的那几条就地判失败，结算按真正抽出来的条数走，事后还能单独重试。
+ * 一条都还没抽出来时等同于放弃，钱全退。
+ *
+ * 停不掉的是 after() 里那次调用——没有句柄能从外面掐。这里改完状态，
+ * 那边每写一步之前都会回头看一眼，下一步就自己收手了。所以「停」的语义是
+ * 「不再往下走，也不再往库里写」，不是「立刻掐断正在飞的那个请求」。
+ */
+export async function stopJob(jobId: string): Promise<ActionResult<null>> {
+  if (!uuid.safeParse(jobId).success) return fail("作业标识不对");
+  await haltRemaining(jobId);
+  return ok(null);
 }
 
 /** 放弃这个作业，回到上传区。Pass 1 就挂掉时，重试之外总得有条退路。 */
