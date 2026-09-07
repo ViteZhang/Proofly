@@ -149,7 +149,7 @@ export async function getJobProgress(jobId: string): Promise<ActionResult<JobPro
     candidates,
     settled,
     stalled,
-    headline: headline(job.progress_stage, job.status, current, total, drafts),
+    headline: headline(job.progress_stage, job.status, current, total, drafts, job.error_message),
   });
 }
 
@@ -159,8 +159,12 @@ function headline(
   current: number,
   total: number,
   drafts: number,
+  error: string | null,
 ): string {
   if (status !== "extracting") {
+    // 一条候选都没切出来、还带着错误 —— 那是「这次没读成」，不是
+    // 「这份文档里没有经历」。把故障说成结论，人就不会再试了。
+    if (drafts === 0 && total === 0 && error !== null) return "这份没抽成";
     return drafts === 0 ? "这份文档里没找到经历" : `抽出 ${drafts} 条，等你确认`;
   }
   if (stage === "segmenting" || total === 0) return "正在通读文档…";

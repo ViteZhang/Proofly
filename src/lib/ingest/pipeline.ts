@@ -479,9 +479,17 @@ async function failJob(jobId: string, message: string): Promise<void> {
   // 解析失败全额退回。用户没拿到东西，就不该付钱。
   await releaseJob(jobId, "failed");
   const supabase = await createClient();
+  // status 必须一起改。只写错误信息、把状态留在 extracting，这条作业就成了
+  // 一具「已经死了但还说自己在跑」的僵尸：轮询永不停止，导入页每次打开都把它
+  // 捡回来，24 小时后又悄无声息地消失。库里 2026-08-26 那条挂了 13 天，
+  // 就是这么来的。
   await supabase
     .from("ingest_jobs")
-    .update({ error_message: message, progress_stage: null })
+    .update({
+      status: "discarded",
+      error_message: message,
+      progress_stage: "finishing",
+    })
     .eq("id", jobId);
 }
 

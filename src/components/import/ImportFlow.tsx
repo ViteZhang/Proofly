@@ -47,6 +47,11 @@ export function ImportFlow({
 
   const onSettled = useCallback((p: JobProgress) => setDone(p), []);
 
+  // Pass 1 就挂了的作业现在也会落到终态（failJob 会标 discarded），于是它
+  // 同样会走 onSettled。那条红字和「重新抽一次」由 JobProgressPanel 负责，
+  // 这里再补一句「没有可以入库的经历」，就是把故障说成了结论。
+  const failedEarly = done !== null && done.errorMessage !== null && done.total === 0;
+
   if (jobId) {
     return (
       <div>
@@ -64,7 +69,7 @@ export function ImportFlow({
               <Button onClick={() => router.push(`/app/import/review/${jobId}${taskId ? `?task=${taskId}` : ""}`)}>
                 去确认这 {done.draftCount} 条
               </Button>
-            ) : (
+            ) : failedEarly ? null : (
               <p className="text-[13.5px]" style={{ color: "var(--slate)" }}>
                 这份文档里没有可以入库的经历。换一份试试，或者到经历库手动加一条。
               </p>
