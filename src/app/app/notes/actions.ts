@@ -45,19 +45,25 @@ export async function loadMore(before: string): Promise<ActionResult<ChatMessage
  * 处理是在 Server Action 里同步跑完的，页面刷新不会打断它——
  * 但新页面并不知道后台还有活。靠这条作业记录知道。
  *
- * 卡了很久的作业不算「在处理」：跑它的那次请求多半已经没了，
- * 一直转圈比说错话还难查。
+ * 判死看心跳，不看建作业时间。差别在断线那一刻：请求半路没了
+ * （关标签页、超时、进程被回收），作业就永远留在 extracting，
+ * 而「建作业时间」只会随时间流逝，于是这条僵尸会一直说「还在处理」，
+ * 把这个人的输入框锁死 —— 用户看到的就是「发完一条之后随手记不能用了」。
+ * 心跳停了三分钟就是断线，导入、体检、面试三条作业线都是这么判的。
  */
-const BUSY_WINDOW_MS = 10 * 60_000;
+const STALE_MS = 3 * 60_000;
 
 export async function chatBusy(): Promise<boolean> {
   const supabase = await createClient();
+  const cut = new Date(Date.now() - STALE_MS).toISOString();
   const { data } = await supabase
     .from("ingest_jobs")
     .select("id")
     .eq("input_type", "chat")
     .eq("status", "extracting")
-    .gt("created_at", new Date(Date.now() - BUSY_WINDOW_MS).toISOString())
+    // 心跳字段加进来之前建的作业没有心跳，拿建作业时间顶上，
+    // 否则那些老作业永远判不出断线。
+    .or(`heartbeat_at.gte.${cut},and(heartbeat_at.is.null,created_at.gte.${cut})`)
     .limit(1);
   return (data ?? []).length > 0;
 }

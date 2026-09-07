@@ -28,6 +28,10 @@ import { MAX_UNITS, stageBSchema, stageCSchema, type ChangeUnit } from "./schema
 const RECALL_N = 5;
 const UNIT_CONCURRENCY = 3;
 
+// 作业跑着的时候每 20 秒按一次心跳。判死的那条线（chatBusy 的 STALE_MS）
+// 是 3 分钟，留出九次机会 —— 一次网络抖动不该让活着的作业被判成死的。
+const BEAT_MS = 20_000;
+
 // 0.75 是硬线，与 Step 2 和 drafts 表上的 CHECK 一致。
 // 判错的代价不对称：该更新却新建，档案里会长出重复条目，用户很难发现。
 const CONFIDENCE_GATE = 0.75;
@@ -105,16 +109,43 @@ export async function runRecord(v: {
     .single();
   if (jobError || !job) return fail(`没能开始处理：${jobError?.message ?? "未知错误"}`);
 
+  // 一轮记录要跑 30 到 100 秒。这期间必须持续按心跳，否则 chatBusy 会
+  // 把还在跑的作业判成断线；反过来，请求半路没了心跳自然就停，
+  // 卡在 extracting 的作业三分钟后自己失效，不会再把输入框锁住。
+  const beat = setInterval(() => {
+    void supabase
+      .from("ingest_jobs")
+      .update({ heartbeat_at: new Date().toISOString() })
+      .eq("id", job.id)
+      .then(() => undefined);
+  }, BEAT_MS);
+
   // ---- Stage C：逐个单元 ----
   // 并发跑，但结果按单元顺序摆卡——用户说的第一件事就该排在第一张。
   const results: (Placed | { error: string })[] = new Array(units.length);
-  await inBatches(units.length, UNIT_CONCURRENCY, async (i) => {
-    try {
-      results[i] = await locateOne(job.id, units[i], i, v, split.usage.provider);
-    } catch (e) {
-      results[i] = { error: e instanceof Error ? e.message : "处理这条时出了意外" };
-    }
-  });
+  try {
+    await inBatches(units.length, UNIT_CONCURRENCY, async (i) => {
+      try {
+        results[i] = await locateOne(job.id, units[i], i, v, split.usage.provider);
+      } catch (e) {
+        results[i] = { error: e instanceof Error ? e.message : "处理这条时出了意外" };
+      }
+    });
+  } catch (e) {
+    // 这里抛出来说明连兜底都没兜住。作业必须落一个终态 ——
+    // 留在 extracting 就是一条僵尸，会把这个人的输入框锁到判死为止。
+    clearInterval(beat);
+    await supabase
+      .from("ingest_jobs")
+      .update({
+        status: "discarded",
+        progress_stage: "finishing",
+        error_message: e instanceof Error ? e.message : "处理这条时出了意外",
+      })
+      .eq("id", job.id);
+    throw e;
+  }
+  clearInterval(beat);
 
   const messages: ChatMessageView[] = [];
   let done = 0;

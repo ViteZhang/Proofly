@@ -6,8 +6,9 @@
 // 三行起，最多长到八行。Enter 发送，Shift+Enter 换行。
 // 支持粘贴图片，缩略图显示在输入框上方，可移除。
 //
-// 发送失败时不清空——话是用户打的，丢了就得重打（验收 44）。
-// 所以 onSend 返回 false 时这里什么都不动。
+// 点发送就清空，失败再把话还回来（验收 44 要的是「话不丢」，不是「不清空」）。
+// 一轮记录要在服务端跑 30 到 100 秒。等成功才清，用户就得对着自己刚打的字
+// 发呆一分半 —— 屏幕上没有任何迹象说明这句话已经送出去了，只会再点一次。
 // =============================================================
 
 import {
@@ -92,10 +93,18 @@ export function Composer({
 
   async function submit() {
     if (empty || disabled || uploading) return;
-    const okDone = await onSend(text.trim(), image?.path ?? null);
-    if (!okDone) return;
+    const body = text.trim();
+    const sent = image;
     setText("");
     setImage(null);
+
+    const okDone = await onSend(body, sent?.path ?? null);
+    if (okDone) return;
+
+    // 没发出去，把话还回去。发送期间发送键是禁用的，用户提交不了新的一条，
+    // 所以这里几乎总是空的；真不空就别盖掉他新打的（那句话更值钱）。
+    setText((cur) => (cur === "" ? body : cur));
+    setImage((cur) => cur ?? sent);
   }
 
   return (
