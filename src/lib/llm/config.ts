@@ -34,6 +34,11 @@ type ProviderSpec = {
   baseEnv: string;
   defaultBase: string;
   models: Partial<Record<Tier, string>>;
+  /**
+   * 这一家自己的请求参数，原样并进 body。
+   * 只放「不这么传它就干不了活」的东西，不放调参偏好。
+   */
+  extraBody?: Record<string, unknown>;
 };
 
 const CHAIN: ProviderSpec[] = [
@@ -49,6 +54,14 @@ const CHAIN: ProviderSpec[] = [
     keyEnv: "BAILIAN_API_KEY",
     baseEnv: "BAILIAN_BASE_URL",
     defaultBase: "",
+    // qwen3 默认开着思考模式，而抽取这类活它想不完：实测同一个 Pass 2 请求，
+    // 16000 token 的额度全花在思考上（reasoning_tokens 恰好 16000），
+    // 正文一个字都没吐出来。关掉之后 46 秒跑完、正文 6506 字，
+    // 是三家里最快的（itokens 流式 134 秒，DeepSeek 193 秒）。
+    //
+    // 关掉不亏：Pass 2 的提示词第一句就是「你没有创作权限」，要的是把
+    // 文档里**已经存在**的事实搬进字段，不是推理。
+    extraBody: { enable_thinking: false },
     models: {
       light: "qwen3.8-max",
       strong: "qwen3.8-max",
@@ -105,6 +118,8 @@ export type Provider = Endpoint & {
   /** 记进 llm_calls.provider，用来分清这笔钱是谁收的 */
   name: string;
   model: string;
+  /** 这一家自己的请求参数，发请求时并进 body。 */
+  extraBody?: Record<string, unknown>;
 };
 
 /**
@@ -125,7 +140,7 @@ export function providersFor(tier: Tier): Provider[] {
     const baseURL = process.env[spec.baseEnv] ?? spec.defaultBase;
     if (baseURL === "") continue; // 百炼的地址是每个实例一条，没有能猜的默认值
 
-    out.push({ name: spec.name, baseURL, apiKey, model });
+    out.push({ name: spec.name, baseURL, apiKey, model, extraBody: spec.extraBody });
   }
 
   // 向量档的历史配法：BAILIAN_* 之前叫 EMBEDDING_*。

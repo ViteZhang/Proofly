@@ -277,6 +277,9 @@ async function complete(
           // 不要这个的话流式响应里没有 usage，成本报表会缺一块。
           // itokens / 百炼 / DeepSeek 三家都认（实测）。
           stream_options: { include_usage: true },
+          // 这一家自己的参数（如百炼的 enable_thinking:false）。
+          // 放在最后，但它只该带「不这么传就干不了活」的东西，见 config.ts。
+          ...provider.extraBody,
         },
         { signal: gate.signal },
       );
