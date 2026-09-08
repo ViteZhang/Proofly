@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import { JdForm } from "./JdForm";
 import { GenerateResumeButton } from "@/components/resume/GenerateResumeButton";
@@ -28,17 +28,24 @@ export function JdSection({
   const [addingJd, setAddingJd] = useState(false);
   const [parsedCount, setParsedCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [parsing, startParse] = useTransition();
+  // 解析要一分钟以上，这个「在跑」的标记必须是普通 state。
+  // 用 useTransition 的话，这一分钟里 React 会连带压住路由的更新 ——
+  // 中途点别的 JD 会像卡死一样毫无反应。
+  const [parsing, setParsing] = useState(false);
+  // 「存完这份就自动解析」的待办。放 ref 不放 state：它只是个一次性的意图，
+  // 不参与渲染，改它不该多渲染一轮。
+  const autoParse = useRef<string | null>(null);
   const [removing, startRemove] = useTransition();
 
   function select(jdId: string) {
     router.replace(`/app/targets?target=${targetId}&jd=${jdId}`, { scroll: false });
   }
 
-  function parse(jdId: string) {
+  async function parse(jdId: string) {
     setError(null);
     setParsedCount(null);
-    startParse(async () => {
+    setParsing(true);
+    try {
       const res = await parseJd(jdId);
       if (!res.ok) {
         setError(res.error);
@@ -46,8 +53,25 @@ export function JdSection({
       }
       setParsedCount(res.data.length);
       router.refresh();
-    });
+    } catch {
+      setError("解析没跑完就断了，点「解析要求」再试一次");
+    } finally {
+      setParsing(false);
+    }
   }
+
+  // 存完自动解析，但要等这份 JD 真的选中了再起。
+  // 在 onCreated 里直接调 parse()，那次跳转和这次一分钟的解析会落进同一个
+  // transition，React 要等解析结束才提交跳转 —— 屏幕上整整一分钟什么都不动，
+  // 人只会以为保存失败了。effect 在提交之后跑，跳转先落地，解析才开始。
+  useEffect(() => {
+    const want = autoParse.current;
+    if (want === null || jd?.id !== want) return;
+    autoParse.current = null;
+    void parse(want);
+    // parse 每次渲染都是新函数，进依赖数组会变成死循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jd?.id]);
 
   function remove(jdId: string) {
     setError(null);
@@ -79,10 +103,10 @@ export function JdSection({
           onClose={() => setAddingJd(false)}
           onCreated={(jdId) => {
             setAddingJd(false);
+            // 存完直接解析，不让人再点一次。真正的调用交给上面那个 effect，
+            // 等跳转落地再起。createJd 里已经 revalidate 过，这里不用再 refresh。
+            autoParse.current = jdId;
             select(jdId);
-            router.refresh();
-            // 存完直接解析，不让人再点一次
-            parse(jdId);
           }}
         />
       )}
