@@ -144,6 +144,8 @@ export function VersionDetailView({ version }: { version: VersionDetail }) {
                 headline={version.headline}
                 blocks={version.blocks}
                 skills={version.skills}
+                educations={version.educations}
+                credentials={version.credentials}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 highlight={changed}
@@ -166,6 +168,8 @@ export function VersionDetailView({ version }: { version: VersionDetail }) {
                 blocks: version.blocks,
                 tradeoffs: [],
                 skills: version.skills,
+                educations: version.educations,
+                credentials: version.credentials,
                 checks: version.checks,
                 why: version.why,
                 draftCount: 0,

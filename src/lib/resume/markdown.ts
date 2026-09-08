@@ -17,12 +17,17 @@ export type RenderBlock = {
   bullets: string[];
 };
 
+/** 教育背景 / 证书段落的一行。不从 atom 来，见 profile-sections。 */
+export type ProfileLine = { main: string; when: string };
+
 export type ResumeDoc = {
   name: string;
   contact: string[];
   headline: string;
   blocks: RenderBlock[];
   skills: string[];
+  educations?: ProfileLine[];
+  credentials?: ProfileLine[];
 };
 
 /**
@@ -74,13 +79,34 @@ export function renderMarkdown(doc: ResumeDoc): string {
     }
   }
 
+  // 教育背景排在经历之后、技能之前。这是中文简历里最常见的顺序，而
+  // ATS 认的是标题文字本身，不是位置 —— 位置只影响人读起来顺不顺。
+  section2(out, "教育背景", doc.educations);
+
   if (doc.skills.length > 0) {
     out.push("");
     out.push("## 技能");
     out.push(doc.skills.join("、"));
   }
 
+  section2(out, "证书与语言", doc.credentials);
+
   return out.join("\n") + "\n";
+}
+
+/**
+ * 教育背景 / 证书这类「一行一条」的段落。
+ * 每条仍然是独立的一行「- 」，跟 bullet 同一套写法 —— ATS 对列表的
+ * 解析是稳的，对两列排版不是。
+ */
+function section2(out: string[], title: string, lines: ProfileLine[] | undefined): void {
+  if (!lines || lines.length === 0) return;
+  out.push("");
+  out.push(`## ${title}`);
+  for (const l of lines) {
+    if (l.main.trim() === "") continue;
+    out.push(`- ${[l.main, l.when].filter((s) => s && s.trim() !== "").join("　")}`);
+  }
 }
 
 /** 导出文件名：{姓名}-{岗位}-{日期}.md */

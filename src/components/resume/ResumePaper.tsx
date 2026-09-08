@@ -11,13 +11,15 @@
 import { useState } from "react";
 import { ProofDot } from "@/components/library/ProofDot";
 import { ProofBar } from "./ProofBar";
-import { groupBySection } from "@/lib/resume/markdown";
+import { groupBySection, type ProfileLine } from "@/lib/resume/markdown";
 import type { BaselineBlockView } from "@/lib/queries/resume";
 
 export function ResumePaper({
   headline,
   blocks,
   skills,
+  educations = [],
+  credentials = [],
   selectedId = null,
   onSelect,
   onMenu,
@@ -29,6 +31,9 @@ export function ResumePaper({
   headline: string;
   blocks: BaselineBlockView[];
   skills: string[];
+  /** 教育背景与证书。直接来自基本信息，不可在这里编辑 —— 改要去那一页。 */
+  educations?: ProfileLine[];
+  credentials?: ProfileLine[];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   onMenu?: (id: string, x: number, y: number) => void;
@@ -79,13 +84,44 @@ export function ResumePaper({
         />
       ))}
 
+      {/* 顺序与导出一致：教育背景 → 技能 → 证书。屏幕上和导出的必须是
+          同一份东西，不然用户会在两个界面之间做换算。 */}
+      {shown >= ordered.length && <Lines title="教育背景" lines={educations} />}
+
       {skills.length > 0 && shown >= ordered.length && (
         <section className="mt-7">
           <SectionTitle>技能</SectionTitle>
           <p className="text-[13px] leading-relaxed">{skills.join("、")}</p>
         </section>
       )}
+
+      {shown >= ordered.length && <Lines title="证书与语言" lines={credentials} />}
     </article>
+  );
+}
+
+/**
+ * 教育背景 / 证书。它们不是块，点不了也拖不动 —— 没有「怎么讲」的空间，
+ * 只有「是不是真的」，改要去基本信息那一页。
+ */
+function Lines({ title, lines }: { title: string; lines: ProfileLine[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <section className="mt-7">
+      <SectionTitle>{title}</SectionTitle>
+      <ul className="space-y-1">
+        {lines.map((l, i) => (
+          <li key={i} className="flex gap-3 text-[13px] leading-relaxed">
+            <span className="min-w-0 flex-1">{l.main}</span>
+            {l.when && (
+              <span className="font-display shrink-0 text-[12px]" style={{ color: "var(--mute)" }}>
+                {l.when}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

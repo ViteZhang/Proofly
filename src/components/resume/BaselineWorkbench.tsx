@@ -368,6 +368,8 @@ export function BaselineWorkbench({
             headline={baseline?.headline ?? ""}
             blocks={blocks}
             skills={baseline?.skills ?? []}
+            educations={baseline?.educations ?? []}
+            credentials={baseline?.credentials ?? []}
             selectedId={selectedId}
             onSelect={setSelectedId}
             draggable={!locked}
