@@ -42,14 +42,24 @@ function round(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
 
+/**
+ * 硬门槛整条排除在加权之外 —— 分母里也没有它。
+ *
+ * 为什么不是「不满足就扣分」：一条不可改变的因素会持续压低所有方向的
+ * 分数，而分数唯一的用途是「我这两周有没有进步」。学历三个月不会变，
+ * 让它常驻扣 6 分，等于给每个方向加了一个固定偏移量，读数就废了。
+ * 它单独在方向页标注一栏，用户自己权衡投不投。
+ */
 export function score(
   requirements: RequirementInput[],
   verdicts: Verdict[],
   atoms: AtomFact[],
   skills: SkillFact[],
 ): ScoreResult {
-  const totalWeight = requirements.reduce((sum, r) => sum + WEIGHT[r.kind], 0);
-  if (requirements.length === 0 || totalWeight === 0) {
+  const totalWeight = requirements
+    .filter((r) => r.hardGate === null)
+    .reduce((sum, r) => sum + WEIGHT[r.kind], 0);
+  if (requirements.length === 0) {
     return { matchScore: 0, results: [] };
   }
 
@@ -58,6 +68,35 @@ export function score(
   const byIndex = new Map(verdicts.map((v) => [v.requirementIndex, v]));
 
   const results: RequirementResult[] = requirements.map((req) => {
+    // 硬门槛不参与打分：既不进分子也不进分母，失分恒为 0。
+    // 缺口类型只在「确实不满足」时给 hard_disqualifier —— 判不了
+    // （档案里压根没填学历）不是缺口，是我们还不知道。
+    if (req.hardGate !== null) {
+      return {
+        requirementId: req.id,
+        requirementIndex: req.index,
+        text: req.text,
+        rawPhrase: req.rawPhrase,
+        kind: req.kind,
+        isStructural: req.isStructural,
+        weight: 0,
+        coverage: (req.hardGate.verdict === "met" ? "full" : "none") as Coverage,
+        coverageValue: req.hardGate.verdict === "met" ? 1 : 0,
+        bestEvidence: null,
+        evidenceMultiplier: 0,
+        requirementScore: 0,
+        scoreLoss: 0,
+        matchedAtomIds: [],
+        matchedTitles: [],
+        relatedSkillLabels: [],
+        emptySkillLabels: [],
+        reason: req.hardGate.detail,
+        mappedKind: req.mappedKind,
+        hardGate: req.hardGate,
+        gapType: req.hardGate.verdict === "unmet" ? "hard_disqualifier" : null,
+      };
+    }
+
     const weight = WEIGHT[req.kind];
     // 模型漏判了某条要求，按「没有任何经历能支撑」算 —— 漏判不能白捡分。
     const v = byIndex.get(req.index);
@@ -102,6 +141,9 @@ export function score(
       emptySkillLabels,
       reason: v?.reason ?? "",
 
+      mappedKind: req.mappedKind,
+      hardGate: null,
+
       gapType: classify({
         isStructural: req.isStructural,
         coverage,
@@ -113,9 +155,14 @@ export function score(
   });
 
   const weighted = results.reduce((sum, r) => sum + r.weight * r.requirementScore, 0);
-  const matchScore = round((weighted / totalWeight) * 100);
+  // 一份 JD 全是硬门槛（分母为 0）时不做除法。这种 JD 存在得很勉强，
+  // 但除以零会得到 NaN，而 NaN 一路写进库比一个 0 分难查得多。
+  const matchScore = totalWeight === 0 ? 0 : round((weighted / totalWeight) * 100);
 
-  assertIdentity(matchScore, results);
+  // 恒等式说的是「那 100 分被分完了」。一条可打分的要求都没有（整份 JD
+  // 全是硬门槛）时没有 100 分可分，两边都是空的，此时校验它只会得到一个
+  // 假警报。
+  if (totalWeight > 0) assertIdentity(matchScore, results);
   return { matchScore, results };
 }
 

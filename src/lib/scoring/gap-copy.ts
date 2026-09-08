@@ -41,6 +41,14 @@ export const GAP_COPY: Record<GapType, GapCopy> = {
     bg: "var(--line-soft)",
     remedy: "改叙事",
   },
+  // 第五类，跟前四类不是一个东西：前四类都在回答「怎么补」，这一类的
+  // 答案是「补不了，自己权衡投不投」。它不进缺口列表，也不生成任务。
+  hard_disqualifier: {
+    label: "不满足硬门槛",
+    fg: "var(--slate)",
+    bg: "var(--line-soft)",
+    remedy: "",
+  },
 };
 
 /** 右卡里「其他」那一档：扣了分，但不属于四类中的任何一类。 */
@@ -84,5 +92,7 @@ export function gapExplain(
         : "做过，但还没有实测数据。";
     case "structural":
       return "这个补不上，只能换个说法。";
+    case "hard_disqualifier":
+      return "这一条不是能靠行动补上的，投之前自己权衡。";
   }
 }

@@ -4,13 +4,19 @@
 // 不让一条脏记录把整页评估结果打空。
 // =============================================================
 
-import type { EvidenceLevel, GapType, Json, RequirementKind } from "@/types/database";
-import type { Coverage, RequirementResult } from "./types";
+import type { EvidenceLevel, GapType, Json, MappedKind, RequirementKind } from "@/types/database";
+import type { Coverage, HardGate, RequirementResult } from "./types";
 
 const COVERAGES: Coverage[] = ["full", "partial", "weak", "none"];
 const KINDS: RequirementKind[] = ["hard", "implicit", "nice_to_have"];
 const LEVELS: EvidenceLevel[] = ["measured", "estimated", "designed_only", "absent"];
-const GAPS: GapType[] = ["no_capability", "no_evidence", "weak_evidence", "structural"];
+const GAPS: GapType[] = [
+  "no_capability",
+  "no_evidence",
+  "weak_evidence",
+  "structural",
+  "hard_disqualifier",
+];
 
 type Obj = Record<string, Json | undefined>;
 
@@ -28,6 +34,23 @@ function strList(v: Json | undefined): string[] {
 
 function oneOf<T extends string>(v: Json | undefined, allowed: T[], fallback: T): T {
   return typeof v === "string" && (allowed as string[]).includes(v) ? (v as T) : fallback;
+}
+
+const MAPPED_KINDS: MappedKind[] = [
+  "skill",
+  "education",
+  "credential",
+  "employment",
+  "profile_fact",
+];
+
+const VERDICTS: HardGate["verdict"][] = ["met", "unmet", "unknown"];
+
+function parseGate(v: Json | undefined): HardGate | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Obj;
+  if (typeof o.verdict !== "string" || !(VERDICTS as string[]).includes(o.verdict)) return null;
+  return { verdict: o.verdict as HardGate["verdict"], detail: str(o.detail) };
 }
 
 export function parseResults(raw: Json | null | undefined): RequirementResult[] {
@@ -64,6 +87,11 @@ export function parseResults(raw: Json | null | undefined): RequirementResult[] 
       relatedSkillLabels: strList(o.relatedSkillLabels),
       emptySkillLabels: strList(o.emptySkillLabels),
       reason: str(o.reason),
+
+      // 老的 assessments.results 里没有这两个字段。给一个安全的默认：
+      // 当成普通技能要求、不是硬门槛 —— 那正是它们当初被算出来时的样子。
+      mappedKind: oneOf(o.mappedKind, MAPPED_KINDS, "skill"),
+      hardGate: parseGate(o.hardGate),
 
       gapType:
         typeof o.gapType === "string" && (GAPS as string[]).includes(o.gapType)

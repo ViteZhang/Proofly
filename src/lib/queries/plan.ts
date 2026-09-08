@@ -11,9 +11,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { WEIGHT } from "@/lib/scoring/config";
 import { parseResults } from "@/lib/scoring/parse";
-import { MAX_GAPS_IN } from "@/lib/planning/config";
+import { MAX_GAPS_IN, isActionable, type ActionableGapType } from "@/lib/planning/config";
 import type { GapState } from "@/lib/planning/impact";
-import type { AtomStatus, GapSeverity, GapType, Json } from "@/types/database";
+import type { AtomStatus, GapSeverity, Json } from "@/types/database";
 
 /** 一条待处理缺口的全貌：给模型看的部分 + 给 impact 公式用的部分。 */
 export type OpenGap = {
@@ -23,7 +23,7 @@ export type OpenGap = {
   assessmentId: string;
   requirementIndex: number;
   text: string;
-  gapType: GapType;
+  gapType: ActionableGapType;
   severity: GapSeverity;
   scoreLoss: number;
   matchedTitles: string[];
@@ -91,6 +91,10 @@ export async function listOpenGaps(): Promise<OpenGap[]> {
   for (const g of gaps ?? []) {
     const a = latestById.get(g.assessment_id);
     if (!a) continue;
+    // 硬门槛不进任务池。放进来就会排出「获得本科学历 · 1440 小时」
+    // 这种永远关不掉的任务，而它一旦出现在第一位，整个优先级排序在
+    // 用户眼里就废了。
+    if (!isActionable(g.gap_type)) continue;
 
     const results = parseResults(a.results as Json);
     const sumWeight = results.reduce((s, r) => s + WEIGHT[r.kind], 0);

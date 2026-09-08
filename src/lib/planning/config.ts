@@ -11,8 +11,21 @@
 import { COVERAGE, EVIDENCE } from "@/lib/scoring/config";
 import type { GapType, TaskActionType } from "@/types/database";
 
+/**
+ * 能靠行动关闭的缺口类型。
+ *
+ * hard_disqualifier 被排除在外，不是因为「暂时没想好给它什么行动」，
+ * 而是因为它按定义就没有行动 —— 任务池成立的前提就是可通过行动关闭。
+ * 用类型把它挡在门外，比在每个调用点写 if 可靠。
+ */
+export type ActionableGapType = Exclude<GapType, "hard_disqualifier">;
+
+export function isActionable(t: GapType): t is ActionableGapType {
+  return t !== "hard_disqualifier";
+}
+
 /** 缺口类型 → 行动类型。方案 §二 的对应表，严格按此，不自由发挥。 */
-export const ACTION_FOR_GAP: Record<GapType, TaskActionType> = {
+export const ACTION_FOR_GAP: Record<ActionableGapType, TaskActionType> = {
   weak_evidence: "collect_data",
   no_evidence: "build_evidence",
   no_capability: "learn",

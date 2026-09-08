@@ -27,6 +27,8 @@ import { matchSchema } from "@/lib/jd/schema";
 import { score } from "@/lib/scoring";
 import { gapRows } from "@/lib/scoring/gaps";
 import { getRequirements } from "@/lib/queries/jds";
+import { isHardGate } from "@/lib/jd/mapping";
+import { buildGateEvidence, gateFor } from "@/lib/assess/hard-gate";
 import type { Json } from "@/types/database";
 import type { RequirementInput, Verdict } from "@/lib/scoring/types";
 
@@ -108,36 +110,55 @@ async function runMatchAndScore(
   const requirements = await getRequirements(jdId);
   if (requirements.length === 0) return fail("这份 JD 还没解析出要求，先解析一次");
 
-  const [{ candidates, facts }, skills] = await Promise.all([
+  const [{ candidates, facts }, skills, evidence] = await Promise.all([
     buildCandidates(parsedIds.data),
     loadSkills(),
+    buildGateEvidence(),
   ]);
 
-  const res = await callLLM({
-    tier: "strong",
-    purpose: "jd_match",
-    system: MATCH_SYSTEM,
-    user: matchUser({
-      requirementsJson: JSON.stringify(
-        requirements.map((r) => ({
-          index: r.idx,
-          text: r.text,
-          raw_phrase: r.rawPhrase,
-          kind: r.kind,
-          is_structural: r.isStructural,
-        })),
-        null,
-        2,
-      ),
-      atomsJson:
-        candidates.length === 0
-          ? "（经历库是空的，或者没有与这个岗位相关的条目）"
-          : JSON.stringify(candidates, null, 2),
-      skillsJson:
-        skills.length === 0 ? "（还没有技能标签）" : JSON.stringify(skills, null, 2),
-    }),
-    jsonSchema: matchSchema,
-  });
+  // 学历、证书这类硬门槛在这里就判完了，不发给模型。
+  //
+  // 原来的做法是把它们跟其余要求一起丢过去做语义匹配 —— 模型在经历里
+  // 当然找不到「本科学历」，于是判 none，代码据此产出一条缺口，规划再
+  // 据此排出一条「获得本科学历 · 1440 小时」。整条链上每一步都在正常
+  // 工作，产出的却是一个必然错误的结论。
+  const gates = new Map(
+    requirements
+      .filter((r) => isHardGate(r.kind, r.mappedKind))
+      .map((r) => [r.id, gateFor(r.text, r.mappedKind, evidence)]),
+  );
+  const forModel = requirements.filter((r) => !gates.has(r.id));
+
+  // 整份 JD 全是硬门槛（少见但可能）时不发这次调用：一次没有要求的
+  // 匹配调用是纯浪费，而且提示词里的「要求列表」会是个空数组。
+  const res =
+    forModel.length === 0
+      ? ({ ok: true as const, data: { results: [] } })
+      : await callLLM({
+          tier: "strong",
+          purpose: "jd_match",
+          system: MATCH_SYSTEM,
+          user: matchUser({
+            requirementsJson: JSON.stringify(
+              forModel.map((r) => ({
+                index: r.idx,
+                text: r.text,
+                raw_phrase: r.rawPhrase,
+                kind: r.kind,
+                is_structural: r.isStructural,
+              })),
+              null,
+              2,
+            ),
+            atomsJson:
+              candidates.length === 0
+                ? "（经历库是空的，或者没有与这个岗位相关的条目）"
+                : JSON.stringify(candidates, null, 2),
+            skillsJson:
+              skills.length === 0 ? "（还没有技能标签）" : JSON.stringify(skills, null, 2),
+          }),
+          jsonSchema: matchSchema,
+        });
   if (!res.ok) return fail(res.error);
 
   const inputs: RequirementInput[] = requirements.map((r) => ({
@@ -147,6 +168,8 @@ async function runMatchAndScore(
     rawPhrase: r.rawPhrase,
     kind: r.kind,
     isStructural: r.isStructural,
+    mappedKind: r.mappedKind,
+    hardGate: gates.get(r.id) ?? null,
   }));
 
   const verdicts: Verdict[] = res.data.results.map((v) => ({

@@ -3,7 +3,7 @@
 // assessments.results 存的就是 RequirementResult[]，这里是唯一定义处。
 // =============================================================
 
-import type { EvidenceLevel, GapType, RequirementKind } from "@/types/database";
+import type { EvidenceLevel, GapType, MappedKind, RequirementKind } from "@/types/database";
 
 export type Coverage = "full" | "partial" | "weak" | "none";
 
@@ -15,6 +15,19 @@ export type RequirementInput = {
   rawPhrase: string | null;
   kind: RequirementKind;
   isStructural: boolean;
+  /** 这条要求对的是什么。学历、证书类不跟经历比，跟结构化档案比。 */
+  mappedKind: MappedKind;
+  /**
+   * 硬门槛判定结果。null 表示这条不是硬门槛，走正常的匹配打分。
+   * 非 null 的要求整条被排除在加权之外 —— 见 score() 的注释。
+   */
+  hardGate: HardGate | null;
+};
+
+/** 硬门槛的一条判定。detail 是给界面直接显示的人话。 */
+export type HardGate = {
+  verdict: "met" | "unmet" | "unknown";
+  detail: string;
 };
 
 /** 模型对一条要求给出的判定。分数不在里面——模型给了也会被忽略。 */
@@ -69,6 +82,10 @@ export type RequirementResult = {
   /** relatedSkillLabels 里 evidence_strength 为 none 的那些。 */
   emptySkillLabels: string[];
   reason: string;
+
+  mappedKind: MappedKind;
+  /** 非 null 表示这条走的是硬门槛那条路，不参与加权。 */
+  hardGate: HardGate | null;
 
   gapType: GapType | null;
 };

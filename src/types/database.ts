@@ -40,7 +40,17 @@ export type NudgeRule = "R1" | "R2" | "R3";
 export type LlmTier = "light" | "strong" | "vision" | "embedding";
 export type RenderWeight = "expand" | "brief" | "one_line" | "omit";
 export type RequirementKind = "hard" | "implicit" | "nice_to_have";
-export type GapType = "no_capability" | "no_evidence" | "weak_evidence" | "structural";
+// hard_disqualifier 与另外四类不同：它不可通过行动关闭，所以不进任务池，
+// 也不计入扣分，只在方向页单独标注一栏。
+export type GapType =
+  | "no_capability"
+  | "no_evidence"
+  | "weak_evidence"
+  | "structural"
+  | "hard_disqualifier";
+
+/** 一条要求对的是什么。学历、证书类要求跟结构化档案比对，不跟经历做语义匹配。 */
+export type MappedKind = "skill" | "education" | "credential" | "employment" | "profile_fact";
 export type GapSeverity = "high" | "medium" | "low";
 export type TaskActionType =
   | "collect_data"
@@ -912,6 +922,7 @@ export type Database = {
           jd_id: string;
           text: string;
           kind: RequirementKind;
+          mapped_kind: MappedKind;
           idx: number | null;
           raw_phrase: string | null;
           is_structural: boolean;
@@ -927,6 +938,7 @@ export type Database = {
           jd_id: string;
           text: string;
           kind?: RequirementKind;
+          mapped_kind?: MappedKind;
           idx?: number | null;
           raw_phrase?: string | null;
           is_structural?: boolean;
@@ -942,6 +954,7 @@ export type Database = {
           jd_id?: string;
           text?: string;
           kind?: RequirementKind;
+          mapped_kind?: MappedKind;
           idx?: number | null;
           raw_phrase?: string | null;
           is_structural?: boolean;

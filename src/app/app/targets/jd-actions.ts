@@ -14,6 +14,7 @@ import { PARSE_SYSTEM, parseUser } from "@/lib/llm/jd-prompts";
 import { createClient } from "@/lib/supabase/server";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import { KINDS, parseSchema } from "@/lib/jd/schema";
+import { classifyRequirement } from "@/lib/jd/mapping";
 import { getRequirements, type RequirementRow } from "@/lib/queries/jds";
 
 function firstIssue(e: z.ZodError): string {
@@ -139,6 +140,10 @@ async function runParseJd(jdId: string): Promise<ActionResult<RequirementRow[]>>
       kind: r.kind,
       is_structural: r.is_structural,
       derived_from: r.kind === "implicit" ? r.derived_from : null,
+      // 归类由代码做，不加进提示词：同一份 JD 解析十次必须得到同样的
+      // mapped_kind，不然「上次说我学历满足这次说不满足」会让人不再信
+      // 这个分数。而且不加钱、不加一次调用、不增加整份解析失败的风险。
+      mapped_kind: classifyRequirement(r.text, r.raw_phrase),
     }));
 
   const { error } = await supabase.from("requirements").insert(rows);
@@ -173,6 +178,9 @@ export async function updateRequirement(
       text: parsed.data.text,
       kind: parsed.data.kind,
       is_structural: parsed.data.isStructural,
+      // 改了文字就重新归类。留着旧的 mapped_kind 会出现「这条已经被改成
+      // 一条技能要求了，系统还拿它去比学历」。
+      mapped_kind: classifyRequirement(parsed.data.text, null),
     })
     .eq("id", id);
 
@@ -207,6 +215,7 @@ export async function addRequirement(
     text: parsed.data.text,
     kind: parsed.data.kind,
     is_structural: parsed.data.isStructural,
+    mapped_kind: classifyRequirement(parsed.data.text, null),
     // 手动加的没有 JD 原文措辞，留空。Step 6 做关键词对齐时会跳过它。
     raw_phrase: null,
   });

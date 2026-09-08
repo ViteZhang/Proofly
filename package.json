@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "pnpm guard:plan && pnpm guard:budget && pnpm billing:test && pnpm telemetry:test && pnpm health:test && pnpm redeem:test && pnpm arch:test && next build",
+    "build": "pnpm guard:plan && pnpm guard:budget && pnpm billing:test && pnpm telemetry:test && pnpm health:test && pnpm redeem:test && pnpm gate:hard && pnpm arch:test && next build",
     "start": "next start",
     "lint": "eslint",
     "eval:extract": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/eval-extract.ts",
@@ -33,6 +33,7 @@
     "health:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/health/*.test.ts",
     "gen-code": "node --import ./scripts/ts-resolve.mjs --env-file=.env.local scripts/gen-code.ts",
     "redeem:test": "node --import ./scripts/ts-resolve.mjs --test src/lib/redeem/*.test.ts",
+    "gate:hard": "node --import ./scripts/ts-resolve.mjs --test src/lib/jd/*.test.ts src/lib/scoring/*.test.ts",
     "redeem:concurrency": "bash scripts/redeem-concurrency.sh"
   },
   "dependencies": {

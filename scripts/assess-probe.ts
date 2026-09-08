@@ -139,6 +139,9 @@ const requirements: RequirementInput[] = parsed.data
   .sort((a, b) => a.index - b.index)
   .map((r, i) => ({
     id: `req-${i + 1}`,
+    // 探针只跑打分，不跑硬门槛那条路：那一段要读库，而这个脚本是脱库的。
+    mappedKind: "skill" as const,
+    hardGate: null,
     index: i + 1,
     text: r.text,
     rawPhrase: r.raw_phrase,
