@@ -69,12 +69,15 @@ export function ReviewQueue({
     atom: ExtractedAtom | null,
     parentId: string | null,
     asCreate: boolean,
+    /** 人在「需你判断」卡片上点的那个方案指向的经历 */
+    targetId: string | null,
   ) {
     const r = await acceptDraft({
       draftId: d.id,
       atom,
       parentAtomId: parentId,
       asCreate,
+      targetAtomId: targetId,
     });
     if (!r.ok) throw new Error(r.error);
     // 回流上传路径：这条经历就是那条行动的产出。入库成功才标完成 ——
@@ -175,7 +178,8 @@ export function ReviewQueue({
                     projects={queue.projects}
                     leaving={leaving.has(d.id)}
                     action={{
-                      accept: (atom, parentId, asCreate) => accept(d, atom, parentId, asCreate),
+                      accept: (atom, parentId, asCreate, targetId) =>
+                        accept(d, atom, parentId, asCreate, targetId),
                       reject: () => reject(d),
                     }}
                   />
