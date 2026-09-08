@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import { JdForm } from "./JdForm";
 import { GenerateResumeButton } from "@/components/resume/GenerateResumeButton";
@@ -12,6 +12,10 @@ import { BIND_LABEL } from "@/lib/jd/labels";
 import type { JdCard, JdDetail } from "@/lib/queries/jds";
 
 // S6 区块二。列表 + 录入 + 解析结果。
+//
+// 手风琴：一份 JD 的解析结果就长在它自己那一行底下，不再飞到列表外面去。
+// 展开哪一份由 ?jd= 决定（刷新、分享都还原得回来），收起是纯前端的事 ——
+// 收起不该丢掉已经取回来的数据。
 export function JdSection({
   targetId,
   jds,
@@ -21,12 +25,14 @@ export function JdSection({
   targetId: string;
   jds: JdCard[];
   jd: JdDetail | null;
-  /** 区块三：评估结果。由页面装配好传进来。 */
+  /** 区块三：评估结果。由页面装配好传进来，跟着展开的那一份走。 */
   assessPanel?: React.ReactNode;
 }) {
   const router = useRouter();
   const [addingJd, setAddingJd] = useState(false);
-  const [parsedCount, setParsedCount] = useState<number | null>(null);
+  // 「解析出 N 条」这个条幅必须记住是哪一份的。只存个数字的话，
+  // 解析完 A 再点开 B，B 头上会挂着 A 的战果。
+  const [parsed, setParsed] = useState<{ jdId: string; count: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 解析要一分钟以上，这个「在跑」的标记必须是普通 state。
   // 用 useTransition 的话，这一分钟里 React 会连带压住路由的更新 ——
@@ -35,15 +41,32 @@ export function JdSection({
   // 「存完这份就自动解析」的待办。放 ref 不放 state：它只是个一次性的意图，
   // 不参与渲染，改它不该多渲染一轮。
   const autoParse = useRef<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const [removing, startRemove] = useTransition();
+
+  const open = jd !== null && !collapsed;
 
   function select(jdId: string) {
     router.replace(`/app/targets?target=${targetId}&jd=${jdId}`, { scroll: false });
   }
 
+  // 点自己 = 收起／展开，点别的 = 换一份。
+  function toggle(jdId: string) {
+    if (jdId === jd?.id) {
+      setCollapsed((c) => !c);
+      return;
+    }
+    setError(null);
+    // 「解析出 N 条」是解析完那一下的追问，一次性的。换一份 JD 就该消失，
+    // 不然回头再点回来，那份早就解析好的 JD 头上又挂着同一句提示。
+    setParsed(null);
+    setCollapsed(false);
+    select(jdId);
+  }
+
   async function parse(jdId: string) {
     setError(null);
-    setParsedCount(null);
+    setParsed(null);
     setParsing(true);
     try {
       const res = await parseJd(jdId);
@@ -51,7 +74,7 @@ export function JdSection({
         setError(res.error);
         return;
       }
-      setParsedCount(res.data.length);
+      setParsed({ jdId, count: res.data.length });
       router.refresh();
     } catch {
       setError("解析没跑完就断了，点「解析要求」再试一次");
@@ -103,6 +126,7 @@ export function JdSection({
           onClose={() => setAddingJd(false)}
           onCreated={(jdId) => {
             setAddingJd(false);
+            setCollapsed(false);
             // 存完直接解析，不让人再点一次。真正的调用交给上面那个 effect，
             // 等跳转落地再起。createJd 里已经 revalidate 过，这里不用再 refresh。
             autoParse.current = jdId;
@@ -120,14 +144,27 @@ export function JdSection({
           className="mt-3 overflow-hidden rounded-card"
           style={{ background: "var(--card)", border: "1px solid var(--line)" }}
         >
-          {jds.map((j) => (
-            <JdRow
-              key={j.id}
-              jd={j}
-              selected={j.id === jd?.id}
-              onSelect={() => select(j.id)}
-            />
-          ))}
+          {jds.map((j) => {
+            const expanded = open && j.id === jd?.id;
+            return (
+              <Fragment key={j.id}>
+                <JdRow jd={j} expanded={expanded} onToggle={() => toggle(j.id)} />
+                {expanded && jd && (
+                  <JdBody
+                    jd={jd}
+                    parsing={parsing}
+                    removing={removing}
+                    parsedCount={parsed?.jdId === jd.id ? parsed.count : null}
+                    onDismissParsed={() => setParsed(null)}
+                    onParse={() => void parse(jd.id)}
+                    onRemove={() => remove(jd.id)}
+                    onChanged={() => router.refresh()}
+                    assessPanel={assessPanel}
+                  />
+                )}
+              </Fragment>
+            );
+          })}
         </div>
       )}
 
@@ -136,130 +173,148 @@ export function JdSection({
           {error}
         </p>
       )}
+    </section>
+  );
+}
 
-      {jd && (
+// 展开后的内容。缩进 + 换个底色，让人一眼看出它属于上面那一行。
+function JdBody({
+  jd,
+  parsing,
+  removing,
+  parsedCount,
+  onDismissParsed,
+  onParse,
+  onRemove,
+  onChanged,
+  assessPanel,
+}: {
+  jd: JdDetail;
+  parsing: boolean;
+  removing: boolean;
+  parsedCount: number | null;
+  onDismissParsed: () => void;
+  onParse: () => void;
+  onRemove: () => void;
+  onChanged: () => void;
+  assessPanel?: React.ReactNode;
+}) {
+  return (
+    <div
+      className="px-5 py-4 pl-[38px]"
+      style={{ background: "var(--bg)", borderBottom: "1px solid var(--line-soft)" }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {jd.sourceUrl ? (
+          <a
+            href={jd.sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="max-w-[52ch] truncate text-[12px] hover:underline"
+            style={{ color: "var(--mute)" }}
+          >
+            {jd.sourceUrl}
+          </a>
+        ) : (
+          <span />
+        )}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button variant="secondary" size="sm" onClick={onParse} disabled={parsing}>
+            {parsing ? "解析中…" : jd.requirements.length > 0 ? "重新解析" : "解析要求"}
+          </Button>
+          <GenerateResumeButton jdId={jd.id} />
+          <Button variant="danger" size="sm" onClick={onRemove} disabled={removing}>
+            删除
+          </Button>
+        </div>
+      </div>
+
+      {/* 解析完直接追问，不让用户自己再点一次 */}
+      {parsedCount !== null && (
         <div
-          className="mt-4 rounded-card px-5 py-4"
-          style={{ background: "var(--card)", border: "1px solid var(--line)" }}
+          className="mt-3 flex flex-wrap items-center gap-3 rounded-btn px-3 py-2"
+          style={{ background: "var(--ai-soft)" }}
         >
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h3 className="text-[15px] font-semibold">
-                {jd.company ?? "未填公司"} · {jd.roleTitle ?? "未填岗位"}
-              </h3>
-              {jd.sourceUrl && (
-                <a
-                  href={jd.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-0.5 inline-block max-w-[52ch] truncate text-[12px] hover:underline"
-                  style={{ color: "var(--mute)" }}
-                >
-                  {jd.sourceUrl}
-                </a>
-              )}
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => parse(jd.id)}
-                disabled={parsing}
-              >
-                {parsing
-                  ? "解析中…"
-                  : jd.requirements.length > 0
-                    ? "重新解析"
-                    : "解析要求"}
-              </Button>
-              <GenerateResumeButton jdId={jd.id} />
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => remove(jd.id)}
-                disabled={removing}
-              >
-                删除
-              </Button>
-            </div>
-          </div>
-
-          {/* 解析完直接追问，不让用户自己再点一次 */}
-          {parsedCount !== null && (
-            <div
-              className="mt-3 flex flex-wrap items-center gap-3 rounded-btn px-3 py-2"
-              style={{ background: "var(--ai-soft)" }}
+          <span className="text-[13px]" style={{ color: "var(--ai)" }}>
+            解析出 {parsedCount} 条要求。要现在评估匹配度吗？
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button variant="text" size="sm" onClick={onDismissParsed}>
+              先不用
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                onDismissParsed();
+                document
+                  .getElementById("assess-panel")
+                  ?.scrollIntoView({ behavior: "smooth", block: "center" });
+              }}
             >
-              <span className="text-[13px]" style={{ color: "var(--ai)" }}>
-                解析出 {parsedCount} 条要求。要现在评估匹配度吗？
-              </span>
-              <div className="ml-auto flex items-center gap-1.5">
-                <Button variant="text" size="sm" onClick={() => setParsedCount(null)}>
-                  先不用
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setParsedCount(null);
-                    document
-                      .getElementById("assess-panel")
-                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  }}
-                >
-                  去评估
-                </Button>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-3">
-            {jd.requirements.length === 0 ? (
-              <p className="text-[13px]" style={{ color: "var(--mute)" }}>
-                还没解析。点上面的「解析要求」，把这份 JD 拆成一条条能对照的能力点。
-              </p>
-            ) : (
-              <RequirementList
-                jdId={jd.id}
-                requirements={jd.requirements}
-                onChanged={() => router.refresh()}
-              />
-            )}
+              去评估
+            </Button>
           </div>
         </div>
       )}
 
+      <div className="mt-3">
+        {jd.requirements.length === 0 ? (
+          <p className="text-[13px]" style={{ color: "var(--mute)" }}>
+            还没解析。点上面的「解析要求」，把这份 JD 拆成一条条能对照的能力点。
+          </p>
+        ) : (
+          <RequirementList jdId={jd.id} requirements={jd.requirements} onChanged={onChanged} />
+        )}
+      </div>
+
       {assessPanel}
-    </section>
+    </div>
   );
 }
 
 function JdRow({
   jd,
-  selected,
-  onSelect,
+  expanded,
+  onToggle,
 }: {
   jd: JdCard;
-  selected: boolean;
-  onSelect: () => void;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const bind = BIND_LABEL[jd.bind];
   const bindColor = jd.bind === "none" ? "var(--mute)" : "var(--proof)";
 
   return (
     <div
-      className="flex items-center gap-3 px-4 py-2.5"
-      style={{
-        borderBottom: "1px solid var(--line-soft)",
-        background: selected ? "var(--line-soft)" : undefined,
-      }}
+      className="flex items-center gap-1 pr-3"
+      style={{ borderBottom: "1px solid var(--line-soft)" }}
     >
-      {/* 选中整行的按钮跟「生成简历」是两个动作，不能嵌套成一个 button */}
+      {/* 展开整行的按钮跟「生成简历」是两个动作，不能嵌套成一个 button */}
       <button
         type="button"
-        onClick={onSelect}
-        aria-pressed={selected}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150 hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink"
       >
+        {/* 这个箭头就是「这一行能点」的全部提示，别去掉 */}
+        <svg
+          aria-hidden
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          className="shrink-0 transition-transform duration-150"
+          style={{ transform: expanded ? "rotate(90deg)" : "none", color: "var(--mute)" }}
+        >
+          <path
+            d="M3.5 1.5 L7 5 L3.5 8.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+
         <span className="min-w-0 flex-1 truncate text-[13.5px]">
           {jd.company ?? "未填公司"}
           <span style={{ color: "var(--slate)" }}> · {jd.roleTitle ?? "未填岗位"}</span>
@@ -292,7 +347,7 @@ function JdRow({
       {/* 简历要到 Step 6，按钮先给个说明，状态判定逻辑现在就是对的 */}
       <Link
         href={`/app/resume?jd=${jd.id}`}
-        className="shrink-0 rounded-btn px-2.5 py-1 text-[12.5px] transition-colors hover:bg-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+        className="shrink-0 rounded-btn px-2.5 py-1 text-[12.5px] transition-colors hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
         style={{ color: "var(--slate)", border: "1px solid var(--line)" }}
       >
         {bind.action}
