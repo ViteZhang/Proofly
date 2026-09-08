@@ -334,7 +334,22 @@ async function complete(
           failover: true,
         };
       }
-      if (chunks === 0) return { ok: false, error: "模型没有返回任何内容", failover: true };
+
+      // 流正常结束却一个字都没有。
+      //
+      // 这**不是**「模型答得不对」—— 交给下面的 JSON 校验去处理的话，错误会
+      // 变成「输出不符合结构要求：返回内容为空」，而那条路是不换家的
+      // （答得不对换谁都一样）。空响应恰恰相反：几乎一定是这一家出了问题，
+      // 换一家最可能就好了。实测在 Pass 1 上踩到过，卡在这里没往下走。
+      //
+      // 块数和 finish 一起报出来，才分得清「一块没收到」和「收到了但全是空的」。
+      if (raw.trim() === "") {
+        return {
+          ok: false,
+          error: `模型没有返回内容（收到 ${chunks} 块，finish=${finish ?? "无"}）`,
+          failover: true,
+        };
+      }
     } catch (e) {
       await logCall({
         tier: opts.tier,
