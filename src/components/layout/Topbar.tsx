@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BalancePill, type BalanceProps } from "@/components/billing/BalancePill";
 import { isGlobalPath } from "@/lib/nav";
+import { SearchPalette } from "./SearchPalette";
 
 export type TargetOption = { id: string; name: string };
 
@@ -112,19 +113,8 @@ export function Topbar({
       */}
       <div className="ml-auto">{!hideBalance && <BalancePill {...balance} />}</div>
 
-      {/* 全局搜索占位：显示 ⌘K，本步不实现 */}
-      <div
-        className="flex h-8 min-w-0 items-center gap-2 rounded-btn px-3 text-[13px]"
-        style={{ background: "var(--bg)", border: "1px solid var(--line)", color: "var(--mute)" }}
-      >
-        <span className="truncate">搜索经历、技能、任务</span>
-        <kbd
-          className="font-display rounded px-1 text-[11px]"
-          style={{ background: "var(--card)", border: "1px solid var(--line)", color: "var(--slate)" }}
-        >
-          ⌘K
-        </kbd>
-      </div>
+      <SearchPalette />
+
     </header>
   );
 }
