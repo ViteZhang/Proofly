@@ -32,10 +32,14 @@ export function JobProgressPanel({
   const [error, setError] = useState<string | null>(null);
   const settledSent = useRef(false);
 
-  // 后台作业跑在 after() 里，进程一没（热重载、重启、崩溃）活就没人接了。
-  // 作业会一直标着 extracting，进度停住，还不报错。发现了先自己续一次；
-  // 续过还断，就交给使用者决定，别在后台反复烧钱。
-  const triedResume = useRef(false);
+  // 一次函数调用装不下整个作业：平台有 maxDuration，管道跑到时间不够就主动
+  // 让出，把剩下的候选留给下一次。让出时它会把心跳往回拨，于是下面这段
+  // 立刻认领并接着抽——所以「续跑」是常态，不是异常。
+  //
+  // 只要**还在往前走**就一直续。停在原地的那次续跑才算数：续过一轮
+  // 一条都没多抽出来，就别在后台反复烧钱了，交给使用者决定。
+  // 记的是「上次发起续跑时已经抽好几条」，-1 表示还没续过。
+  const resumedAt = useRef(-1);
   const [resumed, setResumed] = useState<"no" | "once" | "stuck">("no");
 
   // 点了停之后按钮要立刻变样，不能等下一次轮询——那要 2 秒，
@@ -83,8 +87,8 @@ export function JobProgressPanel({
       if (r.data.settled) return; // 跑完就停下来，别一直问
 
       if (r.data.stalled) {
-        if (!triedResume.current) {
-          triedResume.current = true;
+        if (r.data.current > resumedAt.current) {
+          resumedAt.current = r.data.current;
           setResumed("once");
           await resumeJob(jobId);
         } else {
@@ -111,7 +115,7 @@ export function JobProgressPanel({
 
   async function rerun(fn: () => Promise<unknown>) {
     settledSent.current = false;
-    triedResume.current = false;
+    resumedAt.current = -1;
     setResumed("no");
     await fn();
     setNonce((n) => n + 1);
@@ -182,7 +186,7 @@ export function JobProgressPanel({
         <div className="mt-3 border-t pt-3" style={{ borderColor: "var(--line)" }}>
           {resumed === "once" ? (
             <p className="text-[13px]" style={{ color: "var(--slate)" }}>
-              抽取中途断过一次，已经接着上次继续了。抽好的 {p.current} 条不会重来。
+              一轮跑不完，正接着上次继续。抽好的 {p.current} 条不会重来。
             </p>
           ) : (
             <>

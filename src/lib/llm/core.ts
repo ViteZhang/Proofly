@@ -53,12 +53,11 @@ type BaseOptions = {
   /** JSON 校验失败后的重试次数，默认 1。 */
   maxRetries?: number;
   /**
-   * 这一次调用的总时限，默认 CALL_DEADLINE_MS（5 分钟）。
+   * 这一次调用的**总**预算，默认 CALL_BUDGET_MS。换供应商也算在里面。
    *
-   * 只有一种情况该调大：任务本身就要生成很长的结构化输出，5 分钟不是
-   * 「卡住了」而是「还没写完」。面试题包是唯一这样的地方 —— 一次要 15–20
-   * 道题、每道带 3–4 个应答要点，实测单次要 300–500s。把它按卡死处理，
-   * 用户永远拿不到题。
+   * 注意语义：这是整条兜底链一起花的时间，不是「每一家各给这么久」。
+   * 调用方知道自己还剩多少时间（函数被平台回收前），就把剩余时间传进来，
+   * 这一层负责把它摊给链上各家。传大了没有意义 —— 平台的墙不认。
    */
   deadlineMs?: number;
 };
@@ -79,16 +78,23 @@ export type EmbeddingOptions = BaseOptions & {
   user: string;
 };
 
-// ---- 重载 ----
-// 一次请求最多等这么久。实测：itokens 上最慢 1m31s，DeepSeek 兜底跑一段
-// 5200 字的长片段要 2m09s（输出 8448 token）。按最慢那个的 1.8 倍留余量，
-// 不然会把正在正常生成的兜底调用误杀掉。
-const ATTEMPT_TIMEOUT_MS = 240_000;
+// ---- 时间预算 ----
+//
+// 一通调用（含换供应商）最多花这么久。
+//
+// 这个数必须**明显小于平台给一次函数调用的时间**，否则兜底链是死的。
+// 之前是「单家 300 秒」，而 Vercel 一次函数调用也是 300 秒：主用卡住时，
+// 平台先把整个函数杀掉，第二家永远轮不到。线上实测——一份 1292 字的文档，
+// Pass 2 直连模型跑了 400 秒还没回来，而百炼、DeepSeek 当时都是好的
+// （40 / 89 token 每秒），却一次都没被试到。
+//
+// 快速报错时兜底一直是有用的（日志里能看到 itokens 秒挂、百炼接手）。
+// 坏的是「卡住」这一种，而那恰恰是最常见的一种。
+const CALL_BUDGET_MS = 200_000;
 
-// 连 SDK 重试一起算的总上限。SDK 对超时也会重试，不封顶的话一次卡死
-// 能拖到 50 分钟——那条候选就一直挂在 pending，界面看着跟死了一样，
-// 还不报错。宁可判失败让人重试，也不能无声地等下去。
-const CALL_DEADLINE_MS = 300_000;
+// 一家至少要给这么久，否则等于没试 —— 拿 8 秒去敲一个大模型，
+// 结果只会是又一条超时，白白把预算耗在换家上。
+const MIN_PROVIDER_MS = 40_000;
 
 // ---- 熔断 ----
 // 供应商整体宕机时，「每条候选都先花 5 分钟撞主用、再换兜底」是不能接受的：
@@ -138,23 +144,38 @@ export async function callLLM(
 
   let last: Fail = { ok: false, error: "模型调用失败" };
 
+  const budget = opts.deadlineMs ?? CALL_BUDGET_MS;
+  const startedAt = Date.now();
+
   for (let i = 0; i < ordered.length; i++) {
     const p = ordered[i];
+
+    // 把剩下的时间摊给还没试的几家。前面一家很快挂掉，后面的就分得更多。
+    const left = budget - (Date.now() - startedAt);
+    const share = Math.floor(left / (ordered.length - i));
+    if (i > 0 && share < MIN_PROVIDER_MS) {
+      // 预算见底。再拿十几秒去敲下一家，只是把「超时」换个说法，
+      // 还会多烧一次 token。就地认输，让调用方看见真正的原因。
+      break;
+    }
+    const slice = Math.max(share, MIN_PROVIDER_MS);
+
     const client = new OpenAI({
       apiKey: p.apiKey,
       baseURL: p.baseURL,
-      // 网络层重试，与下面的校验重试是两回事。
-      // 中转站在并发下会回 503，SDK 的指数退避能扛过大部分，所以给到 4 次。
-      maxRetries: 4,
-      // 传了 deadlineMs 就跟着放宽：SDK 先超时的话会自己重试，
-      // 于是一次本来只是慢的生成被重跑四遍，比不放宽还糟。
-      timeout: opts.deadlineMs ?? ATTEMPT_TIMEOUT_MS,
+      // 网络层重试，与下面的校验重试是两回事。中转站在并发下会回 503，
+      // SDK 的指数退避能扛过大部分。但重试是**藏在一次调用里**的：
+      // 日志上只留一行，看不出中间摔了几跤 —— 线上见过一次 540 token 的
+      // Pass 1 花掉 159 秒，按当时实测的 40 token/秒该是 14 秒。
+      // 所以次数要收，且下面的 AbortSignal 会把总时间卡死。
+      maxRetries: 2,
+      timeout: slice,
     });
 
     const r: Attempt<unknown> =
       opts.tier === "embedding"
-        ? await embed(client, p, opts)
-        : await complete(client, p, opts);
+        ? await embed(client, p, opts, slice)
+        : await complete(client, p, opts, slice);
 
     if (r.ok) {
       clearStrikes(p.name);
@@ -188,6 +209,7 @@ async function complete(
   client: OpenAI,
   provider: Provider,
   opts: TextOptions & { jsonSchema?: ZodType },
+  sliceMs: number,
 ): Promise<Attempt<unknown>> {
   const model = provider.model;
   const maxRetries = opts.maxRetries ?? 1;
@@ -201,7 +223,9 @@ async function complete(
     { role: "user", content: userContent(opts) },
   ];
 
-  const deadline = opts.deadlineMs ?? CALL_DEADLINE_MS;
+  // 这一家的截止时刻。校验重试要共用它，不能每一轮都重新发一份完整时间——
+  // 那样两轮就把预算翻倍，后面的兜底家又轮不到了。
+  const endsAt = Date.now() + sliceMs;
 
   let attempts = 0;
   let promptTokens = 0;
@@ -214,6 +238,10 @@ async function complete(
     const t0 = Date.now();
     let raw: string;
     const cap = opts.maxTokens ?? MAX_OUTPUT_TOKENS[opts.tier];
+    const leftMs = endsAt - Date.now();
+    if (leftMs <= 0) {
+      return { ok: false, error: timedOut(sliceMs), failover: true };
+    }
     try {
       // 已知问题：抽一条带三个能力点的经历时，输出能到几千 token，
       // 中转站偶尔会在生成完成前回 504 网关超时。流式本该能绕开
@@ -226,7 +254,7 @@ async function complete(
           messages,
           max_completion_tokens: cap,
         },
-        { signal: AbortSignal.timeout(deadline) },
+        { signal: AbortSignal.timeout(leftMs) },
       );
       const ms = Date.now() - t0;
       promptTokens += res.usage?.prompt_tokens ?? 0;
@@ -260,7 +288,7 @@ async function complete(
         model,
         succeeded: false,
       });
-      return { ok: false, error: apiError(e), failover: shouldFailover(e) };
+      return { ok: false, error: apiError(e, sliceMs), failover: shouldFailover(e) };
     }
 
     const usage: LLMUsage = {
@@ -365,6 +393,7 @@ async function embed(
   client: OpenAI,
   provider: Provider,
   opts: EmbeddingOptions,
+  sliceMs: number,
 ): Promise<Attempt<number[]>> {
   const model = provider.model;
   const t0 = Date.now();
@@ -375,7 +404,7 @@ async function embed(
         input: opts.user,
         dimensions: EMBEDDING_DIM,
       },
-      { signal: AbortSignal.timeout(CALL_DEADLINE_MS) },
+      { signal: AbortSignal.timeout(sliceMs) },
     );
     const ms = Date.now() - t0;
     await logCall({
@@ -421,7 +450,7 @@ async function embed(
       model,
       succeeded: false,
     });
-    return { ok: false, error: apiError(e), failover: shouldFailover(e) };
+    return { ok: false, error: apiError(e, sliceMs), failover: shouldFailover(e) };
   }
 }
 
@@ -476,11 +505,15 @@ async function logCall(entry: CallLog): Promise<void> {
   }
 }
 
-function apiError(e: unknown): string {
+/** 这一家没在分到的时间里回话。文案里带上秒数，日志和界面都好对账。 */
+function timedOut(sliceMs: number): string {
+  return `等了 ${Math.round(sliceMs / 1000)} 秒模型还没回，换一家`;
+}
+
+function apiError(e: unknown, sliceMs: number): string {
   // 超时两种：SDK 自己的单次超时，和我们用 AbortSignal 卡的总时限。
   // 都要排在 APIConnectionError 前面——前者是它的子类。
-  if (e instanceof OpenAI.APIUserAbortError)
-    return `等了 ${Math.round(CALL_DEADLINE_MS / 60000)} 分钟模型还没回，先算这条失败`;
+  if (e instanceof OpenAI.APIUserAbortError) return timedOut(sliceMs);
   if (e instanceof OpenAI.APIConnectionTimeoutError) return "模型接口超时没回";
   if (e instanceof OpenAI.AuthenticationError) return "模型接口拒绝了这个 key";
   if (e instanceof OpenAI.NotFoundError)
