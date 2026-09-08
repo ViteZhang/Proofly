@@ -41,27 +41,45 @@ export function JdSection({
   // 「存完这份就自动解析」的待办。放 ref 不放 state：它只是个一次性的意图，
   // 不参与渲染，改它不该多渲染一轮。
   const autoParse = useRef<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
   const [removing, startRemove] = useTransition();
 
-  const open = jd !== null && !collapsed;
+  // 展开哪一份，由点击当场说了算，不等服务端。
+  // 换一份 JD 要一次服务端往返（实测 1.6 秒）。这段时间里如果拿服务端
+  // 回来的 jd 当准绳，点第二条看上去毫无反应，人自然会接着点；而那时
+  // jd 还是上一份，「点的是不是自己」就判反了 —— 于是收起，或者展开
+  // 错的那一条。意图归前端，内容归服务端，各管各的。
+  const [openId, setOpenId] = useState<string | null>(jd?.id ?? null);
+  // 最后一次向服务端要的是哪一份。判断「还用不用再跑一趟」只能看它，
+  // 不能看服务端现在手上是哪份 —— 上一趟还没回来时，那个是过期的。
+  const [wanted, setWanted] = useState<string | null>(jd?.id ?? null);
+  const [seenId, setSeenId] = useState<string | null>(jd?.id ?? null);
+  if ((jd?.id ?? null) !== seenId) {
+    setSeenId(jd?.id ?? null);
+    // 只有送来的正是我们最后要的那份，才让它决定展开哪一份。
+    // 否则这是一趟过期的往返（人已经改点别的了），不许它抢。
+    if ((jd?.id ?? null) === wanted) setOpenId(jd?.id ?? null);
+  }
 
   function select(jdId: string) {
     router.replace(`/app/targets?target=${targetId}&jd=${jdId}`, { scroll: false });
   }
 
-  // 点自己 = 收起／展开，点别的 = 换一份。
+  // 点自己 = 收起，点别的 = 换一份。
   function toggle(jdId: string) {
-    if (jdId === jd?.id) {
-      setCollapsed((c) => !c);
+    if (jdId === openId) {
+      setOpenId(null);
       return;
     }
     setError(null);
     // 「解析出 N 条」是解析完那一下的追问，一次性的。换一份 JD 就该消失，
     // 不然回头再点回来，那份早就解析好的 JD 头上又挂着同一句提示。
     setParsed(null);
-    setCollapsed(false);
-    select(jdId);
+    setOpenId(jdId);
+    // 已经在要这一份了就别再跑一趟（收起后又点开同一份就是这种情况）
+    if (jdId !== wanted) {
+      setWanted(jdId);
+      select(jdId);
+    }
   }
 
   async function parse(jdId: string) {
@@ -126,7 +144,8 @@ export function JdSection({
           onClose={() => setAddingJd(false)}
           onCreated={(jdId) => {
             setAddingJd(false);
-            setCollapsed(false);
+            setOpenId(jdId);
+            setWanted(jdId);
             // 存完直接解析，不让人再点一次。真正的调用交给上面那个 effect，
             // 等跳转落地再起。createJd 里已经 revalidate 过，这里不用再 refresh。
             autoParse.current = jdId;
@@ -145,11 +164,13 @@ export function JdSection({
           style={{ background: "var(--card)", border: "1px solid var(--line)" }}
         >
           {jds.map((j) => {
-            const expanded = open && j.id === jd?.id;
+            const expanded = j.id === openId;
+            const ready = expanded && jd?.id === j.id;
             return (
               <Fragment key={j.id}>
                 <JdRow jd={j} expanded={expanded} onToggle={() => toggle(j.id)} />
-                {expanded && jd && (
+                {expanded && !ready && <JdBodyPending />}
+                {ready && jd && (
                   <JdBody
                     jd={jd}
                     parsing={parsing}
@@ -174,6 +195,23 @@ export function JdSection({
         </p>
       )}
     </section>
+  );
+}
+
+// 内容还在路上。展开是立刻的，内容要等一次服务端往返 —— 这块占位就是
+// 那一秒多里唯一能证明「点到了」的东西，别省。
+function JdBodyPending() {
+  return (
+    <div
+      className="px-5 py-4 pl-[38px] text-[13px]"
+      style={{
+        background: "var(--bg)",
+        borderBottom: "1px solid var(--line-soft)",
+        color: "var(--mute)",
+      }}
+    >
+      正在取这份 JD 的解析结果…
+    </div>
   );
 }
 
