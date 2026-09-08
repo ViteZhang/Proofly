@@ -208,15 +208,18 @@ export async function saveEmployment(
 
   const supabase = await createClient();
 
+  // 人手动存过一次，就不再是「回填出来还没人看过」的状态了。
+  const row = { ...d, needs_review: false };
+
   if (id === null) {
-    const { data, error } = await supabase.from("employments").insert(d).select("id").single();
+    const { data, error } = await supabase.from("employments").insert(row).select("id").single();
     if (error || !data) return fail("没能保存，再试一次");
     refresh();
     return ok({ id: data.id });
   }
 
   if (!Id.safeParse(id).success) return fail("这条履历不存在");
-  const { error } = await supabase.from("employments").update(d).eq("id", id);
+  const { error } = await supabase.from("employments").update(row).eq("id", id);
   if (error) return fail("没能保存，再试一次");
   refresh();
   return ok({ id });
@@ -353,4 +356,88 @@ export async function profileItemImpact(
   }
 
   return ok({ lines });
+}
+
+// ---- 由经历库回填履历 ----
+
+/**
+ * 按 org 把经历聚合成履历草稿。
+ *
+ * 起止时间取该公司名下所有经历的 min / max —— 这个结果必然偏窄：在职但
+ * 那几个月没有可写的项目，那段时间就聚合不出来。所以回填出来的每一条都
+ * 打上 needs_review，人在界面上逐条校对过才算数。
+ *
+ * 个人项目、志愿、社区类的经历不参与：它们不属于任何一段任职，硬塞进去
+ * 会凭空造出一家叫「个人项目」的公司。
+ *
+ * 已经存在的同名履历不动，只把经历挂上去 —— 用户可能已经手工填过并校对
+ * 过时间了，回填不该把它盖回一个偏窄的值。
+ */
+export async function backfillEmployments(): Promise<
+  ActionResult<{ created: number; linked: number }>
+> {
+  const supabase = await createClient();
+
+  const [{ data: atoms }, { data: existing }] = await Promise.all([
+    supabase
+      .from("atoms")
+      .select("id,org,role,period_start,period_end,employment_id,context,level")
+      .eq("context", "employment")
+      .not("org", "is", null),
+    supabase.from("employments").select("id,org"),
+  ]);
+
+  const byOrg = new Map<string, typeof atoms>();
+  for (const a of atoms ?? []) {
+    const org = a.org?.trim();
+    if (!org) continue;
+    const list = byOrg.get(org) ?? [];
+    list.push(a);
+    byOrg.set(org, list);
+  }
+  if (byOrg.size === 0) return ok({ created: 0, linked: 0 });
+
+  const idByOrg = new Map((existing ?? []).map((e) => [e.org.trim(), e.id]));
+  let created = 0;
+
+  for (const [org, list] of byOrg) {
+    if (idByOrg.has(org)) continue;
+
+    const starts = (list ?? []).map((a) => a.period_start).filter((d): d is string => !!d);
+    const running = (list ?? []).some((a) => a.period_end === null);
+    const ends = (list ?? []).map((a) => a.period_end).filter((d): d is string => !!d);
+
+    // 一条时间都没有的公司不建：那样会造出一条起止全空的履历，
+    // 而 period_start 是必填的，只能瞎填一个日期 —— 那是编造。
+    if (starts.length === 0) continue;
+
+    const { data, error } = await supabase
+      .from("employments")
+      .insert({
+        org,
+        title: (list ?? []).find((a) => a.role)?.role ?? null,
+        period_start: starts.reduce((a, b) => (a < b ? a : b)),
+        period_end: running || ends.length === 0 ? null : ends.reduce((a, b) => (a > b ? a : b)),
+        needs_review: true,
+      })
+      .select("id")
+      .single();
+
+    if (error || !data) continue;
+    idByOrg.set(org, data.id);
+    created += 1;
+  }
+
+  let linked = 0;
+  for (const [org, list] of byOrg) {
+    const empId = idByOrg.get(org);
+    if (!empId) continue;
+    const ids = (list ?? []).filter((a) => a.employment_id !== empId).map((a) => a.id);
+    if (ids.length === 0) continue;
+    const { error } = await supabase.from("atoms").update({ employment_id: empId }).in("id", ids);
+    if (!error) linked += ids.length;
+  }
+
+  refresh();
+  return ok({ created, linked });
 }

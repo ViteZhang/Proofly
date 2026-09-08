@@ -33,12 +33,16 @@ export function EmploymentSection({
   items,
   action,
   rowActions,
+  backfill,
 }: {
   items: Employment[];
   action?: React.ReactNode;
   rowActions?: (e: Employment) => React.ReactNode;
+  /** 空态下的「从经历库整理」入口。 */
+  backfill?: React.ReactNode;
 }) {
   const gaps = gapsBetween(items);
+  const pending = items.filter((e) => e.needsReview).length;
 
   return (
     <Section
@@ -48,11 +52,28 @@ export function EmploymentSection({
       desc="项目明细仍在经历库。这里只管哪家公司、什么职位、从几月到几月。"
       action={action}
     >
+      {/* 这句话必须挂在状态上，不能只在整理完的那一瞬间弹一下 ——
+          按钮所在的空态整理完就消失了，提示跟着一起没，而人恰恰要在
+          之后的某一刻才回来核对。 */}
+      {pending > 0 && (
+        <div
+          className="mb-3 rounded-btn px-3.5 py-3 text-[12.5px]"
+          style={{ background: "var(--warn-soft)", color: "#8A5A00" }}
+        >
+          有 {pending} 段是从经历库整理出来的，起止时间要你逐条核对。聚合只算到「有项目可写」
+          的那几个月，在职却没有可写项目的时段会被吞掉 —— 直接拿去生成简历，日期会偏窄。
+          改一次并保存，这个标记就消失。
+        </div>
+      )}
+
       {items.length === 0 ? (
-        <Empty
-          title="还没有履历"
-          hint="填一条，简历的工作经历段落就有准确的起止时间了"
-        />
+        <>
+          <Empty
+            title="还没有履历"
+            hint="填一条，简历的工作经历段落就有准确的起止时间了"
+          />
+          {backfill}
+        </>
       ) : (
         items.map((e) => {
           const gap = gaps.get(e.id);
@@ -62,7 +83,19 @@ export function EmploymentSection({
               when={period(e.periodStart, e.periodEnd)}
               actions={rowActions?.(e)}
             >
-              <div className="text-[14px] font-semibold">{e.org}</div>
+              <div className="flex flex-wrap items-center gap-2 text-[14px] font-semibold">
+                {e.org}
+                {/* 回填出来的起止时间必然偏窄。没有这个标记，一份日期错的
+                    简历会以完全正常的样子导出去。 */}
+                {e.needsReview && (
+                  <span
+                    className="shrink-0 rounded-pill px-2.5 py-[3px] text-[11.5px] font-medium"
+                    style={{ background: "var(--warn-soft)", color: "var(--warn)" }}
+                  >
+                    起止待确认
+                  </span>
+                )}
+              </div>
               <div className="mt-0.5 text-[12.5px]" style={{ color: "var(--slate)" }}>
                 {[e.title, e.city, EMPLOYMENT_TYPE_LABEL[e.employmentType]]
                   .filter(Boolean)

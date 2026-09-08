@@ -44,6 +44,8 @@ export type Employment = {
   periodEnd: string | null;
   entityNote: string | null;
   sortOrder: number;
+  /** 由经历库回填出来、还没人逐条校对过起止时间。 */
+  needsReview: boolean;
   /** 挂在这段履历下的经历条数。展开时告诉用户删掉会影响什么。 */
   atomCount: number;
 };
@@ -110,7 +112,9 @@ export async function listEmployments(): Promise<Employment[]> {
   const [{ data }, { data: atoms }] = await Promise.all([
     supabase
       .from("employments")
-      .select("id,org,title,city,employment_type,period_start,period_end,entity_note,sort_order")
+      .select(
+        "id,org,title,city,employment_type,period_start,period_end,entity_note,sort_order,needs_review",
+      )
       .order("period_start", { ascending: false }),
     supabase.from("atoms").select("employment_id").not("employment_id", "is", null),
   ]);
@@ -131,6 +135,7 @@ export async function listEmployments(): Promise<Employment[]> {
     periodEnd: r.period_end,
     entityNote: r.entity_note,
     sortOrder: r.sort_order ?? 0,
+    needsReview: r.needs_review,
     atomCount: count.get(r.id) ?? 0,
   }));
 }

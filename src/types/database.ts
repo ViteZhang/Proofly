@@ -199,6 +199,7 @@ export type Database = {
           period_start: string;
           period_end: string | null;
           entity_note: string | null;
+          needs_review: boolean;
           sort_order: number | null;
           created_at: string | null;
           updated_at: string | null;
@@ -213,6 +214,7 @@ export type Database = {
           period_start: string;
           period_end?: string | null;
           entity_note?: string | null;
+          needs_review?: boolean;
           sort_order?: number | null;
           created_at?: string | null;
           updated_at?: string | null;
@@ -227,6 +229,7 @@ export type Database = {
           period_start?: string;
           period_end?: string | null;
           entity_note?: string | null;
+          needs_review?: boolean;
           sort_order?: number | null;
           created_at?: string | null;
           updated_at?: string | null;

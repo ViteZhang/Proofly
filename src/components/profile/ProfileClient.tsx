@@ -11,6 +11,7 @@ import { EducationDrawer } from "./EducationDrawer";
 import { EducationSection } from "./EducationSection";
 import { EmploymentDrawer } from "./EmploymentDrawer";
 import { EmploymentSection } from "./EmploymentSection";
+import { BackfillButton } from "./BackfillButton";
 import { IdentityEditor } from "./IdentityEditor";
 import type { ProfileFact } from "@/lib/queries/facts";
 
@@ -73,7 +74,14 @@ export function ProfileClient({
 
       <EmploymentSection
         items={employments}
-        action={add(() => setEmp(null))}
+        action={
+          <div className="flex gap-2">
+            {/* 空的时候标题旁不重复放一个：那时候整个空态就是这个按钮 */}
+            {employments.length > 0 && <BackfillButton compact />}
+            {add(() => setEmp(null))}
+          </div>
+        }
+        backfill={<BackfillButton />}
         rowActions={(e) =>
           rowButtons(
             () => setEmp(e),
