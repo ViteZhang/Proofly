@@ -56,6 +56,11 @@ const HEARTBEAT_MS = 30_000;
 //
 // 所以这里自己拿一个更小的预算，宁可主动让出，也不要被平台砍。
 // 留出的余量给冷启动、几次写库和结算。
+// 想放宽到 800 秒（Vercel Pro + Fluid 的上限）时，改两处、只改两处：
+//   1. src/app/app/import/page.tsx 的 maxDuration
+//   2. 这里的 INVOCATION_BUDGET_MS（留 50 秒余量，写 750_000）
+// 下面几个 CAP 会跟着变宽还是不变，由 budget.guard.test.ts 校验，
+// 改坏了 pnpm build 直接红。
 const INVOCATION_BUDGET_MS = 250_000;
 
 // 开一条新候选至少要剩这么多。不够就留给下一次调用 ——
@@ -69,8 +74,12 @@ const UNIT_MIN_MS = 150_000;
 const PASS1_BUDGET_MS = 90_000;
 
 // Pass 2 是最贵的一步，但也要留出 Pass 3 和写库的时间。
-const PASS2_CAP_MS = 140_000;
-const PASS3_CAP_MS = 45_000;
+//
+// 175 秒是拿实测倒推的：itokens 流式抽一条 1292 字的经历要 134 秒
+// （非流式时它 61 秒就被网关 504 掐了，看不到真实耗时）。留三成余量。
+// Pass 3 只是判定意图，历史平均 8 秒，30 秒足够宽。
+const PASS2_CAP_MS = 175_000;
+const PASS3_CAP_MS = 30_000;
 const RECALL_BUDGET_MS = 20_000;
 
 // 收尾写库要留的余量。

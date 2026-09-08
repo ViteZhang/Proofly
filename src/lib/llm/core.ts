@@ -80,7 +80,8 @@ export type EmbeddingOptions = BaseOptions & {
 
 // ---- 时间预算 ----
 //
-// 一通调用（含换供应商）最多花这么久。
+// 一通调用（含换供应商）最多花这么久。这是**总**预算，不按家平摊：
+// 谁先上谁就用剩下的全部，死了由断流看门狗在 45 秒内揪出来换下一家。
 //
 // 这个数必须**明显小于平台给一次函数调用的时间**，否则兜底链是死的。
 // 之前是「单家 300 秒」，而 Vercel 一次函数调用也是 300 秒：主用卡住时，
@@ -95,6 +96,13 @@ const CALL_BUDGET_MS = 200_000;
 // 一家至少要给这么久，否则等于没试 —— 拿 8 秒去敲一个大模型，
 // 结果只会是又一条超时，白白把预算耗在换家上。
 const MIN_PROVIDER_MS = 40_000;
+
+// 流式下真正的「卡住」信号：这么久没吐出下一个字就判这家死了。
+//
+// 比总时长准得多。总时长会把正在正常生成的长回复误杀 —— 一条经历要几千
+// token，两分钟是正常的，不是卡住。而只要还在一个字一个字往外吐，
+// 它就是活的；连着 45 秒一个字都没有，那才是真的没气了。
+const STALL_MS = 45_000;
 
 // ---- 熔断 ----
 // 供应商整体宕机时，「每条候选都先花 5 分钟撞主用、再换兜底」是不能接受的：
@@ -150,15 +158,20 @@ export async function callLLM(
   for (let i = 0; i < ordered.length; i++) {
     const p = ordered[i];
 
-    // 把剩下的时间摊给还没试的几家。前面一家很快挂掉，后面的就分得更多。
+    // 剩下多少就给多少，不按家数平摊。
+    //
+    // 平摊是流式之前的思路：那时候分不清「卡死」和「正在慢慢写」，只能靠
+    // 缩短单家时限来保证后面几家轮得到。现在有断流看门狗了 —— 一家真死了
+    // 45 秒内就会暴露，用不着预先扣住它的时间。反过来，平摊会把正在正常
+    // 生成的长回复误杀：实测 itokens 流式抽一条要 134 秒，按三家平摊只给
+    // 66 秒，等于亲手掐死唯一那个干得成活的。
     const left = budget - (Date.now() - startedAt);
-    const share = Math.floor(left / (ordered.length - i));
-    if (i > 0 && share < MIN_PROVIDER_MS) {
+    if (i > 0 && left < MIN_PROVIDER_MS) {
       // 预算见底。再拿十几秒去敲下一家，只是把「超时」换个说法，
       // 还会多烧一次 token。就地认输，让调用方看见真正的原因。
       break;
     }
-    const slice = Math.max(share, MIN_PROVIDER_MS);
+    const slice = Math.max(left, MIN_PROVIDER_MS);
 
     const client = new OpenAI({
       apiKey: p.apiKey,
@@ -236,47 +249,79 @@ async function complete(
   for (let round = 0; round <= maxRetries; round++) {
     attempts++;
     const t0 = Date.now();
-    let raw: string;
+    let raw = "";
     const cap = opts.maxTokens ?? MAX_OUTPUT_TOKENS[opts.tier];
     const leftMs = endsAt - Date.now();
     if (leftMs <= 0) {
       return { ok: false, error: timedOut(sliceMs), failover: true };
     }
+    const gate = watchdog(leftMs);
+    let lastUsage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
     try {
-      // 已知问题：抽一条带三个能力点的经历时，输出能到几千 token，
-      // 中转站偶尔会在生成完成前回 504 网关超时。流式本该能绕开
-      // （连接一直有数据），但这个沙箱的出网代理会把 SSE 连接重置，
-      // 没法在这里验证，所以不上没验证过的改动。
-      // 当前的兜底是每条可以单独重试，见 ingest/pipeline.ts。
+      // 必须流式。这不是为了看字一个个蹦出来，是为了让连接上一直有数据 ——
+      // 抽一条经历要生成几千 token，非流式时中间那一两分钟连接上是空的，
+      // 于是：
+      //   · itokens 的网关 61 秒回 504（实测，同一个请求流式跑通只要 134 秒）
+      //   · 百炼在整段生成完成前不发响应头，超过 Node undici 默认的
+      //     300 秒 headersTimeout 就被底层掐掉，报「等不到响应头」
+      // 两家都是「等太久」而不是「答不出来」。流式一开，两家的病一起好。
+      //
+      // 顺带拿到 stall 这个真正的卡死信号：不是「总共花了多久」，
+      // 而是「多久没吐出下一个字」。前者会误杀正在正常生成的长回复。
       const res = await client.chat.completions.create(
         {
           model,
           messages,
           max_completion_tokens: cap,
+          stream: true,
+          // 不要这个的话流式响应里没有 usage，成本报表会缺一块。
+          // itokens / 百炼 / DeepSeek 三家都认（实测）。
+          stream_options: { include_usage: true },
         },
-        { signal: AbortSignal.timeout(leftMs) },
+        { signal: gate.signal },
       );
+
+      let finish: string | null = null;
+      let chunks = 0;
+      raw = "";
+      for await (const part of res) {
+        chunks++;
+        gate.beat();
+        raw += part.choices[0]?.delta?.content ?? "";
+        const fr = part.choices[0]?.finish_reason;
+        if (fr) finish = fr;
+        if (part.usage) {
+          promptTokens += part.usage.prompt_tokens ?? 0;
+          completionTokens += part.usage.completion_tokens ?? 0;
+          lastUsage = part.usage;
+        }
+      }
+
       const ms = Date.now() - t0;
-      promptTokens += res.usage?.prompt_tokens ?? 0;
-      completionTokens += res.usage?.completion_tokens ?? 0;
       await logCall({
         tier: opts.tier,
         provider: provider.name,
         purpose: opts.purpose,
-        promptTokens: res.usage?.prompt_tokens ?? null,
-        completionTokens: res.usage?.completion_tokens ?? null,
+        promptTokens: lastUsage?.prompt_tokens ?? null,
+        completionTokens: lastUsage?.completion_tokens ?? null,
         durationMs: ms,
         model,
         succeeded: true,
       });
 
-      if (res.choices[0]?.finish_reason === "length") {
+      if (finish === "length") {
+        // 百炼实测见过一种：16000 token 全花在思考上，正文一个字没有。
+        // 这跟「写到一半被截断」是两回事，说出来才好换一家。
         return {
           ok: false,
-          error: `模型输出被 ${cap} token 上限截断，这条没抽完`,
+          error:
+            raw.trim() === ""
+              ? `模型想了 ${cap} token 也没开始作答，这条它做不了`
+              : `模型输出被 ${cap} token 上限截断，这条没抽完`,
+          failover: true,
         };
       }
-      raw = res.choices[0]?.message?.content ?? "";
+      if (chunks === 0) return { ok: false, error: "模型没有返回任何内容", failover: true };
     } catch (e) {
       await logCall({
         tier: opts.tier,
@@ -288,7 +333,14 @@ async function complete(
         model,
         succeeded: false,
       });
+      // 断流和「总时间到了」在 SDK 眼里都是 abort，得自己分清楚，
+      // 不然界面上永远只有一句「超时」，查不出到底是哪一种。
+      if (gate.stalled()) {
+        return { ok: false, error: `模型吐到一半断了（${STALL_MS / 1000} 秒没动静）`, failover: true };
+      }
       return { ok: false, error: apiError(e, sliceMs), failover: shouldFailover(e) };
+    } finally {
+      gate.done();
     }
 
     const usage: LLMUsage = {
@@ -503,6 +555,43 @@ async function logCall(entry: CallLog): Promise<void> {
   } catch {
     // 忽略
   }
+}
+
+/**
+ * 一次流式请求的看门狗：总时限 + 断流检测，合成一个 AbortSignal。
+ *
+ * 两条命都要看。只看总时限，卡死的连接会一直挂到时间用完，把后面几家的
+ * 预算一起赔进去；只看断流，一个慢慢吐字但永远吐不完的回复能拖到天荒地老。
+ */
+function watchdog(totalMs: number): {
+  signal: AbortSignal;
+  beat: () => void;
+  stalled: () => boolean;
+  done: () => void;
+} {
+  const ctl = new AbortController();
+  let stalled = false;
+  let gap: ReturnType<typeof setTimeout>;
+
+  const arm = () => {
+    clearTimeout(gap);
+    gap = setTimeout(() => {
+      stalled = true;
+      ctl.abort();
+    }, STALL_MS);
+  };
+  const total = setTimeout(() => ctl.abort(), totalMs);
+  arm();
+
+  return {
+    signal: ctl.signal,
+    beat: arm,
+    stalled: () => stalled,
+    done: () => {
+      clearTimeout(gap);
+      clearTimeout(total);
+    },
+  };
 }
 
 /** 这一家没在分到的时间里回话。文案里带上秒数，日志和界面都好对账。 */
