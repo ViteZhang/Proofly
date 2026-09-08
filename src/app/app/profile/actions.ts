@@ -15,7 +15,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { fail, ok, type ActionResult } from "@/lib/domain";
-import { FACT_REGISTRY, isFactKey } from "@/lib/profile/registry";
+import { FACT_KEYS, FACT_REGISTRY, isFactKey } from "@/lib/profile/registry";
 
 function refresh() {
   revalidatePath("/app/profile");
@@ -84,6 +84,55 @@ export async function saveFact(key: string, value: string): Promise<ActionResult
   const { error } = await supabase
     .from("profile_facts")
     .upsert({ key, value: parsed.data || null }, { onConflict: "user_id,key" });
+
+  if (error) return fail("没能保存，再试一次");
+  refresh();
+  return ok(null);
+}
+
+// ---- 从原「事实层」页搬过来的两个动作 ----
+//
+// 那一页已经并进基本信息，动作跟着搬家，免得留下一个只为了两个函数
+// 而存在的目录。
+
+const PRESET = new Set<string>(FACT_KEYS);
+
+/** 首次进入基本信息时把缺的预置项补成空记录，用户看到的是一张完整清单。 */
+export async function ensureFacts(keys: string[]): Promise<ActionResult> {
+  const wanted = keys.filter((k) => PRESET.has(k));
+  if (wanted.length === 0) return ok(null);
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profile_facts")
+    .upsert(
+      wanted.map((key) => ({ key, value: null })),
+      { onConflict: "user_id,key", ignoreDuplicates: true },
+    );
+
+  if (error) return fail("没能初始化基本信息，刷新再试");
+  refresh();
+  return ok(null);
+}
+
+/**
+ * 定下一个值，冲突就算解决。
+ * conflict_log 原样保留——曾经不一致这件事本身是体检模块要追溯的证据。
+ */
+export async function resolveFact(id: string, value: string): Promise<ActionResult> {
+  const parsed = z
+    .object({
+      id: z.uuid("这条事实不存在"),
+      value: z.string().trim().min(1, "选一个，或者自己填一个").max(500, "最多 500 字"),
+    })
+    .safeParse({ id, value });
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "填写有误");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profile_facts")
+    .update({ value: parsed.data.value, status: "RESOLVED" })
+    .eq("id", parsed.data.id);
 
   if (error) return fail("没能保存，再试一次");
   refresh();

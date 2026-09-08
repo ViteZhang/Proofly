@@ -2195,6 +2195,10 @@ export type Database = {
       };
     };
     Functions: {
+      set_account_profile: {
+        Args: { p_display_name: string | null; p_avatar_color: string };
+        Returns: undefined;
+      };
       commit_draft: {
         Args: {
           p_draft_id: string;

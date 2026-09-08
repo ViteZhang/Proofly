@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { saveFact } from "@/app/app/profile/actions";
-import { resolveFact } from "@/app/app/facts/actions";
+import { resolveFact } from "@/app/app/profile/actions";
 import { FACT_KEYS, FACT_REGISTRY, type FactKey } from "@/lib/profile/registry";
 import type { ProfileFact } from "@/lib/queries/facts";
 import { ExportTag, Section } from "./parts";

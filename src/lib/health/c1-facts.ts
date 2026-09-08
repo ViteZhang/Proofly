@@ -27,7 +27,7 @@ export const c1Facts: HealthCheck = {
         const body =
           lines.length > 0
             ? `几处材料说法不一样：\n${lines.join("\n")}\n\n定死一个之后，简历、面试题里用到「${f.label}」的地方都会跟着走这一个口径。`
-            : `这一项被标成了待定，但没有记下候选值。去事实台账里填一个准确的值。`;
+            : `这一项被标成了待定，但没有记下候选值。去基本信息里填一个准确的值。`;
 
         return {
           code: "C1",
@@ -35,7 +35,7 @@ export const c1Facts: HealthCheck = {
           title: `「${f.label}」还没定下来`,
           detail: `${body}\n\n在解决之前，简历生成会被拦住。`,
           refIds: [f.id],
-          resolveLink: `/app/facts?key=${encodeURIComponent(f.key)}&highlight=1`,
+          resolveLink: `/app/profile?key=${encodeURIComponent(f.key)}&highlight=1`,
           fingerprint: `C1:${f.key}`,
           autoFixable: false,
         };

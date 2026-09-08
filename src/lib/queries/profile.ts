@@ -203,3 +203,35 @@ export async function getProfileOverview(): Promise<ProfileOverview> {
     }),
   };
 }
+
+/**
+ * 侧栏要的那几样：展示名、头像色、常驻地、还差几项。
+ *
+ * 不复用 getProfileOverview —— 那个要读五张表，而它挂在 layout 上，
+ * 每翻一页都会跑一遍。这里只读三张，且不去数经历。
+ */
+export async function getNavProfile(): Promise<{
+  account: AccountProfile;
+  location: string | null;
+  missingCount: number;
+}> {
+  const supabase = await createClient();
+  const [{ facts }, account, eduRes, empRes] = await Promise.all([
+    getProfileFacts(),
+    getAccountProfile(),
+    supabase.from("educations").select("id", { count: "exact", head: true }),
+    supabase.from("employments").select("id", { count: "exact", head: true }),
+  ]);
+
+  const done = completeness({
+    facts: facts.map((f) => ({ key: f.key, value: f.value })),
+    educationCount: eduRes.count ?? 0,
+    employmentCount: empRes.count ?? 0,
+  });
+
+  return {
+    account,
+    location: facts.find((f) => f.key === "location")?.value ?? null,
+    missingCount: done.missing.length,
+  };
+}

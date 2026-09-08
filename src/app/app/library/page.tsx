@@ -35,7 +35,7 @@ export default async function LibraryPage({
     <div>
       <h1 className="font-display text-[26px] font-semibold tracking-tight">经历库</h1>
       <p className="mt-1.5 text-[14px]" style={{ color: "var(--slate)" }}>
-        事实层，全局唯一
+        所有简历都从这里取材，改一处，下游全同步
       </p>
 
       <div className="mt-5 flex items-start gap-5">

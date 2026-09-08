@@ -1,7 +1,7 @@
 import { getProfileOverview } from "@/lib/queries/profile";
 import { CompletenessCard } from "@/components/profile/CompletenessCard";
 import { ProfileClient } from "@/components/profile/ProfileClient";
-import { EnsureFacts } from "@/components/facts/EnsureFacts";
+import { EnsureFacts } from "@/components/profile/EnsureFacts";
 
 /**
  * 基本信息。

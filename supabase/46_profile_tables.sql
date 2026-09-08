@@ -147,3 +147,33 @@ end $$;
 drop policy if exists own_insert on user_profiles;
 drop policy if exists own_delete on user_profiles;
 revoke insert, delete on user_profiles from anon, authenticated;
+
+-- 账户设置的唯一写入口。
+--
+-- 不给客户端 insert 权限（那样能删了再建，等于把 signup_grant_issued
+-- 清零），但历史账号可能压根没有 user_profiles 那一行 —— 一个只能
+-- update 的路径会让这些人存不下自己的名字，且看不到任何解释。
+-- 用 SECURITY DEFINER 收口：只认 auth.uid()，只写这三列。
+create or replace function set_account_profile(
+  p_display_name text,
+  p_avatar_color text
+) returns void language plpgsql security definer set search_path = public as $$
+declare v_user uuid := auth.uid();
+begin
+  if v_user is null then
+    raise exception '未登录';
+  end if;
+  if length(coalesce(p_display_name, '')) > 40 then
+    raise exception '显示名最多 40 字';
+  end if;
+
+  insert into user_profiles (user_id, nickname, avatar_kind, avatar_color)
+  values (v_user, nullif(btrim(coalesce(p_display_name, '')), ''), 'color', p_avatar_color)
+  on conflict (user_id) do update
+    set nickname = excluded.nickname,
+        avatar_kind = excluded.avatar_kind,
+        avatar_color = excluded.avatar_color;
+end $$;
+
+revoke all on function set_account_profile(text, text) from public, anon;
+grant execute on function set_account_profile(text, text) to authenticated;
