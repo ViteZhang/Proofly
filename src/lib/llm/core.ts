@@ -210,7 +210,17 @@ function shouldFailover(e: unknown): boolean {
   if (e instanceof OpenAI.APIUserAbortError) return true; // 撞上我们的总时限
   if (e instanceof OpenAI.APIConnectionError) return true; // 连不上，含 SDK 超时
   if (e instanceof OpenAI.RateLimitError) return true;
-  if (e instanceof OpenAI.APIError) return (e.status ?? 0) >= 500;
+  if (e instanceof OpenAI.APIError) {
+    // 没有状态码 = 这个错不是服务端给的一个完整 HTTP 响应，而是传输层出的事：
+    // 流被上游掐断、连接中途没了。改成流式之后才浮出来的一类 ——
+    // 非流式时代错误总是完整响应，永远带状态码，所以 `?? 0` 从来没暴露过。
+    //
+    // 实测踩到的原话：「Upstream response stream was interrupted」，
+    // status 是 undefined，于是 `(undefined ?? 0) >= 500` 为假，判成「换家也
+    // 没用」就地失败。可这恰恰最该换家：不是请求有问题，是这家的连接断了。
+    if (e.status === undefined) return true;
+    return e.status >= 500;
+  }
   return false;
 }
 
