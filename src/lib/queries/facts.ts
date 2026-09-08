@@ -5,31 +5,14 @@
 // =============================================================
 
 import { createClient } from "@/lib/supabase/server";
+import { FACT_KEYS, FACT_LABEL, type FactKey } from "@/lib/profile/registry";
 import { parseFactConflicts, type FactConflict } from "@/lib/domain";
 import type { ProfileFactStatus } from "@/types/database";
 
-// 预置的事实项。顺序即事实层页面的展示顺序；缺失的记录在 1.7 首次进入时补建。
-export const FACT_KEYS = [
-  "name",
-  "phone",
-  "email",
-  "location",
-  "years_of_experience",
-  "headline",
-  "entity_disclosure",
-] as const;
-
-export type FactKey = (typeof FACT_KEYS)[number];
-
-export const FACT_LABEL: Record<FactKey, string> = {
-  name: "姓名",
-  phone: "手机",
-  email: "邮箱",
-  location: "常驻地",
-  years_of_experience: "工作年限",
-  headline: "一句话定位",
-  entity_disclosure: "主体披露口径",
-};
+// 预置的事实项与它们的标签由 lib/profile/registry 统一定义 —— 那份表同时
+// 管着「进不进简历」，两处各写一份必然漂移。这里只做转出。
+export { FACT_KEYS, FACT_LABEL } from "@/lib/profile/registry";
+export type { FactKey } from "@/lib/profile/registry";
 
 export type ProfileFact = {
   id: string;
