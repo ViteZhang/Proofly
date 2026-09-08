@@ -13,6 +13,13 @@ import { c7CrossTarget } from "./c7-cross-target";
 import { c8Conflict } from "./c8-conflict";
 import { c9Stale } from "./c9-stale";
 import { c10Method } from "./c10-method";
+import {
+  c11ResumeEducation,
+  c12ProfileMissing,
+  c13EmploymentGap,
+  c14OrgMismatch,
+  c15DisplayName,
+} from "./c11-c15-profile";
 
 /** 快扫。顺序即体检页「通过项」里的展示顺序。 */
 export const QUICK_CHECKS: HealthCheck[] = [
@@ -25,6 +32,11 @@ export const QUICK_CHECKS: HealthCheck[] = [
   c7CrossTarget,
   c9Stale,
   c10Method,
+  c11ResumeEducation,
+  c12ProfileMissing,
+  c13EmploymentGap,
+  c14OrgMismatch,
+  c15DisplayName,
 ];
 
 /** 深扫。调模型，二十到六十秒，只能手动触发。 */

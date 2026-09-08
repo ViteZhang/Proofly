@@ -12,6 +12,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { parseFactConflicts, parseStringList } from "@/lib/domain";
 import { FACT_LABEL, type FactKey } from "@/lib/queries/facts";
+import { completeness } from "@/lib/profile/completeness";
 import { parseOutline } from "@/lib/queries/interview";
 import { QUICK_CHECKS, DEEP_CHECKS } from "@/lib/health/registry";
 import { buildReport, type HealthReport, type IgnoreRecord } from "@/lib/health/report";
@@ -55,6 +56,9 @@ export async function loadHealthContext(now = new Date()): Promise<HealthContext
     gateQ,
     outlineQ,
     resumes,
+    eduQ,
+    empQ,
+    accountQ,
   ] = await Promise.all([
       supabase.from("profile_facts").select("id,key,value,status,conflict_log,disclosure_rule"),
       supabase
@@ -77,6 +81,9 @@ export async function loadHealthContext(now = new Date()): Promise<HealthContext
         .is("resolved_at", null),
       supabase.from("interview_questions").select("id,from_atom_id,answer_outline"),
       loadResumes(supabase),
+      supabase.from("educations").select("id,school,degree"),
+      supabase.from("employments").select("id,org,period_start,period_end,needs_review"),
+      supabase.from("user_profiles").select("nickname").maybeSingle(),
     ]);
 
   const metricsByAtom = new Map<string, HealthAtom["metrics"]>();
@@ -133,7 +140,37 @@ export async function loadHealthContext(now = new Date()): Promise<HealthContext
     };
   });
 
+  const factList = (factsQ.data ?? []).map((f) => ({
+    key: f.key,
+    value: f.value,
+  }));
+  const done = completeness({
+    facts: factList,
+    educationCount: (eduQ.data ?? []).length,
+    employmentCount: (empQ.data ?? []).length,
+  });
+
   return {
+    profile: {
+      educations: (eduQ.data ?? []).map((e) => ({
+        id: e.id,
+        school: e.school,
+        degree: e.degree,
+      })),
+      employments: (empQ.data ?? []).map((e) => ({
+        id: e.id,
+        org: e.org,
+        periodStart: e.period_start,
+        periodEnd: e.period_end,
+        needsReview: e.needs_review,
+      })),
+      displayName: accountQ.data?.nickname ?? null,
+      // 完整度那一套里「教育经历」「工作履历」也各算一项，这里只报
+      // 字段类的缺项 —— 学历缺了有 C11 专门管，重复报两遍是噪音。
+      missingFactLabels: done.missing
+        .filter((m) => m.anchor === "identity")
+        .map((m) => m.label),
+    },
     facts: (factsQ.data ?? []).map((f) => ({
       id: f.id,
       key: f.key,
