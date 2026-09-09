@@ -14,6 +14,7 @@ import { PARSE_SYSTEM, parseUser } from "@/lib/llm/jd-prompts";
 import { createClient } from "@/lib/supabase/server";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import { KINDS, parseSchema } from "@/lib/jd/schema";
+import { classifyRequirement } from "@/lib/jd/mapping";
 import { getRequirements, type RequirementRow } from "@/lib/queries/jds";
 
 function firstIssue(e: z.ZodError): string {
@@ -69,6 +70,69 @@ export async function createJd(
   if (error || !data) return fail("没能保存这份 JD，再试一次");
   refresh();
   return ok({ id: data.id });
+}
+
+export type JdDeleteImpact = {
+  /** 「公司 · 岗位」，两个都没填时退回到「这份 JD」。 */
+  name: string;
+  requirementCount: number;
+  assessmentCount: number;
+  resumeCount: number;
+  interviewCount: number;
+  /** 行动清单里有多少条任务是从这份 JD 的缺口来的。任务本身不删。 */
+  taskLinkCount: number;
+};
+
+/**
+ * 删这份 JD 会带走什么。全部查库，一个数字都不写死。
+ *
+ * jds 上挂着四张 on delete cascade 的表：要求项、评估、投递版本、面试题库。
+ * 后两样是花过积分的东西，静悄悄删掉它们是这个确认框存在的全部理由。
+ */
+export async function getJdDeleteImpact(jdId: string): Promise<ActionResult<JdDeleteImpact>> {
+  if (!z.uuid().safeParse(jdId).success) return fail("这份 JD 不存在");
+  const supabase = await createClient();
+
+  const { data: jd } = await supabase
+    .from("jds")
+    .select("company,role_title")
+    .eq("id", jdId)
+    .maybeSingle();
+  if (!jd) return fail("这份 JD 已经不在了");
+
+  const [reqRes, assessRes, resumeRes, kitRes] = await Promise.all([
+    supabase.from("requirements").select("id", { count: "exact", head: true }).eq("jd_id", jdId),
+    supabase.from("assessments").select("id").eq("jd_id", jdId),
+    supabase.from("resume_versions").select("id", { count: "exact", head: true }).eq("jd_id", jdId),
+    supabase.from("interview_kits").select("id", { count: "exact", head: true }).eq("jd_id", jdId),
+  ]);
+
+  // 任务挂在缺口上，缺口挂在评估上 —— 中间隔了两层，只能一层层问。
+  const assessmentIds = (assessRes.data ?? []).map((a) => a.id);
+  let taskLinkCount = 0;
+  if (assessmentIds.length > 0) {
+    const { data: gaps } = await supabase
+      .from("gaps")
+      .select("id")
+      .in("assessment_id", assessmentIds);
+    const gapIds = (gaps ?? []).map((g) => g.id);
+    if (gapIds.length > 0) {
+      const { count } = await supabase
+        .from("task_targets")
+        .select("id", { count: "exact", head: true })
+        .in("gap_id", gapIds);
+      taskLinkCount = count ?? 0;
+    }
+  }
+
+  return ok({
+    name: [jd.company, jd.role_title].filter((s) => s && s.trim() !== "").join(" · ") || "这份 JD",
+    requirementCount: reqRes.count ?? 0,
+    assessmentCount: assessmentIds.length,
+    resumeCount: resumeRes.count ?? 0,
+    interviewCount: kitRes.count ?? 0,
+    taskLinkCount,
+  });
 }
 
 export async function deleteJd(jdId: string): Promise<ActionResult> {
@@ -139,6 +203,10 @@ async function runParseJd(jdId: string): Promise<ActionResult<RequirementRow[]>>
       kind: r.kind,
       is_structural: r.is_structural,
       derived_from: r.kind === "implicit" ? r.derived_from : null,
+      // 归类由代码做，不加进提示词：同一份 JD 解析十次必须得到同样的
+      // mapped_kind，不然「上次说我学历满足这次说不满足」会让人不再信
+      // 这个分数。而且不加钱、不加一次调用、不增加整份解析失败的风险。
+      mapped_kind: classifyRequirement(r.text, r.raw_phrase),
     }));
 
   const { error } = await supabase.from("requirements").insert(rows);
@@ -173,6 +241,9 @@ export async function updateRequirement(
       text: parsed.data.text,
       kind: parsed.data.kind,
       is_structural: parsed.data.isStructural,
+      // 改了文字就重新归类。留着旧的 mapped_kind 会出现「这条已经被改成
+      // 一条技能要求了，系统还拿它去比学历」。
+      mapped_kind: classifyRequirement(parsed.data.text, null),
     })
     .eq("id", id);
 
@@ -207,6 +278,7 @@ export async function addRequirement(
     text: parsed.data.text,
     kind: parsed.data.kind,
     is_structural: parsed.data.isStructural,
+    mapped_kind: classifyRequirement(parsed.data.text, null),
     // 手动加的没有 JD 原文措辞，留空。Step 6 做关键词对齐时会跳过它。
     raw_phrase: null,
   });

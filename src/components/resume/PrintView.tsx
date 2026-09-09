@@ -58,7 +58,7 @@ const CSS = `
   border-bottom: 1px solid #c9cfd8;
 }
 .print-root h3 { font-size: 10.5pt; font-weight: 700; margin: 3.5mm 0 1mm; }
-.print-root h3 .meta { font-weight: 400; color: #4b5260; }
+.print-root h3 .meta, .print-root li .meta { font-weight: 400; color: #4b5260; }
 .print-root ul { margin: 0 0 0 5mm; padding: 0; list-style: disc outside; }
 .print-root li { margin: 0 0 1mm; }
 .print-root p { margin: 0 0 1.5mm; }
@@ -76,6 +76,24 @@ const CSS = `
   .print-root section { break-inside: avoid-page; }
 }
 `;
+
+/** 一行一条的段落。每条是真实的 <li>，ATS 认得。 */
+function Lines({ title, lines }: { title: string; lines: PrintDoc["educations"] }) {
+  if (lines.length === 0) return null;
+  return (
+    <section>
+      <h2>{title}</h2>
+      <ul>
+        {lines.map((l, i) => (
+          <li key={i}>
+            {l.main}
+            {l.when && <span className="meta">　{l.when}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 export function PrintView({ doc }: { doc: PrintDoc }) {
   const printed = useRef(false);
@@ -131,12 +149,18 @@ export function PrintView({ doc }: { doc: PrintDoc }) {
           );
         })}
 
+        {/* 顺序与 renderMarkdown 一致：教育背景 → 技能 → 证书。
+            两处不一致的话，屏幕上看到的和导出的就是两份东西。 */}
+        <Lines title="教育背景" lines={doc.educations} />
+
         {doc.skills.length > 0 && (
           <section>
             <h2>技能</h2>
             <p>{doc.skills.join("、")}</p>
           </section>
         )}
+
+        <Lines title="证书与语言" lines={doc.credentials} />
       </div>
     </div>
   );

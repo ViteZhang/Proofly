@@ -21,7 +21,12 @@ const INTENT_LABEL: Record<string, string> = {
 };
 
 export type CardAction = {
-  accept: (atom: ExtractedAtom | null, parentId: string | null, asCreate: boolean) => Promise<void>;
+  accept: (
+    atom: ExtractedAtom | null,
+    parentId: string | null,
+    asCreate: boolean,
+    targetId: string | null,
+  ) => Promise<void>;
   reject: () => Promise<void>;
 };
 
@@ -43,7 +48,21 @@ export function ConfirmCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const intent = asCreate ? "CREATE" : draft.intent;
+  // 「需你判断」的卡片上，AI 列的那几个方案是要人点的。
+  // 之前它们只是三条死的说明文字，而卡片又不给 ASK 渲染「这是新经历」，
+  // 于是这种卡片唯一的出路是「不要这条」—— 抽出来的东西只能扔。
+  const [picked, setPicked] = useState<number | null>(null);
+  const chosen = picked === null ? null : (draft.options[picked] ?? null);
+
+  // 点了方案就按方案来：说新建就新建，说更新/合并就更新那一条。
+  const asCreateNow = asCreate || chosen?.action === "CREATE";
+  // CREATE 型方案里的那个 id 是「挂在谁下面」，UPDATE/MERGE 型的是「改哪一条」。
+  const targetId =
+    chosen && chosen.action !== "CREATE" ? chosen.target_atom_id : null;
+  const parentNow =
+    chosen?.action === "CREATE" && chosen.target_atom_id ? chosen.target_atom_id : parentId;
+
+  const intent = asCreateNow ? "CREATE" : draft.intent;
   const pct = draft.confidence === null ? null : Math.round(draft.confidence * 100);
 
   async function run(fn: () => Promise<void>) {
@@ -170,7 +189,7 @@ export function ConfirmCard({
               onCancel={() => setEditing(false)}
               onSave={(next) =>
                 run(async () => {
-                  await action.accept(next, parentId, asCreate);
+                  await action.accept(next, parentNow, asCreateNow, targetId);
                 })
               }
             />
@@ -178,10 +197,12 @@ export function ConfirmCard({
         ) : (
           <>
             {intent === "UPDATE" && <DiffTable draft={draft} />}
-            {intent === "ASK" && <Options draft={draft} />}
-            {intent === "CREATE" && <Preview atom={draft.atom} />}
+            {draft.intent === "ASK" && (
+              <Options draft={draft} picked={picked} onPick={setPicked} />
+            )}
+            {intent === "CREATE" && draft.intent !== "ASK" && <Preview atom={draft.atom} />}
 
-            {asCreate && (
+            {asCreateNow && draft.intent !== "ASK" && (
               <div className="mt-3">
                 <label className="text-[12.5px]" style={{ color: "var(--slate)" }}>
                   这条挂在哪个项目下？
@@ -205,15 +226,18 @@ export function ConfirmCard({
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
-                disabled={busy}
-                onClick={() => run(() => action.accept(null, parentId, asCreate))}
+                disabled={busy || (draft.intent === "ASK" && chosen === null && !asCreate)}
+                onClick={() => run(() => action.accept(null, parentNow, asCreateNow, targetId))}
               >
                 {intent === "UPDATE" ? "就这么更新" : "收下这条"}
               </Button>
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEditing(true)}>
                 改一下
               </Button>
-              {draft.intent === "UPDATE" && !asCreate && (
+              {/* ASK 也要给这条退路：模型说不准该更新哪条才判的 ASK，
+                  而「其实是条全新的经历」是最常见的答案。以前只给 UPDATE 渲染，
+                  于是报错让人点这个按钮、按钮却不存在。 */}
+              {draft.intent !== "CREATE" && !asCreate && chosen === null && (
                 <Button size="sm" variant="secondary" disabled={busy} onClick={() => setAsCreate(true)}>
                   这是新经历
                 </Button>
@@ -363,28 +387,51 @@ function DiffTable({ draft }: { draft: ReviewDraft }) {
   );
 }
 
-function Options({ draft }: { draft: ReviewDraft }) {
+function Options({
+  draft,
+  picked,
+  onPick,
+}: {
+  draft: ReviewDraft;
+  picked: number | null;
+  onPick: (i: number | null) => void;
+}) {
   if (draft.options.length === 0) {
     return (
       <p className="mt-3 text-[13px]" style={{ color: "var(--mute)" }}>
-        AI 没给出可选方案。按新增收下，或者改一下再存。
+        AI 没给出可选方案。按「这是新经历」收下，或者改一下再存。
       </p>
     );
   }
   return (
-    <ul className="mt-3 space-y-2">
-      {draft.options.map((o, i) => (
-        <li
-          key={i}
-          className="rounded-card px-3 py-2.5 text-[13px]"
-          style={{ background: "var(--line-soft)" }}
-        >
-          <p className="font-medium">{o.label}</p>
-          <p className="mt-0.5 text-[12.5px]" style={{ color: "var(--slate)" }}>
-            {o.consequence}
-          </p>
-        </li>
-      ))}
-    </ul>
+    <div className="mt-3">
+      <p className="text-[12.5px]" style={{ color: "var(--slate)" }}>
+        选一个再收下
+      </p>
+      <ul className="mt-1.5 space-y-2">
+        {draft.options.map((o, i) => {
+          const on = picked === i;
+          return (
+            <li key={i}>
+              <button
+                type="button"
+                aria-pressed={on}
+                onClick={() => onPick(on ? null : i)}
+                className="block w-full cursor-pointer rounded-card px-3 py-2.5 text-left text-[13px] transition-colors"
+                style={{
+                  background: on ? "var(--ai-soft, var(--line-soft))" : "var(--line-soft)",
+                  border: `1.5px solid ${on ? "var(--ink)" : "transparent"}`,
+                }}
+              >
+                <p className="font-medium">{o.label}</p>
+                <p className="mt-0.5 text-[12.5px]" style={{ color: "var(--slate)" }}>
+                  {o.consequence}
+                </p>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

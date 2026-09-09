@@ -3,7 +3,7 @@
 // =============================================================
 
 import { createClient } from "@/lib/supabase/server";
-import type { RequirementKind } from "@/types/database";
+import type { MappedKind, RequirementKind } from "@/types/database";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -100,6 +100,8 @@ export type RequirementRow = {
   kind: RequirementKind;
   isStructural: boolean;
   derivedFrom: string | null;
+  /** 这条要求对的是什么：技能 / 学历 / 证书 / 履历 / 基础信息。 */
+  mappedKind: MappedKind;
 };
 
 export type JdDetail = {
@@ -138,7 +140,7 @@ export async function getRequirements(jdId: string): Promise<RequirementRow[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("requirements")
-    .select("id,idx,text,raw_phrase,kind,is_structural,derived_from")
+    .select("id,idx,text,raw_phrase,kind,is_structural,derived_from,mapped_kind")
     .eq("jd_id", jdId)
     .order("idx", { ascending: true })
     .order("created_at", { ascending: true });
@@ -152,5 +154,6 @@ export async function getRequirements(jdId: string): Promise<RequirementRow[]> {
     kind: r.kind,
     isStructural: r.is_structural,
     derivedFrom: r.derived_from,
+    mappedKind: r.mapped_kind,
   }));
 }

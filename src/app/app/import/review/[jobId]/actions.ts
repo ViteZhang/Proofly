@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import { refreshAtomEmbedding } from "@/lib/ingest/embedding";
-import { diffEntry, pass2Schema } from "@/lib/ingest/schema";
+import { diffEntry, optionEntry, pass2Schema } from "@/lib/ingest/schema";
 import { getProofSummary } from "@/lib/queries/atoms";
 import { BULK_THRESHOLD, settleIngestJob } from "@/lib/queries/drafts";
 import { createClient } from "@/lib/supabase/server";
@@ -35,6 +35,13 @@ const acceptSchema = z.object({
   parentAtomId: z.uuid().nullable(),
   /** 把 UPDATE 转成 CREATE */
   asCreate: z.boolean(),
+  /**
+   * 人在 ASK 卡片上点的那个方案指向的经历。
+   *
+   * ASK 草稿的 target_atom_id 本来就是空的 —— 模型说不准该更新哪一条，
+   * 才会判成 ASK。所以要更新，只能由人指定。
+   */
+  targetAtomId: z.uuid().nullable().default(null),
 });
 
 export async function acceptDraft(
@@ -42,7 +49,7 @@ export async function acceptDraft(
 ): Promise<ActionResult<CommitResult>> {
   const parsed = acceptSchema.safeParse(input);
   if (!parsed.success) return fail("这条草稿的信息不完整，刷新页面再试");
-  const { draftId, atom: edited, parentAtomId, asCreate } = parsed.data;
+  const { draftId, atom: edited, parentAtomId, asCreate, targetAtomId } = parsed.data;
 
   const supabase = await createClient();
   const { data: draft } = await supabase
@@ -68,8 +75,21 @@ export async function acceptDraft(
     intent === "CREATE" && parent !== null && atomParsed.data.level === "project"
       ? { ...atomParsed.data, level: "capability_slice" as const, children: [] }
       : atomParsed.data;
-  if (intent === "UPDATE" && !draft.target_atom_id) {
-    return fail("这条没有明确要更新哪一条，选「这是新经历」或者自己指一条");
+  // 更新目标：人在卡片上点的优先，其次才是草稿自带的。
+  //
+  // ASK 草稿自带的 target 一定是空的（模型说不准该更新哪一条，才判成 ASK），
+  // 所以这里只能靠人点。但人点的也不能全信 —— 只认模型列在方案里的那几个 id，
+  // 否则前端传什么就更新什么，等于把「改哪条经历」的决定权交给了请求体。
+  const offered = new Set(
+    (z.array(optionEntry).safeParse(obj(draft.payload).options).data ?? [])
+      .map((o) => o.target_atom_id)
+      .filter((v): v is string => typeof v === "string" && v !== ""),
+  );
+  const target =
+    targetAtomId !== null && offered.has(targetAtomId) ? targetAtomId : draft.target_atom_id;
+
+  if (intent === "UPDATE" && !target) {
+    return fail("还没说清楚要更新哪一条。上面的方案点一个，或者按「这是新经历」收下");
   }
 
   const before = await getProofSummary();
@@ -84,7 +104,7 @@ export async function acceptDraft(
     p_draft_id: draftId,
     p_atom: atomToWrite as unknown as Json,
     p_intent: intent,
-    p_target: intent === "UPDATE" ? draft.target_atom_id : null,
+    p_target: intent === "UPDATE" ? target : null,
     p_parent: intent === "CREATE" ? parent : null,
     p_source_doc_id: sourceDocId?.source_doc_id ?? null,
     p_diff: (z.array(diffEntry).safeParse(obj(draft.diff).entries).data ?? []) as unknown as Json,

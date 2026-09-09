@@ -8,6 +8,13 @@
 // =============================================================
 
 import { createClient } from "@/lib/supabase/server";
+import { listCredentials, listEducations } from "@/lib/queries/profile";
+import {
+  credentialLines,
+  educationLines,
+  employmentMeta as renderEmploymentMeta,
+} from "@/lib/resume/profile-sections";
+import type { ProfileLine } from "@/lib/resume/markdown";
 import { parsePendingMetrics, parseStringList } from "@/lib/domain";
 import { mergeStrategies, type StrategyRow } from "@/lib/targets/strategy";
 import { parseResults } from "@/lib/scoring/parse";
@@ -38,6 +45,8 @@ export type ResumeAtom = GateAtom & {
   exclusiveGroup: string | null;
   sortOrder: number;
   skills: string[];
+  /** 挂在哪段任职履历下。简历里这一块的公司与起止时间取自那段，不取自本条。 */
+  employmentId: string | null;
 };
 
 export type BaselineInput = {
@@ -74,12 +83,12 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
     .maybeSingle();
   if (!target) return null;
 
-  const [atomRes, strategyRes, metricRes, guardRes, skillRes, linkRes, factRes, jdRes] =
+  const [atomRes, strategyRes, metricRes, guardRes, skillRes, linkRes, factRes, jdRes, empRes] =
     await Promise.all([
       supabase
         .from("atoms")
         .select(
-          "id,parent_id,level,context,org,role,title,period_start,period_end,status,evidence_level,situation,task,actions,pending_metrics,sort_order",
+          "id,parent_id,level,context,org,role,title,period_start,period_end,status,evidence_level,situation,task,actions,pending_metrics,sort_order,employment_id",
         )
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
@@ -95,6 +104,7 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
       supabase.from("atom_skills").select("atom_id,skills(label)"),
       supabase.from("profile_facts").select("key,value,status"),
       supabase.from("jds").select("id").eq("target_id", targetId),
+      supabase.from("employments").select("id,org,title,period_start,period_end"),
     ]);
 
   const rows = atomRes.data ?? [];
@@ -121,6 +131,20 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
   }
 
   const guardByAtom = new Map((guardRes.data ?? []).map((g) => [g.atom_id, g]));
+
+  // 挂了履历的经历，简历上那行时间取自履历表。在这里渲染一次，块的 meta 和
+  // 门禁的数字白名单用的就是同一个字符串 —— 两边不可能对不上。
+  const employmentLineById = new Map(
+    (empRes.data ?? []).map((e) => [
+      e.id,
+      renderEmploymentMeta({
+        org: e.org,
+        title: e.title,
+        periodStart: e.period_start,
+        periodEnd: e.period_end,
+      }),
+    ]),
+  );
 
   const skillsByAtom = new Map<string, string[]>();
   for (const l of linkRes.data ?? []) {
@@ -163,6 +187,7 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
       pendingMetricNames: parsePendingMetrics(a.pending_metrics).map((m) => m.name),
       periodStart: a.period_start,
       periodEnd: a.period_end,
+      employmentMeta: a.employment_id ? employmentLineById.get(a.employment_id) ?? null : null,
       mustSay: parseStringList(g?.must_say),
       neverSay: parseStringList(g?.never_say),
       roleFraming: g?.role_framing ?? null,
@@ -174,6 +199,7 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
       exclusiveGroup: s?.exclusiveGroup ?? null,
       sortOrder: a.sort_order ?? 0,
       skills: skillsByAtom.get(a.id) ?? [],
+      employmentId: a.employment_id,
     };
   };
 
@@ -247,6 +273,9 @@ export type BaselineView = {
   blocks: BaselineBlockView[];
   tradeoffs: Tradeoff[];
   skills: string[];
+  /** 教育背景与证书。直接来自基本信息，屏幕上和导出的必须是同一份。 */
+  educations: ProfileLine[];
+  credentials: ProfileLine[];
   checks: CheckRow[];
   /** 「为啥选它」：每条经历命中了这个方向下哪几条 JD 要求。 */
   why: Record<string, string[]>;
@@ -363,7 +392,7 @@ export async function getBaseline(targetId: string): Promise<BaselineView | null
     .maybeSingle();
   if (!baseline) return null;
 
-  const [{ data: rows }, { data: versions }, checks, why] = await Promise.all([
+  const [{ data: rows }, { data: versions }, checks, why, profileSections] = await Promise.all([
     supabase
       .from("resume_blocks")
       .select(
@@ -374,6 +403,7 @@ export async function getBaseline(targetId: string): Promise<BaselineView | null
     supabase.from("resume_versions").select("id,submitted_at").eq("baseline_id", baseline.id),
     listResumeChecks({ kind: "baseline", id: baseline.id }),
     whySelected(targetId),
+    loadProfileSections(),
   ]);
 
   const blocks: BaselineBlockView[] = (rows ?? []).map((r) => {
@@ -404,6 +434,8 @@ export async function getBaseline(targetId: string): Promise<BaselineView | null
     lockedAt: baseline.locked_at,
     generatedAt: baseline.generated_at,
     blocks,
+    educations: profileSections.educations,
+    credentials: profileSections.credentials,
     tradeoffs: parseTradeoffs(baseline.tradeoffs),
     skills: parseStringList(baseline.skills),
     checks,
@@ -626,6 +658,9 @@ export type VersionDetail = {
   headline: string;
   blocks: BaselineBlockView[];
   skills: string[];
+  /** 教育背景与证书，与基线同一份来源。 */
+  educations: ProfileLine[];
+  credentials: ProfileLine[];
   checks: CheckRow[];
   why: Record<string, string[]>;
 };
@@ -782,6 +817,10 @@ export async function getVersion(versionId: string): Promise<VersionDetail | nul
     headline,
     blocks,
     skills: base.skills,
+    // 与基线同一份来源。冻结的投递版本也照这个走 —— 教育背景不是措辞，
+    // 学历改了就是改了，没有「这一版当时是这么写的」这回事。
+    educations: base.educations,
+    credentials: base.credentials,
     checks: base.checks,
     why: base.why,
   };
@@ -884,6 +923,9 @@ export type PrintDoc = {
   headline: string;
   blocks: BaselineBlockView[];
   skills: string[];
+  /** 教育背景与证书。直接来自基本信息，不经过模型。 */
+  educations: ProfileLine[];
+  credentials: ProfileLine[];
   /** 文件名里的岗位：投递版本用 JD 岗位，基线用方向名。 */
   roleLabel: string;
   targetId: string;
@@ -909,6 +951,7 @@ export async function getPrintDoc(id: string): Promise<PrintDoc | null> {
   const contact = ["email", "phone", "location"]
     .map(value)
     .filter((s): s is string => !!s);
+  const profile = await loadProfileSections();
 
   const version = await getVersion(id);
   if (version) {
@@ -918,6 +961,8 @@ export async function getPrintDoc(id: string): Promise<PrintDoc | null> {
       id: version.id,
       name: value("name") ?? "",
       contact,
+      educations: profile.educations,
+      credentials: profile.credentials,
       headline: version.headline,
       blocks: version.blocks,
       skills: version.skills,
@@ -943,6 +988,8 @@ export async function getPrintDoc(id: string): Promise<PrintDoc | null> {
     id: base.id,
     name: value("name") ?? "",
     contact,
+    educations: profile.educations,
+    credentials: profile.credentials,
     headline: base.headline,
     blocks: base.blocks,
     skills: base.skills,
@@ -972,4 +1019,28 @@ export async function listBlockingIssues(): Promise<
     detail: r.detail,
     owner: ((r.ref_ids ?? {}) as { owner?: string }).owner ?? "",
   }));
+}
+
+// ---- 教育背景 / 证书 / 履历 ----
+
+/**
+ * 简历里那两段不从经历来的内容。
+ *
+ * 四处会组装一份 ResumeDoc（基线生成、基线重渲、投递版本、打印与导出），
+ * 四处各查一遍库必然有一处忘了改。集中在这里读一次。
+ *
+ * 履历行不在这里 —— 它跟着经历走（ResumeAtom.employmentMeta），块的 meta
+ * 和门禁的数字白名单因此共用同一个字符串。分成两处读过一次，结果是门禁
+ * 拦下了生成代码自己写进去的日期。
+ */
+export async function loadProfileSections(): Promise<{
+  educations: ProfileLine[];
+  credentials: ProfileLine[];
+}> {
+  const [educations, credentials] = await Promise.all([listEducations(), listCredentials()]);
+
+  return {
+    educations: educationLines(educations),
+    credentials: credentialLines(credentials),
+  };
 }

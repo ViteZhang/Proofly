@@ -52,6 +52,8 @@ function req(
     rawPhrase: `原文 ${index}`,
     kind,
     isStructural,
+    mappedKind: "skill",
+    hardGate: null,
   };
 }
 

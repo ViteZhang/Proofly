@@ -47,6 +47,12 @@ export function ImportFlow({
 
   const onSettled = useCallback((p: JobProgress) => setDone(p), []);
 
+  // 出错收场、又一条草稿都没产出的作业（Pass 1 挂了、人中途停了）现在也会
+  // 落到终态，于是同样会走 onSettled。那条红字、重试和放弃都由
+  // JobProgressPanel 负责，这里再补一句「没有可以入库的经历」，
+  // 就是把故障说成了结论。
+  const failedEarly = done !== null && done.errorMessage !== null && done.draftCount === 0;
+
   if (jobId) {
     return (
       <div>
@@ -64,7 +70,7 @@ export function ImportFlow({
               <Button onClick={() => router.push(`/app/import/review/${jobId}${taskId ? `?task=${taskId}` : ""}`)}>
                 去确认这 {done.draftCount} 条
               </Button>
-            ) : (
+            ) : failedEarly ? null : (
               <p className="text-[13.5px]" style={{ color: "var(--slate)" }}>
                 这份文档里没有可以入库的经历。换一份试试，或者到经历库手动加一条。
               </p>

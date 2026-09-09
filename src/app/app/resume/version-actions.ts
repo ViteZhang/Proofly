@@ -25,6 +25,7 @@ import { z } from "zod";
 import { callLLM } from "@/lib/llm";
 import { DELTA_SYSTEM, deltaUser } from "@/lib/llm/resume-prompts";
 import { createClient } from "@/lib/supabase/server";
+import { loadProfileSections } from "@/lib/queries/resume";
 import { fail, ok, parseStringList, type ActionResult } from "@/lib/domain";
 import { loadBaselineInput } from "@/lib/queries/resume";
 import { deltaPlanSchema } from "@/lib/resume/schema";
@@ -578,7 +579,10 @@ export async function submitVersion(versionId: string): Promise<ActionResult<nul
     }),
   );
 
-  const { data: facts } = await supabase.from("profile_facts").select("key,value");
+  const [{ data: facts }, profile] = await Promise.all([
+    supabase.from("profile_facts").select("key,value"),
+    loadProfileSections(),
+  ]);
   const value = (k: string) => {
     const s = (facts ?? []).find((f) => f.key === k)?.value;
     return s && s.trim() !== "" ? s.trim() : null;
@@ -590,6 +594,8 @@ export async function submitVersion(versionId: string): Promise<ActionResult<nul
     headline: applied.headline,
     blocks: applied.blocks,
     skills: parseStringList(baseline.skills),
+    educations: profile.educations,
+    credentials: profile.credentials,
   });
 
   await supabase

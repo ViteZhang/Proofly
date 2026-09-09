@@ -15,6 +15,13 @@ export type Json =
 
 // ---- 枚举（text + CHECK）----
 export type ProfileFactStatus = "RESOLVED" | "PENDING" | "BLOCKING";
+// 基本信息四表。学历与证书的证据等级只有两档 —— 见 supabase/46。
+export type Degree = "doctor" | "master" | "bachelor" | "associate" | "vocational" | "other";
+export type EducationStatus = "graduated" | "in_progress" | "withdrawn";
+export type EmploymentType = "fulltime" | "intern" | "contract" | "freelance";
+export type CredentialKind = "certificate" | "language" | "award" | "publication" | "link";
+export type BinaryEvidence = "measured" | "absent";
+export type AvatarKind = "initial" | "color" | "upload";
 export type AtomLevel = "project" | "capability_slice";
 export type AtomContext = "employment" | "side_project" | "volunteer" | "community";
 export type AtomStatus = "concept" | "design_done" | "in_dev" | "shipped" | "sunset";
@@ -33,7 +40,17 @@ export type NudgeRule = "R1" | "R2" | "R3";
 export type LlmTier = "light" | "strong" | "vision" | "embedding";
 export type RenderWeight = "expand" | "brief" | "one_line" | "omit";
 export type RequirementKind = "hard" | "implicit" | "nice_to_have";
-export type GapType = "no_capability" | "no_evidence" | "weak_evidence" | "structural";
+// hard_disqualifier 与另外四类不同：它不可通过行动关闭，所以不进任务池，
+// 也不计入扣分，只在方向页单独标注一栏。
+export type GapType =
+  | "no_capability"
+  | "no_evidence"
+  | "weak_evidence"
+  | "structural"
+  | "hard_disqualifier";
+
+/** 一条要求对的是什么。学历、证书类要求跟结构化档案比对，不跟经历做语义匹配。 */
+export type MappedKind = "skill" | "education" | "credential" | "employment" | "profile_fact";
 export type GapSeverity = "high" | "medium" | "low";
 export type TaskActionType =
   | "collect_data"
@@ -127,11 +144,165 @@ export type Database = {
         };
         Relationships: [];
       };
+      educations: {
+        Row: {
+          id: string;
+          user_id: string;
+          school: string;
+          major: string | null;
+          degree: Degree | null;
+          is_full_time: boolean;
+          period_start: string | null;
+          period_end: string | null;
+          status: EducationStatus;
+          evidence_level: BinaryEvidence;
+          credential_note: string | null;
+          highlights: Json;
+          sort_order: number | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          school: string;
+          major?: string | null;
+          degree?: Degree | null;
+          is_full_time?: boolean;
+          period_start?: string | null;
+          period_end?: string | null;
+          status?: EducationStatus;
+          evidence_level?: BinaryEvidence;
+          credential_note?: string | null;
+          highlights?: Json;
+          sort_order?: number | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          school?: string;
+          major?: string | null;
+          degree?: Degree | null;
+          is_full_time?: boolean;
+          period_start?: string | null;
+          period_end?: string | null;
+          status?: EducationStatus;
+          evidence_level?: BinaryEvidence;
+          credential_note?: string | null;
+          highlights?: Json;
+          sort_order?: number | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      employments: {
+        Row: {
+          id: string;
+          user_id: string;
+          org: string;
+          title: string | null;
+          city: string | null;
+          employment_type: EmploymentType;
+          period_start: string;
+          period_end: string | null;
+          entity_note: string | null;
+          needs_review: boolean;
+          sort_order: number | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          org: string;
+          title?: string | null;
+          city?: string | null;
+          employment_type?: EmploymentType;
+          period_start: string;
+          period_end?: string | null;
+          entity_note?: string | null;
+          needs_review?: boolean;
+          sort_order?: number | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          org?: string;
+          title?: string | null;
+          city?: string | null;
+          employment_type?: EmploymentType;
+          period_start?: string;
+          period_end?: string | null;
+          entity_note?: string | null;
+          needs_review?: boolean;
+          sort_order?: number | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      credentials: {
+        Row: {
+          id: string;
+          user_id: string;
+          kind: CredentialKind;
+          name: string;
+          issuer: string | null;
+          level: string | null;
+          issued_at: string | null;
+          expires_at: string | null;
+          identifier: string | null;
+          url: string | null;
+          evidence_level: BinaryEvidence;
+          sort_order: number | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          kind?: CredentialKind;
+          name: string;
+          issuer?: string | null;
+          level?: string | null;
+          issued_at?: string | null;
+          expires_at?: string | null;
+          identifier?: string | null;
+          url?: string | null;
+          evidence_level?: BinaryEvidence;
+          sort_order?: number | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          kind?: CredentialKind;
+          name?: string;
+          issuer?: string | null;
+          level?: string | null;
+          issued_at?: string | null;
+          expires_at?: string | null;
+          identifier?: string | null;
+          url?: string | null;
+          evidence_level?: BinaryEvidence;
+          sort_order?: number | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
       atoms: {
         Row: {
           id: string;
           user_id: string;
           parent_id: string | null;
+          employment_id: string | null;
           level: AtomLevel;
           context: AtomContext;
           org: string | null;
@@ -157,6 +328,7 @@ export type Database = {
           id?: string;
           user_id?: string;
           parent_id?: string | null;
+          employment_id?: string | null;
           level?: AtomLevel;
           context?: AtomContext;
           org?: string | null;
@@ -182,6 +354,7 @@ export type Database = {
           id?: string;
           user_id?: string;
           parent_id?: string | null;
+          employment_id?: string | null;
           level?: AtomLevel;
           context?: AtomContext;
           org?: string | null;
@@ -749,6 +922,7 @@ export type Database = {
           jd_id: string;
           text: string;
           kind: RequirementKind;
+          mapped_kind: MappedKind;
           idx: number | null;
           raw_phrase: string | null;
           is_structural: boolean;
@@ -764,6 +938,7 @@ export type Database = {
           jd_id: string;
           text: string;
           kind?: RequirementKind;
+          mapped_kind?: MappedKind;
           idx?: number | null;
           raw_phrase?: string | null;
           is_structural?: boolean;
@@ -779,6 +954,7 @@ export type Database = {
           jd_id?: string;
           text?: string;
           kind?: RequirementKind;
+          mapped_kind?: MappedKind;
           idx?: number | null;
           raw_phrase?: string | null;
           is_structural?: boolean;
@@ -1997,6 +2173,8 @@ export type Database = {
         Row: {
           user_id: string;
           nickname: string | null;
+          avatar_kind: AvatarKind;
+          avatar_color: string | null;
           signup_source: string;
           signup_grant_issued: boolean;
           signup_grant_issued_at: string | null;
@@ -2004,8 +2182,12 @@ export type Database = {
           updated_at: string;
         };
         Insert: never;
-        // 只有 nickname 是列级授权可写的，其余客户端改不了。
-        Update: { nickname?: string | null };
+        // 列级授权只放开这三列，其余（signup_grant_issued 等）客户端改不了。
+        Update: {
+          nickname?: string | null;
+          avatar_kind?: AvatarKind;
+          avatar_color?: string | null;
+        };
         Relationships: [];
       };
     };
@@ -2029,6 +2211,10 @@ export type Database = {
       };
     };
     Functions: {
+      set_account_profile: {
+        Args: { p_display_name: string | null; p_avatar_color: string };
+        Returns: undefined;
+      };
       commit_draft: {
         Args: {
           p_draft_id: string;

@@ -45,6 +45,7 @@ function atom(over: Partial<GateAtom> = {}): GateAtom {
     pendingMetricNames: [],
     periodStart: "2022-02-01",
     periodEnd: null,
+    employmentMeta: null,
     mustSay: [],
     neverSay: [],
     roleFraming: null,
@@ -238,4 +239,60 @@ test("G3｜同一个数字重复出现只报一次", () => {
   const g3 = r.filter((x) => x.code === "G3");
   assert.equal(g3.length, 1);
   assert.ok(g3[0].message.includes("92") && !g3[0].message.includes("92、92"));
+});
+
+// ---- G3 · 白名单要覆盖所有「有出处」的地方 ----
+//
+// 下面这组全部来自一次真实的生成失败：块的 meta 已经改成取自履历表，
+// 而白名单还只看这条经历自己 —— 门禁于是拦下了生成代码自己写进去的
+// 日期。那三条谁也解不开：数字不在用户能编辑的任何字段里。
+
+test("G3｜meta 取自履历表的起止，经历自己没有这个时间也放行", () => {
+  const r = checkBlock(
+    block("负责 AI 成长陪伴助手模块", "absent", { meta: "润泽园教育集团 · 产品经理　2022.02 – 至今" }),
+    atom({
+      periodStart: "2026-03-01",
+      periodEnd: "2026-09-01",
+      employmentMeta: "润泽园教育集团 · 产品经理　2022.02 – 至今",
+      actions: ["负责 AI 成长陪伴助手模块"],
+    }),
+  );
+  assert.ok(!r.some((x) => x.code === "G3"));
+});
+
+test("G3｜手工把 meta 改成履历里没有的年份 → 仍然拦截", () => {
+  const r = checkBlock(
+    block("x", "absent", { meta: "润泽园教育集团 · 产品经理　2017.02 – 至今" }),
+    atom({
+      periodStart: "2026-03-01",
+      periodEnd: null,
+      employmentMeta: "润泽园教育集团 · 产品经理　2022.02 – 至今",
+      actions: [],
+    }),
+  );
+  assert.ok(r.some((x) => x.code === "G3" && x.message.includes("2017")));
+});
+
+test("G3｜must_say 里的数字算有出处 —— G2 要求写进去，G3 不能反过来拦", () => {
+  const r = checkBlock(
+    block("覆盖 6 类意图", "absent"),
+    atom({ actions: [], metrics: [], mustSay: ["覆盖 6 类意图"] }),
+  );
+  assert.ok(!r.some((x) => x.code === "G3"));
+});
+
+test("G3｜「从 0 到 1」是行话，不是效果数字", () => {
+  for (const s of ["从 0 到 1 搭建测评产品", "0→1 落地", "0-1 阶段"]) {
+    const r = checkBlock(block(s, "absent"), atom({ actions: [], metrics: [] }));
+    assert.ok(!r.some((x) => x.code === "G3"), s);
+  }
+});
+
+test("G3｜「10 到 12」不会被当成 0 到 1 切开", () => {
+  const r = checkBlock(
+    block("从 10 到 12 个模块", "absent"),
+    atom({ actions: [], metrics: [] }),
+  );
+  const g3 = r.find((x) => x.code === "G3");
+  assert.ok(g3 && g3.message.includes("10") && g3.message.includes("12"));
 });

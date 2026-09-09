@@ -66,6 +66,13 @@ export type SimilarAtom = {
 export async function findSimilarAtoms(
   text: string,
   limit = 5,
+  /**
+   * 向量这一步最多花多久。实测 recall_query 最慢不到 1 秒，给 20 秒够宽。
+   * 之所以要卡：这一步卡住的话，整次函数调用会被平台回收，
+   * 后面的 Pass 3 和写草稿全都白跑，而且什么错误都留不下来。
+   * 卡住就走下面的字面降级，比整条链一起死好。
+   */
+  budgetMs = 20_000,
 ): Promise<{ atoms: SimilarAtom[]; degraded: boolean }> {
   const supabase = await createClient();
 
@@ -73,6 +80,7 @@ export async function findSimilarAtoms(
     tier: "embedding",
     purpose: "recall_query",
     user: text.slice(0, 500),
+    deadlineMs: budgetMs,
   });
 
   if (r.ok) {

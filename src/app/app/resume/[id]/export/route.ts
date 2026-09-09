@@ -45,6 +45,8 @@ export async function GET(
       bullets: b.bullets,
     })),
     skills: doc.skills,
+    educations: doc.educations,
+    credentials: doc.credentials,
   });
 
   // 导出永远不消耗积分（承诺 4）。留痕是为了让它出现在消费记录里。

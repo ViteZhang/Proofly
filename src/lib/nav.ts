@@ -2,11 +2,16 @@
 
 export type NavItem = { label: string; href: string };
 
+// 首页提出分组，独立成第一项。它是入口，不属于「档案」也不属于「求职」。
+export const NAV_HOME: NavItem = { label: "首页", href: "/app" };
+
 export const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
-    title: "经历",
+    // 原分组名「经历」装不下「基本信息」—— 学历、联系方式不是经历。
+    // 分组名与内容对不上时，用户会下意识跳过整个分组，新加的入口等于白加。
+    title: "档案",
     items: [
-      { label: "首页", href: "/app" },
+      { label: "基本信息", href: "/app/profile" },
       { label: "经历库", href: "/app/library" },
       { label: "导入", href: "/app/import" },
       { label: "随手记", href: "/app/notes" },

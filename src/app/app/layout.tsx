@@ -6,6 +6,8 @@ import { Topbar } from "@/components/layout/Topbar";
 import { createClient } from "@/lib/supabase/server";
 import { healthSummary } from "@/lib/queries/health";
 import { listTargetOptions } from "@/lib/queries/targets";
+import { getNavProfile } from "@/lib/queries/profile";
+import { avatarCss } from "@/lib/profile/avatars";
 
 // 应用外壳：Sidebar（210px）+ Topbar（56px）+ 内容区。
 // 未登录已由 proxy 拦截，这里只需取用户信息用于侧栏底部。
@@ -21,10 +23,11 @@ export default async function AppLayout({
 
   // 顶栏体检芯片：全部阻断级问题的条数（Step 4 时只数事实层，到这一步扩全）。
   // 只读不跑 —— 芯片挂在每个页面上，不能一进任何页面就触发一次全量扫描。
-  const [health, targets, todoCount] = await Promise.all([
+  const [health, targets, todoCount, nav] = await Promise.all([
     healthSummary(),
     listTargetOptions(),
     countOpenTasks(),
+    getNavProfile(),
   ]);
 
   const [balance, ent] = await Promise.all([getBalance(), getEntitlements()]);
@@ -33,7 +36,14 @@ export default async function AppLayout({
     <div className="flex min-h-screen" style={{ background: "var(--bg)" }}>
       {/* data-chrome：打印页要把外壳整个藏掉，靠这个标记，不靠猜类名 */}
       <div data-chrome>
-        <Sidebar email={user?.email ?? ""} todoCount={todoCount} />
+        <Sidebar
+          email={user?.email ?? ""}
+          displayName={nav.account.displayName}
+          avatarColor={avatarCss(nav.account.avatarColor)}
+          location={nav.location}
+          todoCount={todoCount}
+          profileMissing={nav.missingCount}
+        />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Topbar 读 useSearchParams，包一层 Suspense 免得拖累外层渲染 */}

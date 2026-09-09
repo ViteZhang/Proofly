@@ -61,6 +61,7 @@ const NOW = new Date("2026-09-01T00:00:00Z");
 function ctx(over: Partial<HealthContext> = {}): HealthContext {
   return {
     facts: [],
+    profile: { educations: [], employments: [], displayName: null, missingFactLabels: [] },
     atoms: [],
     skills: [],
     targets: [],

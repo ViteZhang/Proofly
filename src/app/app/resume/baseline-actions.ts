@@ -24,7 +24,7 @@ import { callLLM } from "@/lib/llm";
 import { BASELINE_SYSTEM, baselineUser } from "@/lib/llm/resume-prompts";
 import { createClient } from "@/lib/supabase/server";
 import { fail, ok, type ActionResult } from "@/lib/domain";
-import { loadBaselineInput, toSelectable, type ResumeAtom } from "@/lib/queries/resume";
+import { loadProfileSections, loadBaselineInput, toSelectable, type ResumeAtom } from "@/lib/queries/resume";
 import { resolveSelection, selectSkills, type Tradeoff } from "@/lib/resume/select";
 import { baselineSchema, type PlannedBlock } from "@/lib/resume/schema";
 import {
@@ -36,6 +36,7 @@ import {
 } from "@/lib/resume/gate";
 import { listResumeChecks, replaceResumeChecks } from "@/lib/resume/check-results";
 import { blockingBeforeGeneration, runQuickScan } from "@/lib/queries/health";
+import { blockMeta } from "@/lib/resume/profile-sections";
 import { renderMarkdown, type RenderBlock } from "@/lib/resume/markdown";
 import type { Json, RenderWeight } from "@/types/database";
 
@@ -129,7 +130,10 @@ async function runGenerateBaseline(
   if (!z.uuid().safeParse(targetId).success) return fail("这个方向不存在");
 
   const supabase = await createClient();
-  const input = await loadBaselineInput(targetId);
+  const [input, profile] = await Promise.all([
+    loadBaselineInput(targetId),
+    loadProfileSections(),
+  ]);
   if (!input) return fail("这个方向已经不在了");
 
   const { data: existing } = await supabase
@@ -293,6 +297,10 @@ async function runGenerateBaseline(
     headline: res.data.headline,
     blocks: blocks.map(toRenderBlock),
     skills: skills.map((s) => s.label),
+    // 教育背景与证书直接来自基本信息，不经过模型 —— 它们没有「怎么讲」
+    // 的空间，只有「是不是真的」。
+    educations: profile.educations,
+    credentials: profile.credentials,
   });
 
   await supabase
@@ -380,7 +388,10 @@ function normalizeBlocks(
       atomId: atom.id,
       section: sectionOf(p.section, atom),
       title: p.title.trim() || atom.title,
-      meta: p.meta.trim() || periodLabel(atom),
+      // 挂了履历的经历，公司与起止时间一律取自 employments，不用模型
+      // 写的那句 —— 模型看到的时间是这条经历自己的，而「在职却没有可写
+      // 项目」的那几个月它根本看不见，写出来的日期必然偏窄。
+      meta: blockMeta(atom.employmentMeta ?? undefined, p.meta, periodLabel(atom)),
       summary: p.summary.trim(),
       bullets: [...p.bullets],
       templateUsed: atom.evidenceLevel,

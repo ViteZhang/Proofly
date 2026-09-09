@@ -104,6 +104,30 @@ export type HealthSkill = {
 
 export type HealthTarget = { id: string; name: string };
 
+/** 基本信息里的三张表 + 账户展示名。C11..C15 用。 */
+export type HealthEducation = {
+  id: string;
+  school: string;
+  degree: string | null;
+};
+
+export type HealthEmployment = {
+  id: string;
+  org: string;
+  periodStart: string;
+  periodEnd: string | null;
+  needsReview: boolean;
+};
+
+export type HealthProfile = {
+  educations: HealthEducation[];
+  employments: HealthEmployment[];
+  /** 账户展示名。跟档案姓名不一致时提示一句，不计入问题数。 */
+  displayName: string | null;
+  /** 必填基础项里还差的，用于 C12。 */
+  missingFactLabels: string[];
+};
+
 /** 一份简历产物：基线或投递版本。C6 C7 都在这上面跑。 */
 export type HealthResume = {
   kind: "baseline" | "version";
@@ -137,6 +161,7 @@ export type GateRow = {
 
 export type HealthContext = {
   facts: HealthFact[];
+  profile: HealthProfile;
   atoms: HealthAtom[];
   skills: HealthSkill[];
   targets: HealthTarget[];

@@ -19,7 +19,7 @@ import { ConfirmCard } from "./ConfirmCard";
 const SECTIONS = [
   { key: "ask" as const, title: "需你判断", hint: "这几条合并或独立都说得通，只有你知道该怎么算" },
   { key: "update" as const, title: "更新", hint: "改的是已有的经历，覆盖前看清楚改了什么" },
-  { key: "create" as const, title: "新增", hint: "库里没有的，收下就进事实层" },
+  { key: "create" as const, title: "新增", hint: "库里没有的，收下就进经历库" },
 ];
 
 export function ReviewQueue({
@@ -69,12 +69,15 @@ export function ReviewQueue({
     atom: ExtractedAtom | null,
     parentId: string | null,
     asCreate: boolean,
+    /** 人在「需你判断」卡片上点的那个方案指向的经历 */
+    targetId: string | null,
   ) {
     const r = await acceptDraft({
       draftId: d.id,
       atom,
       parentAtomId: parentId,
       asCreate,
+      targetAtomId: targetId,
     });
     if (!r.ok) throw new Error(r.error);
     // 回流上传路径：这条经历就是那条行动的产出。入库成功才标完成 ——
@@ -112,7 +115,7 @@ export function ReviewQueue({
       >
         <p className="text-[15px] font-medium">这份文档处理完了</p>
         <p className="mt-1 text-[13.5px]" style={{ color: "var(--slate)" }}>
-          收下的经历已经进了事实层。去经历库看看，补上缺的结果数据，证明度还能往上走。
+          收下的经历已经进经历库了。去经历库看看，补上缺的结果数据，证明度还能往上走。
         </p>
         {reflowed && (
           <p className="mt-1.5 text-[13.5px]" style={{ color: "var(--proof)" }}>
@@ -175,7 +178,8 @@ export function ReviewQueue({
                     projects={queue.projects}
                     leaving={leaving.has(d.id)}
                     action={{
-                      accept: (atom, parentId, asCreate) => accept(d, atom, parentId, asCreate),
+                      accept: (atom, parentId, asCreate, targetId) =>
+                        accept(d, atom, parentId, asCreate, targetId),
                       reject: () => reject(d),
                     }}
                   />

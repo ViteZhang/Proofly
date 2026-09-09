@@ -12,7 +12,7 @@ import { parseStringList } from "@/lib/domain";
 import { renderMarkdown } from "./markdown";
 import { checkAll, type GateAtom, type GateBlock, type GateResult } from "./gate";
 import { replaceResumeChecks } from "./check-results";
-import { loadBaselineInput } from "@/lib/queries/resume";
+import { loadBaselineInput, loadProfileSections } from "@/lib/queries/resume";
 import type { EvidenceLevel } from "@/types/database";
 
 type BlockRow = {
@@ -84,13 +84,14 @@ export async function refreshRenderedMd(baselineId: string): Promise<void> {
   const supabase = await createClient();
   const rows = await loadBlocks(baselineId);
 
-  const [{ data: baseline }, { data: facts }] = await Promise.all([
+  const [{ data: baseline }, { data: facts }, profile] = await Promise.all([
     supabase
       .from("resume_baselines")
       .select("headline,skills")
       .eq("id", baselineId)
       .maybeSingle(),
     supabase.from("profile_facts").select("key,value"),
+    loadProfileSections(),
   ]);
 
   const value = (k: string) => {
@@ -112,6 +113,10 @@ export async function refreshRenderedMd(baselineId: string): Promise<void> {
       bullets: parseStringList(r.bullets as never),
     })),
     skills: parseStringList((baseline?.skills ?? []) as never),
+    // 手工改过一个块之后重渲，这两段也得跟着重来 —— 它们直接来自基本
+    // 信息，中间不经过模型，漏掉的话导出的那份会缺教育背景。
+    educations: profile.educations,
+    credentials: profile.credentials,
   });
 
   await supabase

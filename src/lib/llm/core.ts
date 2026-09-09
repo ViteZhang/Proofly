@@ -53,12 +53,11 @@ type BaseOptions = {
   /** JSON 校验失败后的重试次数，默认 1。 */
   maxRetries?: number;
   /**
-   * 这一次调用的总时限，默认 CALL_DEADLINE_MS（5 分钟）。
+   * 这一次调用的**总**预算，默认 CALL_BUDGET_MS。换供应商也算在里面。
    *
-   * 只有一种情况该调大：任务本身就要生成很长的结构化输出，5 分钟不是
-   * 「卡住了」而是「还没写完」。面试题包是唯一这样的地方 —— 一次要 15–20
-   * 道题、每道带 3–4 个应答要点，实测单次要 300–500s。把它按卡死处理，
-   * 用户永远拿不到题。
+   * 注意语义：这是整条兜底链一起花的时间，不是「每一家各给这么久」。
+   * 调用方知道自己还剩多少时间（函数被平台回收前），就把剩余时间传进来，
+   * 这一层负责把它摊给链上各家。传大了没有意义 —— 平台的墙不认。
    */
   deadlineMs?: number;
 };
@@ -79,16 +78,31 @@ export type EmbeddingOptions = BaseOptions & {
   user: string;
 };
 
-// ---- 重载 ----
-// 一次请求最多等这么久。实测：itokens 上最慢 1m31s，DeepSeek 兜底跑一段
-// 5200 字的长片段要 2m09s（输出 8448 token）。按最慢那个的 1.8 倍留余量，
-// 不然会把正在正常生成的兜底调用误杀掉。
-const ATTEMPT_TIMEOUT_MS = 240_000;
+// ---- 时间预算 ----
+//
+// 一通调用（含换供应商）最多花这么久。这是**总**预算，不按家平摊：
+// 谁先上谁就用剩下的全部，死了由断流看门狗在 45 秒内揪出来换下一家。
+//
+// 这个数必须**明显小于平台给一次函数调用的时间**，否则兜底链是死的。
+// 之前是「单家 300 秒」，而 Vercel 一次函数调用也是 300 秒：主用卡住时，
+// 平台先把整个函数杀掉，第二家永远轮不到。线上实测——一份 1292 字的文档，
+// Pass 2 直连模型跑了 400 秒还没回来，而百炼、DeepSeek 当时都是好的
+// （40 / 89 token 每秒），却一次都没被试到。
+//
+// 快速报错时兜底一直是有用的（日志里能看到 itokens 秒挂、百炼接手）。
+// 坏的是「卡住」这一种，而那恰恰是最常见的一种。
+const CALL_BUDGET_MS = 200_000;
 
-// 连 SDK 重试一起算的总上限。SDK 对超时也会重试，不封顶的话一次卡死
-// 能拖到 50 分钟——那条候选就一直挂在 pending，界面看着跟死了一样，
-// 还不报错。宁可判失败让人重试，也不能无声地等下去。
-const CALL_DEADLINE_MS = 300_000;
+// 一家至少要给这么久，否则等于没试 —— 拿 8 秒去敲一个大模型，
+// 结果只会是又一条超时，白白把预算耗在换家上。
+const MIN_PROVIDER_MS = 40_000;
+
+// 流式下真正的「卡住」信号：这么久没吐出下一个字就判这家死了。
+//
+// 比总时长准得多。总时长会把正在正常生成的长回复误杀 —— 一条经历要几千
+// token，两分钟是正常的，不是卡住。而只要还在一个字一个字往外吐，
+// 它就是活的；连着 45 秒一个字都没有，那才是真的没气了。
+const STALL_MS = 45_000;
 
 // ---- 熔断 ----
 // 供应商整体宕机时，「每条候选都先花 5 分钟撞主用、再换兜底」是不能接受的：
@@ -138,23 +152,43 @@ export async function callLLM(
 
   let last: Fail = { ok: false, error: "模型调用失败" };
 
+  const budget = opts.deadlineMs ?? CALL_BUDGET_MS;
+  const startedAt = Date.now();
+
   for (let i = 0; i < ordered.length; i++) {
     const p = ordered[i];
+
+    // 剩下多少就给多少，不按家数平摊。
+    //
+    // 平摊是流式之前的思路：那时候分不清「卡死」和「正在慢慢写」，只能靠
+    // 缩短单家时限来保证后面几家轮得到。现在有断流看门狗了 —— 一家真死了
+    // 45 秒内就会暴露，用不着预先扣住它的时间。反过来，平摊会把正在正常
+    // 生成的长回复误杀：实测 itokens 流式抽一条要 134 秒，按三家平摊只给
+    // 66 秒，等于亲手掐死唯一那个干得成活的。
+    const left = budget - (Date.now() - startedAt);
+    if (i > 0 && left < MIN_PROVIDER_MS) {
+      // 预算见底。再拿十几秒去敲下一家，只是把「超时」换个说法，
+      // 还会多烧一次 token。就地认输，让调用方看见真正的原因。
+      break;
+    }
+    const slice = Math.max(left, MIN_PROVIDER_MS);
+
     const client = new OpenAI({
       apiKey: p.apiKey,
       baseURL: p.baseURL,
-      // 网络层重试，与下面的校验重试是两回事。
-      // 中转站在并发下会回 503，SDK 的指数退避能扛过大部分，所以给到 4 次。
-      maxRetries: 4,
-      // 传了 deadlineMs 就跟着放宽：SDK 先超时的话会自己重试，
-      // 于是一次本来只是慢的生成被重跑四遍，比不放宽还糟。
-      timeout: opts.deadlineMs ?? ATTEMPT_TIMEOUT_MS,
+      // 网络层重试，与下面的校验重试是两回事。中转站在并发下会回 503，
+      // SDK 的指数退避能扛过大部分。但重试是**藏在一次调用里**的：
+      // 日志上只留一行，看不出中间摔了几跤 —— 线上见过一次 540 token 的
+      // Pass 1 花掉 159 秒，按当时实测的 40 token/秒该是 14 秒。
+      // 所以次数要收，且下面的 AbortSignal 会把总时间卡死。
+      maxRetries: 2,
+      timeout: slice,
     });
 
     const r: Attempt<unknown> =
       opts.tier === "embedding"
-        ? await embed(client, p, opts)
-        : await complete(client, p, opts);
+        ? await embed(client, p, opts, slice)
+        : await complete(client, p, opts, slice);
 
     if (r.ok) {
       clearStrikes(p.name);
@@ -176,7 +210,17 @@ function shouldFailover(e: unknown): boolean {
   if (e instanceof OpenAI.APIUserAbortError) return true; // 撞上我们的总时限
   if (e instanceof OpenAI.APIConnectionError) return true; // 连不上，含 SDK 超时
   if (e instanceof OpenAI.RateLimitError) return true;
-  if (e instanceof OpenAI.APIError) return (e.status ?? 0) >= 500;
+  if (e instanceof OpenAI.APIError) {
+    // 没有状态码 = 这个错不是服务端给的一个完整 HTTP 响应，而是传输层出的事：
+    // 流被上游掐断、连接中途没了。改成流式之后才浮出来的一类 ——
+    // 非流式时代错误总是完整响应，永远带状态码，所以 `?? 0` 从来没暴露过。
+    //
+    // 实测踩到的原话：「Upstream response stream was interrupted」，
+    // status 是 undefined，于是 `(undefined ?? 0) >= 500` 为假，判成「换家也
+    // 没用」就地失败。可这恰恰最该换家：不是请求有问题，是这家的连接断了。
+    if (e.status === undefined) return true;
+    return e.status >= 500;
+  }
   return false;
 }
 
@@ -188,6 +232,7 @@ async function complete(
   client: OpenAI,
   provider: Provider,
   opts: TextOptions & { jsonSchema?: ZodType },
+  sliceMs: number,
 ): Promise<Attempt<unknown>> {
   const model = provider.model;
   const maxRetries = opts.maxRetries ?? 1;
@@ -201,7 +246,9 @@ async function complete(
     { role: "user", content: userContent(opts) },
   ];
 
-  const deadline = opts.deadlineMs ?? CALL_DEADLINE_MS;
+  // 这一家的截止时刻。校验重试要共用它，不能每一轮都重新发一份完整时间——
+  // 那样两轮就把预算翻倍，后面的兜底家又轮不到了。
+  const endsAt = Date.now() + sliceMs;
 
   let attempts = 0;
   let promptTokens = 0;
@@ -212,43 +259,97 @@ async function complete(
   for (let round = 0; round <= maxRetries; round++) {
     attempts++;
     const t0 = Date.now();
-    let raw: string;
+    let raw = "";
     const cap = opts.maxTokens ?? MAX_OUTPUT_TOKENS[opts.tier];
+    const leftMs = endsAt - Date.now();
+    if (leftMs <= 0) {
+      return { ok: false, error: timedOut(sliceMs), failover: true };
+    }
+    const gate = watchdog(leftMs);
+    let lastUsage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
     try {
-      // 已知问题：抽一条带三个能力点的经历时，输出能到几千 token，
-      // 中转站偶尔会在生成完成前回 504 网关超时。流式本该能绕开
-      // （连接一直有数据），但这个沙箱的出网代理会把 SSE 连接重置，
-      // 没法在这里验证，所以不上没验证过的改动。
-      // 当前的兜底是每条可以单独重试，见 ingest/pipeline.ts。
+      // 必须流式。这不是为了看字一个个蹦出来，是为了让连接上一直有数据 ——
+      // 抽一条经历要生成几千 token，非流式时中间那一两分钟连接上是空的，
+      // 于是：
+      //   · itokens 的网关 61 秒回 504（实测，同一个请求流式跑通只要 134 秒）
+      //   · 百炼在整段生成完成前不发响应头，超过 Node undici 默认的
+      //     300 秒 headersTimeout 就被底层掐掉，报「等不到响应头」
+      // 两家都是「等太久」而不是「答不出来」。流式一开，两家的病一起好。
+      //
+      // 顺带拿到 stall 这个真正的卡死信号：不是「总共花了多久」，
+      // 而是「多久没吐出下一个字」。前者会误杀正在正常生成的长回复。
       const res = await client.chat.completions.create(
         {
           model,
           messages,
           max_completion_tokens: cap,
+          stream: true,
+          // 不要这个的话流式响应里没有 usage，成本报表会缺一块。
+          // itokens / 百炼 / DeepSeek 三家都认（实测）。
+          stream_options: { include_usage: true },
+          // 这一家自己的参数（如百炼的 enable_thinking:false）。
+          // 放在最后，但它只该带「不这么传就干不了活」的东西，见 config.ts。
+          ...provider.extraBody,
         },
-        { signal: AbortSignal.timeout(deadline) },
+        { signal: gate.signal },
       );
+
+      let finish: string | null = null;
+      let chunks = 0;
+      raw = "";
+      for await (const part of res) {
+        chunks++;
+        gate.beat();
+        raw += part.choices[0]?.delta?.content ?? "";
+        const fr = part.choices[0]?.finish_reason;
+        if (fr) finish = fr;
+        if (part.usage) {
+          promptTokens += part.usage.prompt_tokens ?? 0;
+          completionTokens += part.usage.completion_tokens ?? 0;
+          lastUsage = part.usage;
+        }
+      }
+
       const ms = Date.now() - t0;
-      promptTokens += res.usage?.prompt_tokens ?? 0;
-      completionTokens += res.usage?.completion_tokens ?? 0;
       await logCall({
         tier: opts.tier,
         provider: provider.name,
         purpose: opts.purpose,
-        promptTokens: res.usage?.prompt_tokens ?? null,
-        completionTokens: res.usage?.completion_tokens ?? null,
+        promptTokens: lastUsage?.prompt_tokens ?? null,
+        completionTokens: lastUsage?.completion_tokens ?? null,
         durationMs: ms,
         model,
         succeeded: true,
       });
 
-      if (res.choices[0]?.finish_reason === "length") {
+      if (finish === "length") {
+        // 百炼实测见过一种：16000 token 全花在思考上，正文一个字没有。
+        // 这跟「写到一半被截断」是两回事，说出来才好换一家。
         return {
           ok: false,
-          error: `模型输出被 ${cap} token 上限截断，这条没抽完`,
+          error:
+            raw.trim() === ""
+              ? `模型想了 ${cap} token 也没开始作答，这条它做不了`
+              : `模型输出被 ${cap} token 上限截断，这条没抽完`,
+          failover: true,
         };
       }
-      raw = res.choices[0]?.message?.content ?? "";
+
+      // 流正常结束却一个字都没有。
+      //
+      // 这**不是**「模型答得不对」—— 交给下面的 JSON 校验去处理的话，错误会
+      // 变成「输出不符合结构要求：返回内容为空」，而那条路是不换家的
+      // （答得不对换谁都一样）。空响应恰恰相反：几乎一定是这一家出了问题，
+      // 换一家最可能就好了。实测在 Pass 1 上踩到过，卡在这里没往下走。
+      //
+      // 块数和 finish 一起报出来，才分得清「一块没收到」和「收到了但全是空的」。
+      if (raw.trim() === "") {
+        return {
+          ok: false,
+          error: `模型没有返回内容（收到 ${chunks} 块，finish=${finish ?? "无"}）`,
+          failover: true,
+        };
+      }
     } catch (e) {
       await logCall({
         tier: opts.tier,
@@ -260,7 +361,14 @@ async function complete(
         model,
         succeeded: false,
       });
-      return { ok: false, error: apiError(e), failover: shouldFailover(e) };
+      // 断流和「总时间到了」在 SDK 眼里都是 abort，得自己分清楚，
+      // 不然界面上永远只有一句「超时」，查不出到底是哪一种。
+      if (gate.stalled()) {
+        return { ok: false, error: `模型吐到一半断了（${STALL_MS / 1000} 秒没动静）`, failover: true };
+      }
+      return { ok: false, error: apiError(e, sliceMs), failover: shouldFailover(e) };
+    } finally {
+      gate.done();
     }
 
     const usage: LLMUsage = {
@@ -365,6 +473,7 @@ async function embed(
   client: OpenAI,
   provider: Provider,
   opts: EmbeddingOptions,
+  sliceMs: number,
 ): Promise<Attempt<number[]>> {
   const model = provider.model;
   const t0 = Date.now();
@@ -375,7 +484,7 @@ async function embed(
         input: opts.user,
         dimensions: EMBEDDING_DIM,
       },
-      { signal: AbortSignal.timeout(CALL_DEADLINE_MS) },
+      { signal: AbortSignal.timeout(sliceMs) },
     );
     const ms = Date.now() - t0;
     await logCall({
@@ -421,7 +530,7 @@ async function embed(
       model,
       succeeded: false,
     });
-    return { ok: false, error: apiError(e), failover: shouldFailover(e) };
+    return { ok: false, error: apiError(e, sliceMs), failover: shouldFailover(e) };
   }
 }
 
@@ -476,11 +585,52 @@ async function logCall(entry: CallLog): Promise<void> {
   }
 }
 
-function apiError(e: unknown): string {
+/**
+ * 一次流式请求的看门狗：总时限 + 断流检测，合成一个 AbortSignal。
+ *
+ * 两条命都要看。只看总时限，卡死的连接会一直挂到时间用完，把后面几家的
+ * 预算一起赔进去；只看断流，一个慢慢吐字但永远吐不完的回复能拖到天荒地老。
+ */
+function watchdog(totalMs: number): {
+  signal: AbortSignal;
+  beat: () => void;
+  stalled: () => boolean;
+  done: () => void;
+} {
+  const ctl = new AbortController();
+  let stalled = false;
+  let gap: ReturnType<typeof setTimeout>;
+
+  const arm = () => {
+    clearTimeout(gap);
+    gap = setTimeout(() => {
+      stalled = true;
+      ctl.abort();
+    }, STALL_MS);
+  };
+  const total = setTimeout(() => ctl.abort(), totalMs);
+  arm();
+
+  return {
+    signal: ctl.signal,
+    beat: arm,
+    stalled: () => stalled,
+    done: () => {
+      clearTimeout(gap);
+      clearTimeout(total);
+    },
+  };
+}
+
+/** 这一家没在分到的时间里回话。文案里带上秒数，日志和界面都好对账。 */
+function timedOut(sliceMs: number): string {
+  return `等了 ${Math.round(sliceMs / 1000)} 秒模型还没回，换一家`;
+}
+
+function apiError(e: unknown, sliceMs: number): string {
   // 超时两种：SDK 自己的单次超时，和我们用 AbortSignal 卡的总时限。
   // 都要排在 APIConnectionError 前面——前者是它的子类。
-  if (e instanceof OpenAI.APIUserAbortError)
-    return `等了 ${Math.round(CALL_DEADLINE_MS / 60000)} 分钟模型还没回，先算这条失败`;
+  if (e instanceof OpenAI.APIUserAbortError) return timedOut(sliceMs);
   if (e instanceof OpenAI.APIConnectionTimeoutError) return "模型接口超时没回";
   if (e instanceof OpenAI.AuthenticationError) return "模型接口拒绝了这个 key";
   if (e instanceof OpenAI.NotFoundError)

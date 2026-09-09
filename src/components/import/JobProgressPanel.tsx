@@ -9,6 +9,7 @@ import {
   restartJob,
   resumeJob,
   retryOne,
+  stopJob,
   type JobProgress,
 } from "@/app/app/import/job-actions";
 
@@ -31,11 +32,19 @@ export function JobProgressPanel({
   const [error, setError] = useState<string | null>(null);
   const settledSent = useRef(false);
 
-  // 后台作业跑在 after() 里，进程一没（热重载、重启、崩溃）活就没人接了。
-  // 作业会一直标着 extracting，进度停住，还不报错。发现了先自己续一次；
-  // 续过还断，就交给使用者决定，别在后台反复烧钱。
-  const triedResume = useRef(false);
+  // 一次函数调用装不下整个作业：平台有 maxDuration，管道跑到时间不够就主动
+  // 让出，把剩下的候选留给下一次。让出时它会把心跳往回拨，于是下面这段
+  // 立刻认领并接着抽——所以「续跑」是常态，不是异常。
+  //
+  // 只要**还在往前走**就一直续。停在原地的那次续跑才算数：续过一轮
+  // 一条都没多抽出来，就别在后台反复烧钱了，交给使用者决定。
+  // 记的是「上次发起续跑时已经抽好几条」，-1 表示还没续过。
+  const resumedAt = useRef(-1);
   const [resumed, setResumed] = useState<"no" | "once" | "stuck">("no");
+
+  // 点了停之后按钮要立刻变样，不能等下一次轮询——那要 2 秒，
+  // 这 2 秒里人会以为没点上，再点一次。
+  const [stopping, setStopping] = useState(false);
 
   // 重试 / 重来会把作业推回 extracting，但那时轮询已经停了。
   // 用一个计数把 effect 重新点着，否则界面会一直停在旧数字上。
@@ -78,8 +87,8 @@ export function JobProgressPanel({
       if (r.data.settled) return; // 跑完就停下来，别一直问
 
       if (r.data.stalled) {
-        if (!triedResume.current) {
-          triedResume.current = true;
+        if (r.data.current > resumedAt.current) {
+          resumedAt.current = r.data.current;
           setResumed("once");
           await resumeJob(jobId);
         } else {
@@ -96,9 +105,17 @@ export function JobProgressPanel({
     };
   }, [jobId, onSettled, nonce]);
 
+  // 停：只改状态，不去掐 after() 里那次调用（掐不了）。改完之后轮询下一拍
+  // 就会看到终态，界面自己往下走——已经抽好的进校对，一条都没有的回上传区。
+  async function stop() {
+    setStopping(true);
+    await stopJob(jobId);
+    setStopping(false);
+  }
+
   async function rerun(fn: () => Promise<unknown>) {
     settledSent.current = false;
-    triedResume.current = false;
+    resumedAt.current = -1;
     setResumed("no");
     await fn();
     setNonce((n) => n + 1);
@@ -131,11 +148,26 @@ export function JobProgressPanel({
     >
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[15px] font-medium">{p.headline}</p>
-        {!p.settled && p.total > 0 && (
-          <span className="shrink-0 font-mono text-[12px]" style={{ color: "var(--mute)" }}>
-            {pct}%
-          </span>
-        )}
+        <div className="flex shrink-0 items-baseline gap-3">
+          {!p.settled && p.total > 0 && (
+            <span className="font-mono text-[12px]" style={{ color: "var(--mute)" }}>
+              {pct}%
+            </span>
+          )}
+          {/* 抽取途中一直有退路。以前只有「续跑过一次还是不动」和「Pass 1 挂了」
+              两种情况才给按钮，作业跑得慢又没断的时候，人是被关在里面的。 */}
+          {!p.settled && (
+            <Button
+              variant="text"
+              size="sm"
+              className="!px-0"
+              disabled={stopping}
+              onClick={() => void stop()}
+            >
+              {stopping ? "正在停…" : "停下"}
+            </Button>
+          )}
+        </div>
       </div>
 
       {p.total > 0 && (
@@ -154,7 +186,7 @@ export function JobProgressPanel({
         <div className="mt-3 border-t pt-3" style={{ borderColor: "var(--line)" }}>
           {resumed === "once" ? (
             <p className="text-[13px]" style={{ color: "var(--slate)" }}>
-              抽取中途断过一次，已经接着上次继续了。抽好的 {p.current} 条不会重来。
+              一轮跑不完，正接着上次继续。抽好的 {p.current} 条不会重来。
             </p>
           ) : (
             <>

@@ -116,6 +116,7 @@ export function AssessPanel({
             <ScoreCard a={assessment} />
             <LossCard a={assessment} />
           </div>
+          <HardGateBlock results={assessment.results} />
           <Comparison results={assessment.results} taskLinks={taskLinks} />
         </>
       )}
@@ -195,8 +196,11 @@ function Progress({ step }: { step: Step }) {
 }
 
 function ScoreCard({ a }: { a: AssessmentView }) {
-  const gaps = a.results.filter((r) => r.gapType !== null).length;
-  const strong = a.results.filter(isStrong).length;
+  // 硬门槛不参与打分，也就不该出现在「N 条要求里」这个分母里 ——
+  // 它在下面自己那一栏里说。
+  const scored = a.results.filter((r) => r.hardGate === null);
+  const gaps = scored.filter((r) => r.gapType !== null).length;
+  const strong = scored.filter(isStrong).length;
 
   return (
     <div
@@ -212,7 +216,7 @@ function ScoreCard({ a }: { a: AssessmentView }) {
         </span>
       </div>
       <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
-        {a.results.length} 条要求里，{strong} 条讲得出充分证据，{gaps} 条有缺口。
+        {scored.length} 条要求里，{strong} 条讲得出充分证据，{gaps} 条有缺口。
       </p>
       {a.runCount > 1 && (
         <p className="mt-1.5 text-[12px]" style={{ color: "var(--mute)" }}>
@@ -278,6 +282,83 @@ function LossCard({ a }: { a: AssessmentView }) {
   );
 }
 
+// ---- 硬门槛 ----
+
+/**
+ * 不满足的硬门槛单独一栏，不混进缺口列表。
+ *
+ * 混进去的话，用户会在「怎么补」的清单里看到一条补不了的东西；而它一旦
+ * 被排进任务池（「获得本科学历 · 1440 小时」），整个优先级排序在他眼里
+ * 就废了。这一栏只说事实，不给行动。
+ *
+ * 「还判不了」的那些同样要露出来，但措辞完全不同：那是我们缺信息，不是
+ * 他不合格。
+ */
+function HardGateBlock({ results }: { results: RequirementResult[] }) {
+  const gates = results.filter((r) => r.hardGate !== null);
+  if (gates.length === 0) return null;
+
+  const unmet = gates.filter((r) => r.hardGate?.verdict === "unmet");
+  const unknown = gates.filter((r) => r.hardGate?.verdict === "unknown");
+  const met = gates.filter((r) => r.hardGate?.verdict === "met");
+
+  return (
+    <div className="mt-5 space-y-2">
+      {unmet.length > 0 && (
+        <div
+          className="rounded-card px-4 py-3.5"
+          style={{ background: "#FBFBFD", border: "1px solid var(--line)" }}
+        >
+          <h3 className="text-[12.5px] font-semibold" style={{ color: "var(--mute)" }}>
+            这个方向有你不满足的硬门槛 · 不进缺口列表，也不生成任务
+          </h3>
+          <ul className="mt-2.5 space-y-2">
+            {unmet.map((r) => (
+              <li key={r.requirementIndex} className="flex items-start gap-2.5">
+                <Tag fg="var(--slate)" bg="var(--line-soft)">
+                  不满足
+                </Tag>
+                <p className="min-w-0 flex-1 text-[13px] leading-relaxed">
+                  {r.text}
+                  <span style={{ color: "var(--slate)" }}> —— {r.hardGate?.detail}</span>
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {unknown.length > 0 && (
+        <div className="rounded-card px-4 py-3.5" style={{ background: "var(--warn-soft)" }}>
+          <h3 className="text-[12.5px] font-semibold" style={{ color: "#8A5A00" }}>
+            这 {unknown.length} 条还判不了 —— 缺的是档案，不是你的能力
+          </h3>
+          <ul className="mt-2 space-y-1.5">
+            {unknown.map((r) => (
+              <li key={r.requirementIndex} className="text-[12.5px]" style={{ color: "#8A5A00" }}>
+                · {r.text} —— {r.hardGate?.detail}
+              </li>
+            ))}
+          </ul>
+          <Link
+            href="/app/profile#education"
+            className="mt-2 inline-block text-[12.5px] underline"
+            style={{ color: "#8A5A00" }}
+          >
+            去基本信息补上
+          </Link>
+        </div>
+      )}
+
+      {met.length > 0 && (
+        <p className="text-[12.5px]" style={{ color: "var(--proof)" }}>
+          另有 {met.length} 条硬门槛已满足（{met.map((r) => r.text).join("、")}），计入充分项，不产生缺口。
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ---- 逐条对照 ----
 
 function Comparison({
@@ -288,7 +369,8 @@ function Comparison({
   taskLinks: Record<number, TaskLink>;
 }) {
   const [showAll, setShowAll] = useState(true);
-  const shown = showAll ? results : results.filter((r) => r.gapType !== null);
+  const scored = results.filter((r) => r.hardGate === null);
+  const shown = showAll ? scored : scored.filter((r) => r.gapType !== null);
 
   return (
     <div className="mt-5">

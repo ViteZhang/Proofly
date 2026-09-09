@@ -9,6 +9,7 @@
 // 三件事比样式重要：
 // 1. 发送失败时输入框里的话必须还在（验收 44）——断网那一下 Server Action
 //    是抛出来的，不是返回 ok:false，所以每次调用都得包 try/catch。
+//    话由 Composer 收着：点发送先清空，这里说没成功它再还回去。
 // 2. 刷新页面要能把「还在处理」捡回来（验收 42）——处理跑在服务端，
 //    页面刷新打断不了它，但新页面并不知道后台还有活，靠轮询接回来。
 // 3. 消息按 id 去重再追加——同一条既可能从 Server Action 的返回里来，
@@ -116,7 +117,10 @@ export function NotesChat({
     let alive = true;
 
     const tick = async () => {
-      const last = messages[messages.length - 1]?.createdAt ?? null;
+      // 游标只认落了库的消息。本地那条乐观气泡带的是浏览器时钟，
+      // 快一点就会把这段时间里服务端写的消息全部漏掉。
+      const settled = messages.filter((m) => !m.id.startsWith("local-"));
+      const last = settled[settled.length - 1]?.createdAt ?? null;
       try {
         const r = await pollChat(last);
         if (!alive || !r.ok) return;
@@ -134,22 +138,52 @@ export function NotesChat({
     };
   }, [thinking, messages, append]);
 
+  /**
+   * 发一条消息。
+   *
+   * 用户那条气泡先本地摆上去，不等服务端。一轮记录要在服务端跑 30 到 100 秒，
+   * 而 Next.js 的 Server Action 是排队串行的 —— 这期间轮询根本轮不上，
+   * 想靠轮询把自己刚说的话捡回来是捡不到的。不先摆，屏幕上就只有一个
+   * 「想一下…」，自己说过什么完全看不见。
+   *
+   * 临时 id 用 local- 前缀，服务端回来的真消息带的是 uuid，两者不会撞；
+   * 收尾时按前缀把临时那条摘掉，换成落了库的那条。
+   */
   async function onSend(body: string, imagePath: string | null): Promise<boolean> {
     setError(null);
     setHint(null);
     stick.current = true;
     setThinking(true);
+
+    const localId = `local-${crypto.randomUUID()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: localId,
+        role: "user",
+        kind: imagePath === null ? "text" : "image",
+        content: body,
+        imagePath,
+        imageUrl: null,
+        payload: {},
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    const drop = () => setMessages((prev) => prev.filter((m) => m.id !== localId));
+
     try {
       const r = await sendMessage(body, imagePath ?? undefined);
+      drop();
       if (!r.ok) {
         setError(r.error);
-        return false;      // 话留在输入框里
+        return false;      // Composer 把话还回输入框
       }
       append(r.data.messages);
       setError(r.data.modelError);
       return true;
     } catch {
       // 断网、请求被掐断：Server Action 是抛出来的，不是返回 ok:false。
+      drop();
       setError("这条没发出去，网络断了或者请求被掐断了。内容还在，再点一次发送。");
       return false;
     } finally {

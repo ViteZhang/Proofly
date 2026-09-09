@@ -46,6 +46,57 @@ const PASS2_CONCURRENCY = 3;
 // 干活期间多久报一次「我还活着」。要明显小于界面判定断线的 6 分钟。
 const HEARTBEAT_MS = 30_000;
 
+// ---- 一次函数调用能用多久 ----
+//
+// after() 不是真的后台：它跟发起它的那次请求共用同一个函数调用，
+// 也就共用平台那把 maxDuration 的刀（见 src/app/app/import/page.tsx）。
+// 时间一到，正在 await 的东西凭空消失 —— catch 进不去，日志留不下，
+// 候选永远停在 pending。线上那条 1292 字的作业就是这么死的：
+// Pass 1 花了 159 秒，Pass 2 分到剩下的 136 秒，没跑完，然后什么也没有。
+//
+// 所以这里自己拿一个更小的预算，宁可主动让出，也不要被平台砍。
+// 留出的余量给冷启动、几次写库和结算。
+// 想放宽到 800 秒（Vercel Pro + Fluid 的上限）时，改两处、只改两处：
+//   1. src/app/app/import/page.tsx 的 maxDuration
+//   2. 这里的 INVOCATION_BUDGET_MS（留 50 秒余量，写 750_000）
+// 下面几个 CAP 会跟着变宽还是不变，由 budget.guard.test.ts 校验，
+// 改坏了 pnpm build 直接红。
+const INVOCATION_BUDGET_MS = 250_000;
+
+// 开一条新候选至少要剩这么多。不够就留给下一次调用 ——
+// 开了一半被砍等于白烧一次 token，还什么都不留下。
+//
+// 这个数的下限由 budget.guard.test.ts 钉着：至少要够 Pass 2 敲完一家
+// （core.ts 的 MIN_PROVIDER_MS），加上召回、Pass 3 和收尾的余量。
+const UNIT_MIN_MS = 150_000;
+
+// Pass 1 只是切段，不该吃掉整轮。超了就是这一家有问题，换一家比等下去快。
+const PASS1_BUDGET_MS = 90_000;
+
+// Pass 2 是最贵的一步，但也要留出 Pass 3 和写库的时间。
+//
+// 175 秒是拿实测倒推的：itokens 流式抽一条 1292 字的经历要 134 秒
+// （非流式时它 61 秒就被网关 504 掐了，看不到真实耗时）。留三成余量。
+// Pass 3 只是判定意图，历史平均 8 秒，30 秒足够宽。
+const PASS2_CAP_MS = 175_000;
+const PASS3_CAP_MS = 30_000;
+const RECALL_BUDGET_MS = 20_000;
+
+// 收尾写库要留的余量。
+const RESERVE_MS = 20_000;
+
+// 主动让出时把心跳往回拨多久。要大于 job-actions 里判定断线的 6 分钟，
+// 这样界面下一拍（2 秒）就能认领并接着抽，而不是干等六分钟。
+const YIELD_BACKDATE_MS = 7 * 60_000;
+
+/** 这次函数调用还剩多少毫秒可用。 */
+type Clock = () => number;
+
+function startClock(): Clock {
+  const endsAt = Date.now() + INVOCATION_BUDGET_MS;
+  return () => endsAt - Date.now();
+}
+
 // 单份文档最多抽这么多条。Pass 1 偶尔会把目录当成经历切出几十条，
 // 真跑起来又慢又贵，先截断并在界面上说清楚。
 const MAX_CANDIDATES = 40;
@@ -55,6 +106,7 @@ const MAX_CANDIDATES = 40;
  * 不抛异常——失败写进 ingest_jobs.error_message，让界面有话可说。
  */
 export async function runJob(jobId: string): Promise<void> {
+  const left = startClock();
   const supabase = await createClient();
 
   const { data: job } = await supabase
@@ -86,6 +138,7 @@ export async function runJob(jobId: string): Promise<void> {
       system: PASS1_SYSTEM,
       user: pass1User(fullText),
       jsonSchema: pass1Schema,
+      deadlineMs: Math.min(PASS1_BUDGET_MS, Math.max(left() - RESERVE_MS, 30_000)),
     });
     if (!r.ok) {
       await failJob(jobId, `通读文档时出错：${r.error}`);
@@ -129,7 +182,7 @@ export async function runJob(jobId: string): Promise<void> {
   }
 
   // ---- Pass 2 + Pass 3：逐条，并发 3 ----
-  await runCandidates(jobId, fullText, docTitle, candidates);
+  await runCandidates(jobId, fullText, docTitle, candidates, undefined, left);
 }
 
 /**
@@ -166,6 +219,7 @@ export async function markCandidatePending(
 
 /** 单独重跑某一条，其余不动。调用前先 markCandidatePending。 */
 export async function retryCandidate(jobId: string, index: number): Promise<void> {
+  const left = startClock();
   const supabase = await createClient();
   const { data: job } = await supabase
     .from("ingest_jobs")
@@ -181,7 +235,7 @@ export async function retryCandidate(jobId: string, index: number): Promise<void
   if (fullText === null) return;
   const docTitle = await loadTitle(job.source_doc_id);
 
-  await runCandidates(jobId, fullText, docTitle, all, [index]);
+  await runCandidates(jobId, fullText, docTitle, all, [index], left);
 }
 
 // ---------------------------------------------------------------
@@ -191,7 +245,8 @@ async function runCandidates(
   fullText: string,
   docTitle: string,
   all: Candidate[],
-  onlyIndexes?: number[],
+  onlyIndexes: number[] | undefined,
+  left: Clock,
 ): Promise<void> {
   const todo = all.filter(
     (c) =>
@@ -203,15 +258,32 @@ async function runCandidates(
   // 期间心跳不动，界面会判定作业断了并自动续跑——于是同一批候选被两个 worker
   // 同时抽，钱翻倍。心跳的含义必须是「进程还活着」，不是「又抽完一条」。
   const beat = setInterval(() => void touch(jobId), HEARTBEAT_MS);
+
+  // 时间不够、主动把剩下的留给下一次调用。跟「跑完了」要分清楚：
+  // 让出的作业不能收尾结算，它还没做完。
+  let yielded = false;
+
   try {
     await inBatches(todo.length, PASS2_CONCURRENCY, async (i) => {
+      // 排队中的候选每条开跑前都要回头看一眼。跑在 after() 里的这次调用
+      // 没有句柄能从外面掐掉，所以「停」只能靠它自己自觉：人点了停，
+      // 后面那几条就不该再烧钱了。
+      if (!(await stillRunning(jobId))) return;
+
+      // 时间不够就别开了。开了一半被平台砍掉，这条候选依然是 pending，
+      // 但钱已经烧掉了，而且什么错误都留不下来——那正是要根治的那种失败。
+      if (left() < UNIT_MIN_MS) {
+        yielded = true;
+        return;
+      }
+
       const c = todo[i];
       // handleOne 约定是返回错误而不是抛，但它下面还有一串调用。
       // 真抛出来一个，Promise.all 会整批拒掉，剩下的候选全留在 pending——
       // 界面上就是「进度停住、没有错误、也没有按钮」，最难查的那种。
       let err: string | null;
       try {
-        err = await handleOne(jobId, fullText, docTitle, c, all.length);
+        err = await handleOne(jobId, fullText, docTitle, c, all.length, left);
       } catch (e) {
         err = e instanceof Error ? e.message : "抽这条时出了意外";
       }
@@ -224,7 +296,29 @@ async function runCandidates(
     clearInterval(beat);
   }
 
+  if (yielded && all.some((c) => c.state === "pending")) {
+    await yieldJob(jobId);
+    return;
+  }
+
   await finishIfDone(jobId, all);
+}
+
+/**
+ * 主动让出：这次调用的时间不够开下一条了，把剩下的留给下一次。
+ *
+ * 做法是把心跳往回拨到「已经断线」的位置，界面下一拍（2 秒）就会认领并接着抽。
+ * 不这么做就得等满 6 分钟的断线判定——一份 8 条的文档能拖上四十分钟，
+ * 而且中间那六分钟界面上什么也不动，跟死了没区别。
+ *
+ * 心跳定时器必须先停掉再调这里，否则下一拍心跳会把回拨盖掉。
+ */
+async function yieldJob(jobId: string): Promise<void> {
+  const supabase = await createClient();
+  await supabase
+    .from("ingest_jobs")
+    .update({ heartbeat_at: new Date(Date.now() - YIELD_BACKDATE_MS).toISOString() })
+    .eq("id", jobId);
 }
 
 async function touch(jobId: string): Promise<void> {
@@ -241,6 +335,7 @@ async function handleOne(
   docTitle: string,
   c: Candidate,
   total: number,
+  left: Clock,
 ): Promise<string | null> {
   const at = locate(fullText, { start: c.start_marker, end: c.end_marker }, {
     index: c.index,
@@ -259,6 +354,9 @@ async function handleOne(
       docTitle,
     }),
     jsonSchema: pass2Schema,
+    // 留出 Pass 3、召回和写库的时间。给满了的话 Pass 2 一超时，
+    // 这一条就彻底没救；留一手，至少能把失败原因写进候选里。
+    deadlineMs: budgetFor(left, PASS2_CAP_MS, PASS3_CAP_MS + RECALL_BUDGET_MS),
   });
   if (!extract.ok) return extract.error;
 
@@ -268,6 +366,8 @@ async function handleOne(
   // ---- Pass 3 ----
   const { atoms: similar, degraded } = await findSimilarAtoms(
     [atom.title, atom.org, atom.situation].filter(Boolean).join(" "),
+    5,
+    budgetFor(left, RECALL_BUDGET_MS, PASS3_CAP_MS),
   );
 
   const verdict = await callLLM({
@@ -282,6 +382,7 @@ async function handleOne(
           : JSON.stringify(similar, null, 2),
     }),
     jsonSchema: pass3Schema,
+    deadlineMs: budgetFor(left, PASS3_CAP_MS, 0),
   });
   if (!verdict.ok) return verdict.error;
 
@@ -303,6 +404,10 @@ async function handleOne(
     parent !== null && atom.level === "project"
       ? { ...atom, level: "capability_slice" as const, children: [] }
       : atom;
+
+  // Pass 2 + Pass 3 走下来要几十秒到几分钟，这中间人可能已经点了停。
+  // 这时候再写草稿，校对队列里就会冒出一条属于已停作业的孤儿。
+  if (!(await stillRunning(jobId))) return "抽的过程中被停掉了";
 
   const supabase = await createClient();
 
@@ -424,8 +529,91 @@ async function bumpProgress(jobId: string, all: Candidate[]): Promise<void> {
     .eq("id", jobId);
 }
 
+/**
+ * 这一步能花多久：不超过它自己的上限，也不能把后面几步的时间吃光。
+ *
+ * 下限 20 秒是兜底——真到了这一步只剩十几秒，与其直接判失败，
+ * 不如让模型试一下，说不定它这次很快。
+ */
+function budgetFor(left: Clock, cap: number, reserveAfter: number): number {
+  return Math.min(cap, Math.max(left() - reserveAfter - RESERVE_MS, 20_000));
+}
+
+/**
+ * 作业还在跑吗。
+ *
+ * 「停」这个动作只改数据库里的状态——after() 里那次调用没有句柄能从外面
+ * 掐掉。所以每一步落库之前都回头问一句：我还该干活吗。
+ */
+async function stillRunning(jobId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("ingest_jobs")
+    .select("status")
+    .eq("id", jobId)
+    .maybeSingle();
+  return data?.status === "extracting";
+}
+
+/**
+ * 人工中止：没跑的那几条就地判失败，然后照常收尾。
+ *
+ * 不粗暴 discard——已经抽好的草稿是花了钱也花了时间的，不能因为后面几条慢
+ * 就一起扔掉。收尾按真正抽出来的条数结算，剩下的事后还能单独重试。
+ */
+export async function haltRemaining(jobId: string): Promise<void> {
+  const supabase = await createClient();
+  const { data: job } = await supabase
+    .from("ingest_jobs")
+    .select("status, candidates")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job || job.status !== "extracting") return;
+
+  const all = parseCandidates(job.candidates);
+
+  const { count } = await supabase
+    .from("drafts")
+    .select("id", { count: "exact", head: true })
+    .eq("ingest_job_id", jobId)
+    .eq("review_status", "pending");
+
+  // 一条草稿都还没产出就停 —— 等同于放弃，钱全退。
+  // 留成 awaiting_review 的话，导入页往后 24 小时每次打开都会把这个
+  // 空作业捡回来顶在上传区前面，而里面什么也没有。
+  if ((count ?? 0) === 0) {
+    await releaseJob(jobId, "discarded");
+    await supabase
+      .from("ingest_jobs")
+      .update({
+        status: "discarded",
+        progress_stage: "finishing",
+        error_message: "你中途停下了",
+      })
+      .eq("id", jobId);
+    return;
+  }
+
+  for (const c of all) {
+    if (c.state === "pending") {
+      c.state = "failed";
+      c.error = "你中途停下了";
+    }
+  }
+  await writeCandidates(jobId, all);
+  await bumpProgress(jobId, all);
+  await finishNow(jobId, all);
+}
+
 async function finishIfDone(jobId: string, all: Candidate[]): Promise<void> {
   if (all.some((c) => c.state === "pending")) return;
+  // 人已经点了停（或者作业被放弃）——这里不能把它改回 awaiting_review，
+  // 那等于「点了停，界面却又活过来了」。
+  if (!(await stillRunning(jobId))) return;
+  await finishNow(jobId, all);
+}
+
+async function finishNow(jobId: string, all: Candidate[]): Promise<void> {
   const supabase = await createClient();
   const failed = all.filter((c) => c.state === "failed");
 
@@ -479,9 +667,17 @@ async function failJob(jobId: string, message: string): Promise<void> {
   // 解析失败全额退回。用户没拿到东西，就不该付钱。
   await releaseJob(jobId, "failed");
   const supabase = await createClient();
+  // status 必须一起改。只写错误信息、把状态留在 extracting，这条作业就成了
+  // 一具「已经死了但还说自己在跑」的僵尸：轮询永不停止，导入页每次打开都把它
+  // 捡回来，24 小时后又悄无声息地消失。库里 2026-08-26 那条挂了 13 天，
+  // 就是这么来的。
   await supabase
     .from("ingest_jobs")
-    .update({ error_message: message, progress_stage: null })
+    .update({
+      status: "discarded",
+      error_message: message,
+      progress_stage: "finishing",
+    })
     .eq("id", jobId);
 }
 

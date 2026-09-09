@@ -3,25 +3,37 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { NAV_GROUPS } from "@/lib/nav";
+import { NAV_GROUPS, NAV_HOME } from "@/lib/nav";
 import { LogoWordmark } from "@/components/layout/Logo";
 import { createClient } from "@/lib/supabase/client";
 
 export function Sidebar({
   email,
+  displayName,
+  avatarColor,
+  location,
   todoCount = 0,
+  profileMissing = 0,
 }: {
   email: string;
+  /** 账户展示名。没设过就退回邮箱前缀。它不是简历上的姓名。 */
+  displayName?: string | null;
+  avatarColor?: string | null;
+  /** 侧栏底部第二行。没填常驻地时说清楚是没填，不要编一个。 */
+  location?: string | null;
   /** 行动清单的待办数。0 时不显示徽标 —— 一个「0」比没有徽标更吵。 */
   todoCount?: number;
+  /** 基本信息还差几项。缺的项会直接影响 JD 匹配，值得一个显眼的徽标。 */
+  profileMissing?: number;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
-  const name = email.split("@")[0] || email;
+  const name = displayName?.trim() || email.split("@")[0] || email;
   const initial = (name[0] ?? "?").toUpperCase();
+  const avatar = avatarColor ?? "linear-gradient(135deg, var(--proof), var(--proof-mid))";
 
   async function signOut() {
     setSigningOut(true);
@@ -52,46 +64,32 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* 导航三组 */}
+      {/* 首页独立一项，下面三组：档案 / 求职 / 质量 */}
       <nav className="flex-1 overflow-y-auto px-2.5 pb-4">
-        {NAV_GROUPS.map((group, gi) => (
-          <div key={group.title} className={gi === 0 ? "" : "mt-3 pt-3"}>
+        <NavLink item={NAV_HOME} active={pathname === NAV_HOME.href} />
+
+        {NAV_GROUPS.map((group) => (
+          <div key={group.title} className="mt-3 pt-3">
             <div
               className="px-2.5 pb-1.5 text-[10.5px] font-medium"
               style={{ letterSpacing: "0.06em", color: "rgba(255,255,255,0.38)" }}
             >
               {group.title}
             </div>
-            {group.items.map((item) => {
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="relative flex h-9 items-center rounded-pill px-2.5 text-[13px] transition-colors"
-                  style={{
-                    background: active ? "rgba(255,255,255,0.1)" : "transparent",
-                    color: active ? "#fff" : "rgba(255,255,255,0.72)",
-                  }}
-                >
-                  {active && (
-                    <span
-                      aria-hidden
-                      className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-pill bg-white"
-                    />
-                  )}
-                  {item.label}
-                  {item.href === "/app/actions" && todoCount > 0 && (
-                    <span
-                      className="ml-auto rounded-pill px-1.5 text-[11px]"
-                      style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}
-                    >
-                      {todoCount}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+            {group.items.map((item) => (
+              <NavLink
+                key={item.href}
+                item={item}
+                active={pathname === item.href}
+                badge={
+                  item.href === "/app/actions" && todoCount > 0
+                    ? { text: String(todoCount), warn: false }
+                    : item.href === "/app/profile" && profileMissing > 0
+                      ? { text: String(profileMissing), warn: true }
+                      : null
+                }
+              />
+            ))}
           </div>
         ))}
       </nav>
@@ -103,22 +101,19 @@ export function Sidebar({
             className="absolute bottom-[calc(100%-4px)] left-2.5 right-2.5 overflow-hidden rounded-btn"
             style={{ background: "var(--card)", boxShadow: "var(--shadow-3)" }}
           >
-            <Link
-              href="/app/facts"
-              onClick={() => setMenuOpen(false)}
-              className="block px-3.5 py-2.5 text-left text-[13px] transition-colors hover:bg-[var(--line-soft)]"
-              style={{ color: "var(--ink)" }}
-            >
-              事实层
-            </Link>
-            <Link
-              href="/app/account"
-              onClick={() => setMenuOpen(false)}
-              className="block px-3.5 py-2.5 text-left text-[13px] transition-colors hover:bg-[var(--line-soft)]"
-              style={{ color: "var(--ink)" }}
-            >
-              账户与积分
-            </Link>
+            {/* 「基本信息」不再挂在这里 —— 它已经是一级导航。
+                这个菜单里只留真正属于账户的东西。 */}
+            {MENU.map((m) => (
+              <Link
+                key={m.href}
+                href={m.href}
+                onClick={() => setMenuOpen(false)}
+                className="block px-3.5 py-2.5 text-left text-[13px] transition-colors hover:bg-[var(--line-soft)]"
+                style={{ color: "var(--ink)" }}
+              >
+                {m.label}
+              </Link>
+            ))}
             <button
               type="button"
               onClick={signOut}
@@ -137,7 +132,7 @@ export function Sidebar({
         >
           <span
             className="font-display flex h-8 w-8 shrink-0 items-center justify-center rounded-pill text-[13px] font-semibold text-white"
-            style={{ background: "linear-gradient(135deg, var(--proof), var(--proof-mid))" }}
+            style={{ background: avatar }}
           >
             {initial}
           </span>
@@ -146,11 +141,58 @@ export function Sidebar({
               {name}
             </span>
             <span className="block truncate text-[11.5px]" style={{ color: "rgba(255,255,255,0.45)" }}>
-              常驻地未设置
+              {location?.trim() || "常驻地未设置"}
             </span>
           </span>
         </button>
       </div>
     </aside>
+  );
+}
+
+const MENU = [
+  { label: "账户设置", href: "/app/account/settings" },
+  { label: "导出档案", href: "/app/account/export" },
+  { label: "积分与账单", href: "/app/account" },
+];
+
+function NavLink({
+  item,
+  active,
+  badge,
+}: {
+  item: { label: string; href: string };
+  active: boolean;
+  badge?: { text: string; warn: boolean } | null;
+}) {
+  return (
+    <Link
+      href={item.href}
+      className="relative flex h-9 items-center rounded-pill px-2.5 text-[13px] transition-colors"
+      style={{
+        background: active ? "rgba(255,255,255,0.1)" : "transparent",
+        color: active ? "#fff" : "rgba(255,255,255,0.72)",
+      }}
+    >
+      {active && (
+        <span
+          aria-hidden
+          className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-pill bg-white"
+        />
+      )}
+      {item.label}
+      {badge && (
+        <span
+          className="ml-auto rounded-pill px-1.5 text-[11px]"
+          style={
+            badge.warn
+              ? { background: "var(--warn)", color: "#fff" }
+              : { background: "rgba(255,255,255,0.16)", color: "#fff" }
+          }
+        >
+          {badge.text}
+        </span>
+      )}
+    </Link>
   );
 }

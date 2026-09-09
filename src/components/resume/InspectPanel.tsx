@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { ProofDot } from "@/components/library/ProofDot";
 import { EVIDENCE_LABEL } from "@/lib/domain";
 import { editBlock } from "@/app/app/resume/block-actions";
+import { howToFix } from "@/lib/resume/gate-help";
 import type { GateResult } from "@/lib/resume/gate";
 import type { BaselineBlockView, BaselineView } from "@/lib/queries/resume";
 import type { SelectionPreview } from "@/app/app/resume/baseline-actions";
@@ -55,19 +56,60 @@ export function InspectPanel({
   const mine = block
     ? checks.filter((c) => c.blockId === block.id || c.blockId === block.atomId)
     : [];
+  // 一个块都没有 = 上一次生成被门禁拦下、什么都没写入。检查结果留着，
+  // 块没留下 —— 面板上那句话该说哪一版，全看这个。
+  const fromFailedRun = (baseline?.blocks.length ?? 0) === 0;
+  // 生成成功时 blockId 是 resume_blocks 的行 id，被拦下时没有块可写，
+  // 记的就是来源经历的 id。前者查得到就换成它的 atomId，后者直接用。
+  const blockToAtom = new Map(
+    (baseline?.blocks ?? []).map((b) => [b.id, b.atomId] as const),
+  );
+  const atomIdOf = (id: string | null): string | null =>
+    id === null ? null : blockToAtom.get(id) ?? (blockToAtom.size === 0 ? id : null);
 
   return (
     <div className="space-y-4">
       {blocking.length > 0 && (
         <Panel title={`必须先解决 ${blocking.length} 处`} tone="danger">
-          {blocking.map((c) => (
-            <p key={c.id} className="text-[12.5px] leading-relaxed">
-              <b>{c.code}</b> {c.title}
-              <span className="block" style={{ color: "var(--slate)" }}>
-                {c.detail}
-              </span>
-            </p>
-          ))}
+          {/*
+            这份记录是什么时候的，必须说出来。一个块都没写进去，说明这是
+            上一次生成被拦下留下的痕迹 —— 它不会因为你改了档案就自己变，
+            要再点一次「生成基线」才重算。不说这句，人会以为页面卡住了。
+          */}
+          <p className="text-[12px] leading-relaxed" style={{ color: "var(--slate)" }}>
+            {fromFailedRun
+              ? "这是上一次生成被拦下时留下的记录，这一版没有写入。按下面的说法处理完，再点一次「生成基线」才会重算。"
+              : "改完对应的块之后会自动重新检查。"}
+          </p>
+          {blocking.map((c) => {
+            const fix = howToFix(c.code);
+            const atomId = atomIdOf(c.blockId);
+            return (
+              <div key={c.id} className="text-[12.5px] leading-relaxed">
+                <p>
+                  <b>{c.code}</b> {c.title}
+                </p>
+                {c.detail && (
+                  <p style={{ color: "var(--slate)" }}>{c.detail}</p>
+                )}
+                {fix && (
+                  <p className="mt-0.5" style={{ color: "var(--ink)" }}>
+                    <span style={{ color: "var(--mute)" }}>怎么办 · </span>
+                    {fix}
+                  </p>
+                )}
+                {atomId && (
+                  <Link
+                    href={`/app/library?atom=${atomId}`}
+                    className="mt-0.5 inline-block hover:underline"
+                    style={{ color: "var(--ai)" }}
+                  >
+                    打开这条经历 →
+                  </Link>
+                )}
+              </div>
+            );
+          })}
         </Panel>
       )}
 
