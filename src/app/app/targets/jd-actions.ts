@@ -72,6 +72,69 @@ export async function createJd(
   return ok({ id: data.id });
 }
 
+export type JdDeleteImpact = {
+  /** 「公司 · 岗位」，两个都没填时退回到「这份 JD」。 */
+  name: string;
+  requirementCount: number;
+  assessmentCount: number;
+  resumeCount: number;
+  interviewCount: number;
+  /** 行动清单里有多少条任务是从这份 JD 的缺口来的。任务本身不删。 */
+  taskLinkCount: number;
+};
+
+/**
+ * 删这份 JD 会带走什么。全部查库，一个数字都不写死。
+ *
+ * jds 上挂着四张 on delete cascade 的表：要求项、评估、投递版本、面试题库。
+ * 后两样是花过积分的东西，静悄悄删掉它们是这个确认框存在的全部理由。
+ */
+export async function getJdDeleteImpact(jdId: string): Promise<ActionResult<JdDeleteImpact>> {
+  if (!z.uuid().safeParse(jdId).success) return fail("这份 JD 不存在");
+  const supabase = await createClient();
+
+  const { data: jd } = await supabase
+    .from("jds")
+    .select("company,role_title")
+    .eq("id", jdId)
+    .maybeSingle();
+  if (!jd) return fail("这份 JD 已经不在了");
+
+  const [reqRes, assessRes, resumeRes, kitRes] = await Promise.all([
+    supabase.from("requirements").select("id", { count: "exact", head: true }).eq("jd_id", jdId),
+    supabase.from("assessments").select("id").eq("jd_id", jdId),
+    supabase.from("resume_versions").select("id", { count: "exact", head: true }).eq("jd_id", jdId),
+    supabase.from("interview_kits").select("id", { count: "exact", head: true }).eq("jd_id", jdId),
+  ]);
+
+  // 任务挂在缺口上，缺口挂在评估上 —— 中间隔了两层，只能一层层问。
+  const assessmentIds = (assessRes.data ?? []).map((a) => a.id);
+  let taskLinkCount = 0;
+  if (assessmentIds.length > 0) {
+    const { data: gaps } = await supabase
+      .from("gaps")
+      .select("id")
+      .in("assessment_id", assessmentIds);
+    const gapIds = (gaps ?? []).map((g) => g.id);
+    if (gapIds.length > 0) {
+      const { count } = await supabase
+        .from("task_targets")
+        .select("id", { count: "exact", head: true })
+        .in("gap_id", gapIds);
+      taskLinkCount = count ?? 0;
+    }
+  }
+
+  return ok({
+    name: [jd.company, jd.role_title].filter((s) => s && s.trim() !== "").join(" · ") || "这份 JD",
+    requirementCount: reqRes.count ?? 0,
+    assessmentCount: assessmentIds.length,
+    resumeCount: resumeRes.count ?? 0,
+    interviewCount: kitRes.count ?? 0,
+    taskLinkCount,
+  });
+}
+
 export async function deleteJd(jdId: string): Promise<ActionResult> {
   if (!z.uuid().safeParse(jdId).success) return fail("这份 JD 不存在");
   const supabase = await createClient();

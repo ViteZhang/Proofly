@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   profileItemImpact,
   removeProfileItem,
@@ -42,70 +42,35 @@ export function DeleteConfirm({
   }, [entity, id]);
 
   return (
-    <>
-      <div
-        className="fixed inset-0 z-40"
-        style={{ background: "rgba(12,14,20,0.34)" }}
-        onClick={onClose}
-        aria-hidden
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="fixed left-1/2 top-1/2 z-50 w-[min(440px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-card"
-        style={{ background: "var(--card)", boxShadow: "var(--shadow-3)" }}
-      >
-        <div className="px-5 py-5">
-          <h3 className="text-[15px] font-semibold">删掉「{name}」？</h3>
-
-          {lines === null ? (
-            <p className="mt-2 text-[13px]" style={{ color: "var(--mute)" }}>
-              正在看它被哪些地方用到…
-            </p>
-          ) : lines.length === 0 ? (
-            <p className="mt-2 text-[13px]" style={{ color: "var(--slate)" }}>
-              没有已生成的简历用到它，删掉不影响别的地方。
-            </p>
-          ) : (
-            <ul className="mt-2 space-y-1.5">
-              {lines.map((l) => (
-                <li key={l} className="text-[13px]" style={{ color: "var(--slate)" }}>
-                  · {l}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {error && (
-            <p className="mt-2 text-[12.5px]" style={{ color: "var(--danger)" }}>
-              {error}
-            </p>
-          )}
-        </div>
-
-        <div
-          className="flex justify-end gap-2 px-5 py-3.5"
-          style={{ borderTop: "1px solid var(--line-soft)" }}
-        >
-          <Button variant="text" disabled={pending} onClick={onClose}>
-            不删了
-          </Button>
-          <Button
-            variant="danger"
-            // 影响范围还没回来就不给按。这一步就是为了让人看完再决定。
-            disabled={pending || lines === null}
-            onClick={() =>
-              run(async () => {
-                const res = await removeProfileItem(entity, id);
-                if (res.ok) onClose();
-                else setError(res.error);
-              })
-            }
-          >
-            {pending ? "删除中…" : "删掉"}
-          </Button>
-        </div>
-      </div>
-    </>
+    <ConfirmDialog
+      ariaLabel="确认删除档案条目"
+      title={`删掉「${name}」？`}
+      // 影响范围还没回来就不给按。这一步就是为了让人看完再决定。
+      ready={lines !== null}
+      busy={pending}
+      error={error}
+      cancelLabel="不删了"
+      confirmLabel="删掉"
+      onClose={onClose}
+      onConfirm={() =>
+        run(async () => {
+          const res = await removeProfileItem(entity, id);
+          if (res.ok) onClose();
+          else setError(res.error);
+        })
+      }
+    >
+      {lines === null ? (
+        <p style={{ color: "var(--mute)" }}>正在看它被哪些地方用到…</p>
+      ) : lines.length === 0 ? (
+        <p>没有已生成的简历用到它，删掉不影响别的地方。</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {lines.map((l) => (
+            <li key={l}>· {l}</li>
+          ))}
+        </ul>
+      )}
+    </ConfirmDialog>
   );
 }

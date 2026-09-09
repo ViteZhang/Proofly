@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { JdForm } from "./JdForm";
 import { GenerateResumeButton } from "@/components/resume/GenerateResumeButton";
 import { RequirementList } from "./RequirementList";
-import { deleteJd, parseJd } from "@/app/app/targets/jd-actions";
+import { parseJd } from "@/app/app/targets/jd-actions";
+import { DeleteJdDialog } from "./DeleteJdDialog";
 import { BIND_LABEL } from "@/lib/jd/labels";
 import type { JdCard, JdDetail } from "@/lib/queries/jds";
 
@@ -41,7 +42,8 @@ export function JdSection({
   // 「存完这份就自动解析」的待办。放 ref 不放 state：它只是个一次性的意图，
   // 不参与渲染，改它不该多渲染一轮。
   const autoParse = useRef<string | null>(null);
-  const [removing, startRemove] = useTransition();
+  // 待确认的删除。点「删除」只是把窗口打开，真正的删在窗口里。
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
 
   // 展开哪一份，由点击当场说了算，不等服务端。
   // 换一份 JD 要一次服务端往返（实测 1.6 秒）。这段时间里如果拿服务端
@@ -114,17 +116,12 @@ export function JdSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jd?.id]);
 
-  function remove(jdId: string) {
+  function removed() {
     setError(null);
-    startRemove(async () => {
-      const res = await deleteJd(jdId);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      router.replace(`/app/targets?target=${targetId}`, { scroll: false });
-      router.refresh();
-    });
+    setPendingRemove(null);
+    // 删掉的那份可能正展开着，?jd= 得跟着清掉，否则刷新会去找一份不在了的。
+    router.replace(`/app/targets?target=${targetId}`, { scroll: false });
+    router.refresh();
   }
 
   return (
@@ -174,11 +171,10 @@ export function JdSection({
                   <JdBody
                     jd={jd}
                     parsing={parsing}
-                    removing={removing}
                     parsedCount={parsed?.jdId === jd.id ? parsed.count : null}
                     onDismissParsed={() => setParsed(null)}
                     onParse={() => void parse(jd.id)}
-                    onRemove={() => remove(jd.id)}
+                    onRemove={() => setPendingRemove(jd.id)}
                     onChanged={() => router.refresh()}
                     assessPanel={assessPanel}
                   />
@@ -193,6 +189,14 @@ export function JdSection({
         <p className="mt-2 text-[12.5px]" style={{ color: "var(--danger)" }}>
           {error}
         </p>
+      )}
+
+      {pendingRemove && (
+        <DeleteJdDialog
+          jdId={pendingRemove}
+          onClose={() => setPendingRemove(null)}
+          onDeleted={removed}
+        />
       )}
     </section>
   );
@@ -219,7 +223,6 @@ function JdBodyPending() {
 function JdBody({
   jd,
   parsing,
-  removing,
   parsedCount,
   onDismissParsed,
   onParse,
@@ -229,7 +232,6 @@ function JdBody({
 }: {
   jd: JdDetail;
   parsing: boolean;
-  removing: boolean;
   parsedCount: number | null;
   onDismissParsed: () => void;
   onParse: () => void;
@@ -261,7 +263,7 @@ function JdBody({
             {parsing ? "解析中…" : jd.requirements.length > 0 ? "重新解析" : "解析要求"}
           </Button>
           <GenerateResumeButton jdId={jd.id} />
-          <Button variant="danger" size="sm" onClick={onRemove} disabled={removing}>
+          <Button variant="danger" size="sm" onClick={onRemove}>
             删除
           </Button>
         </div>
