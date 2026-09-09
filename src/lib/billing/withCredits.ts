@@ -29,6 +29,7 @@
 // =============================================================
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isGenerationOutput } from "@/lib/health/gate-derived";
 
 import { ACTION_PRICES, FREE_FOREVER, FREE_QUOTA, LIMITS } from "@/config/plan";
 import { createSink, totals, withUsageSink } from "@/lib/telemetry/usage";
@@ -250,13 +251,17 @@ export async function withCredits<T>(opts: WithCreditsOpts<T>): Promise<BillingR
 
   // ---- 1 前置检查 ----
   if (BLOCKING_GATED.has(actionCode)) {
-    const { count } = await supabase
+    // 只数输入侧的阻断项。门禁自己的结果（以及体检汇总出的 C2–C5）不算
+    // —— 它们是上一次生成的产物，拿来禁止重试就成了死锁：那些行只有
+    // 重新生成才会被覆盖。理由写在 lib/health/gate-derived.ts。
+    const { data: rows } = await supabase
       .from("check_results")
-      .select("id", { count: "exact", head: true })
+      .select("code,origin")
       .eq("level", "blocking")
       .is("ignored_at", null)
       .is("resolved_at", null);
-    if ((count ?? 0) > 0) {
+    const blocking = (rows ?? []).filter((r) => !isGenerationOutput(r.origin, r.code));
+    if (blocking.length > 0) {
       return {
         ok: false,
         code: "BLOCKED",

@@ -51,11 +51,22 @@ function resolveLink(ctx: HealthContext, code: string, row: GateRow): string {
     const atomId = skill?.atomIds[0];
     return atomId ? `/app/library?atom=${atomId}&highlight=skills` : "/app/library?highlight=skills";
   }
-  const target = ctx.resumes.find((x) => `${x.kind}:${x.id}` === row.owner)?.targetId;
+  const resume = ctx.resumes.find((x) => `${x.kind}:${x.id}` === row.owner);
+  const target = resume?.targetId;
   if (code === "C5") {
     return target ? `/app/targets/strategy?target=${target}&section=strategy` : "/app/targets";
   }
-  const parts = [target ? `target=${target}` : "", row.blockId ? `block=${row.blockId}` : ""].filter(
+
+  // 生成成功时 blockId 是块的行 id，跳简历页选中它就能直接改那段文字。
+  // 生成被门禁拦下时一个块都没写入，记下的是来源经历的 id —— 这时候
+  // 再跳简历页，?block= 指向一个不存在的块，人落在页面上无事可做，
+  // 而唯一能改的东西（那条经历的 actions 与 metrics）在经历库里。
+  const knownBlock = row.blockId !== null && (resume?.blocks ?? []).some((b) => b.id === row.blockId);
+  if (!knownBlock && row.blockId !== null && ctx.atoms.some((a) => a.id === row.blockId)) {
+    return `/app/library?atom=${row.blockId}`;
+  }
+
+  const parts = [target ? `target=${target}` : "", knownBlock ? `block=${row.blockId}` : ""].filter(
     Boolean,
   );
   return parts.length > 0 ? `/app/resume?${parts.join("&")}` : "/app/resume";

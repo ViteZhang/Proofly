@@ -39,16 +39,21 @@ function chain(result: unknown) {
 }
 
 type FakeCfg = {
-  blocking?: number;
+  /** 体检里未解决的 blocking 行。给 code / origin，因为前置检查要按它们筛。 */
+  blocking?: { code: string | null; origin: string | null }[];
   balance?: number;
   rpc?: Record<string, unknown>;
 };
+
+/** 输入侧的阻断项：改完就没了，本来就该挡在生成前面。 */
+const inputBlocking = (n: number) =>
+  Array.from({ length: n }, () => ({ code: "C11", origin: "health" }));
 
 function fake(cfg: FakeCfg = {}) {
   const calls: RpcCall[] = [];
   const client = {
     from(table: string) {
-      if (table === "check_results") return chain({ count: cfg.blocking ?? 0 });
+      if (table === "check_results") return chain({ data: cfg.blocking ?? [] });
       if (table === "quota_counters") {
         return chain({ data: { credits_available: cfg.balance ?? 100 } });
       }
@@ -78,7 +83,7 @@ function names(calls: RpcCall[]) {
 // ---- 1 前置检查 ----
 
 test("步骤 1 · 有 blocking 时返回 BLOCKED，且不 HOLD（验收 31）", async () => {
-  const { client, calls } = fake({ blocking: 2 });
+  const { client, calls } = fake({ blocking: inputBlocking(2) });
   let ran = false;
   const r = await withCredits({
     actionCode: "resume_baseline",
@@ -96,8 +101,47 @@ test("步骤 1 · 有 blocking 时返回 BLOCKED，且不 HOLD（验收 31）", 
   assert.ok(!names(calls).includes("hold_credits"), "被阻断时不该产生 hold");
 });
 
+test("步骤 1 · 上一次生成留下的门禁结果不参与拦截，否则一次失败永久锁死", async () => {
+  // 用户真实撞上的循环：生成被门禁拦下 → 结果写进 check_results → 体检
+  // 汇总成 C3 阻断项 → 前置检查不许生成 → 那些行只有重新生成才会覆盖。
+  const { client, calls } = fake({
+    blocking: [
+      { code: "G3", origin: "gate" },
+      { code: "C3", origin: "health" },
+      { code: "C2", origin: "health" },
+    ],
+    rpc: { hold_credits: HOLD_OK, settle_hold: { ok: true } },
+  });
+  const r = await withCredits({
+    actionCode: "resume_baseline",
+    userId: "u1",
+    idempotencyKey: "k-loop",
+    client,
+    run: async () => "ok",
+  });
+  assert.equal(r.ok, true, "重试被自己上一次的失败记录挡住了");
+  assert.ok(names(calls).includes("hold_credits"));
+});
+
+test("步骤 1 · 门禁结果与输入侧问题同时存在时，仍然拦", async () => {
+  const { client } = fake({
+    blocking: [
+      { code: "G3", origin: "gate" },
+      { code: "C11", origin: "health" },
+    ],
+  });
+  const r = await withCredits({
+    actionCode: "resume_baseline",
+    userId: "u1",
+    idempotencyKey: "k-mix",
+    client,
+    run: async () => "ok",
+  });
+  assert.equal(r.ok === false && r.code, "BLOCKED");
+});
+
 test("步骤 1 · 阻断只挡产出材料的动作，不挡拿来修数据的动作", async () => {
-  const { client, calls } = fake({ blocking: 3, rpc: { hold_credits: HOLD_OK } });
+  const { client, calls } = fake({ blocking: inputBlocking(3), rpc: { hold_credits: HOLD_OK } });
   const r = await withCredits({
     actionCode: "doc_parse_base",
     userId: "u1",
