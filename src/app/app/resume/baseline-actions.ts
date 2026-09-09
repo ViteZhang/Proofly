@@ -237,12 +237,7 @@ async function runGenerateBaseline(
   });
   if (!res.ok) return fail(res.error);
 
-  const { blocks, warnings } = normalizeBlocks(
-    res.data.blocks,
-    chosen,
-    weightById,
-    profile.employmentMetaById,
-  );
+  const { blocks, warnings } = normalizeBlocks(res.data.blocks, chosen, weightById);
   if (blocks.length === 0) {
     return fail("模型没有产出任何可用的块，再试一次");
   }
@@ -362,8 +357,6 @@ function normalizeBlocks(
   planned: PlannedBlock[],
   atoms: ResumeAtom[],
   weightById: Map<string, RenderWeight>,
-  /** atom 所属履历的「公司 · 职位　起止」。挂了履历的块一律用它。 */
-  employmentMeta: Map<string, string>,
 ): { blocks: GateBlock[]; warnings: GateResult[] } {
   const byId = new Map(atoms.map((a) => [a.id, a]));
   const warnings: GateResult[] = [];
@@ -398,7 +391,7 @@ function normalizeBlocks(
       // 挂了履历的经历，公司与起止时间一律取自 employments，不用模型
       // 写的那句 —— 模型看到的时间是这条经历自己的，而「在职却没有可写
       // 项目」的那几个月它根本看不见，写出来的日期必然偏窄。
-      meta: blockMeta(employmentMeta.get(atom.employmentId ?? ""), p.meta, periodLabel(atom)),
+      meta: blockMeta(atom.employmentMeta ?? undefined, p.meta, periodLabel(atom)),
       summary: p.summary.trim(),
       bullets: [...p.bullets],
       templateUsed: atom.evidenceLevel,

@@ -60,7 +60,9 @@ export function credentialLines(items: Credential[]): ProfileLine[] {
  * 公司名下所有经历的 period 聚合得出，「在职却没有可写项目」的月份被
  * 整段吞掉，导出的日期因此偏窄 —— 那是一份错的简历。
  */
-export function employmentMeta(e: Employment): string {
+export function employmentMeta(
+  e: Pick<Employment, "org" | "title" | "periodStart" | "periodEnd">,
+): string {
   return [[e.org, e.title].filter(Boolean).join(" · "), period(e.periodStart, e.periodEnd)]
     .filter((s) => s !== "")
     .join("　");

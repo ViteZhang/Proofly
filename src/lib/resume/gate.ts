@@ -70,6 +70,14 @@ export type GateAtom = {
   pendingMetricNames: string[];
   periodStart: string | null;
   periodEnd: string | null;
+  /**
+   * 这条经历挂靠的那段任职履历渲染出的「公司 · 职位　起止」。没挂履历就是 null。
+   *
+   * 它在这里，是因为块的 meta 已经不再由这条经历的时间生成 —— 挂了履历的块
+   * 一律用履历表的起止。履历行同样是一条原始记录，它里面的数字当然有出处；
+   * 不把它算进白名单，就等于让门禁去拦我们自己刚写进去的日期。
+   */
+  employmentMeta: string | null;
   mustSay: string[];
   neverSay: string[];
   roleFraming: string | null;
@@ -114,6 +122,18 @@ const HEDGES = ["约", "大约", "internal", "内部测算", "粗估", "估算",
 
 const NUMBER_TOKEN = /\d+(?:\.\d+)?/g;
 
+/**
+ * 「从 0 到 1」这类说法里的 0 和 1。
+ *
+ * 它不是一个结果数字，是一句行话，说的是「这件事以前不存在」。要求它在
+ * actions 或 metrics 里查得到是查不到的 —— 没有人会把「0」记成一条指标。
+ * 而 G3 拦下它时给出的那句「要么是编的，要么是原始记录漏了」，两个分支
+ * 都不成立：没有东西被编造，也没有记录该补。
+ *
+ * 前后的断言挡住「10 到 12」这种被从中间切开的情况。
+ */
+const ZERO_TO_ONE = /(?<![\d.])0\s*(?:→|->|—>|到|至|~|-|–|—)\s*1(?![\d.])/g;
+
 // ---- 工具 ----
 
 /** 块里所有会印到简历上的文字。meta 也算 —— 手工编辑能改到它。 */
@@ -135,6 +155,11 @@ export function atomText(a: GateAtom): string {
     ...m,
     a.periodStart,
     a.periodEnd,
+    a.employmentMeta,
+    // must_say 与 role_framing 是本人写下的原始记录。G2 会因为「必说要点没
+    // 体现」发警告，要点里带了数字却又被 G3 判成编造 —— 两条规则不能互相拆台。
+    ...a.mustSay,
+    a.roleFraming,
   ]
     .filter((s): s is string => typeof s === "string" && s !== "")
     .join("\n");
@@ -265,7 +290,8 @@ export function checkBlock(block: GateBlock, sourceAtom: GateAtom | null): GateR
   // G3 —— 块里的每个数字都要在来源经历里找得到。
   const known = knownNumbers(atomText(sourceAtom));
   const unknown: string[] = [];
-  for (const raw of text.replace(/,/g, "").matchAll(NUMBER_TOKEN)) {
+  const scanned = text.replace(/,/g, "").replace(ZERO_TO_ONE, "");
+  for (const raw of scanned.matchAll(NUMBER_TOKEN)) {
     if (!hasSource(raw[0], known)) unknown.push(raw[0]);
   }
   const missing = [...new Set(unknown)];
