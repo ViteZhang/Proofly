@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/Button";
 import { ResumePaper } from "./ResumePaper";
 import { InspectPanel } from "./InspectPanel";
 import { RENDER_WEIGHT_LABEL } from "@/lib/targets/strategy";
+import { howToFix } from "@/lib/resume/gate-help";
 import { quoteAction, type ChargeQuote } from "@/app/app/billing-actions";
 import { ConfirmCost } from "@/components/billing/ConfirmCost";
 import { CreditCost, FreeTag } from "@/components/billing/CreditTag";
@@ -465,21 +466,39 @@ function Blocked({ results, onRetry }: { results: GateResult[]; onRetry: () => v
       <p className="text-[13.5px] font-medium">
         这一版没过门禁，{results.length} 处必须先解决，没有写入。
       </p>
-      <ul className="mt-2 space-y-1.5">
-        {results.map((r, i) => (
-          <li key={i} className="text-[12.5px] leading-relaxed">
-            <span
-              className="mr-1.5 rounded-pill px-1.5 py-0.5 text-[11px]"
-              style={{ background: "var(--card)", color: "var(--danger)" }}
-            >
-              {r.code}
-            </span>
-            {r.message}
-            <span className="ml-1" style={{ color: "var(--slate)" }}>
-              {r.detail}
-            </span>
-          </li>
-        ))}
+      <ul className="mt-2 space-y-2">
+        {results.map((r, i) => {
+          const fix = howToFix(r.code);
+          return (
+            <li key={i} className="text-[12.5px] leading-relaxed">
+              <span
+                className="mr-1.5 rounded-pill px-1.5 py-0.5 text-[11px]"
+                style={{ background: "var(--card)", color: "var(--danger)" }}
+              >
+                {r.code}
+              </span>
+              {r.message}
+              <span className="ml-1" style={{ color: "var(--slate)" }}>
+                {r.detail}
+              </span>
+              {fix && (
+                <span className="mt-0.5 block">
+                  <span style={{ color: "var(--mute)" }}>怎么办 · </span>
+                  {fix}
+                </span>
+              )}
+              {r.blockId && (
+                <Link
+                  href={`/app/library?atom=${r.blockId}`}
+                  className="mt-0.5 inline-block hover:underline"
+                  style={{ color: "var(--ai)" }}
+                >
+                  打开这条经历 →
+                </Link>
+              )}
+            </li>
+          );
+        })}
       </ul>
       <Button size="sm" variant="secondary" className="mt-3" onClick={onRetry}>
         带着这些问题重试一次

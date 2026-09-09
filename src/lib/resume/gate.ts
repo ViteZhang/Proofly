@@ -17,6 +17,7 @@
 //   G6 同一互斥组有多条经历同时出现
 // =============================================================
 
+import { FACT_LABEL, isFactKey } from "@/lib/profile/registry";
 import type { EvidenceLevel, EvidenceStrength } from "@/types/database";
 
 // ---- 结果 ----
@@ -335,9 +336,11 @@ export function checkResume(
     if (f.status !== "BLOCKING") continue;
     out.push({
       code: "G4",
+      // 打字段名（expected_city）等于没说。「事实台账」这个词也已经
+      // 从界面上撤掉了，报错里再冒出来，人只会去找一个不存在的页面。
+      message: `基本信息「${isFactKey(f.key) ? FACT_LABEL[f.key] : f.key}」还没定下来`,
       level: "blocking",
-      message: `基本事实「${f.key}」还没定下来`,
-      detail: "这一项被标成 BLOCKING，意味着几处材料的说法对不上。先去事实台账把它定死，再生成简历。",
+      detail: "这一项被标成冲突，说明几处材料的说法对不上。先去基本信息把它定死，再生成简历。",
     });
   }
 
