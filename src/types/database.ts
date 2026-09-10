@@ -38,7 +38,10 @@ export type ChatRole = "user" | "assistant" | "system";
 export type ChatKind = "text" | "image" | "confirm_card" | "query_answer" | "clarify";
 export type NudgeRule = "R1" | "R2" | "R3";
 export type LlmTier = "light" | "strong" | "vision" | "embedding";
-export type RenderWeight = "expand" | "brief" | "one_line" | "omit";
+export type RenderWeight = "lead" | "expand" | "brief" | "one_line" | "omit";
+
+/** 这一行策略是自动算出来的还是人改过的。自动分配只覆盖 auto 行。 */
+export type StrategySource = "auto" | "manual";
 export type RequirementKind = "hard" | "implicit" | "nice_to_have";
 // hard_disqualifier 与另外四类不同：它不可通过行动关闭，所以不进任务池，
 // 也不计入扣分，只在方向页单独标注一栏。
@@ -830,6 +833,7 @@ export type Database = {
           atom_id: string;
           target_id: string;
           render_weight: RenderWeight;
+          strategy_source: StrategySource;
           custom_phrasing: Json | null;
           exclusive_group: string | null;
           created_at: string | null;
@@ -841,6 +845,7 @@ export type Database = {
           atom_id: string;
           target_id: string;
           render_weight?: RenderWeight;
+          strategy_source?: StrategySource;
           custom_phrasing?: Json | null;
           exclusive_group?: string | null;
           created_at?: string | null;
@@ -852,6 +857,7 @@ export type Database = {
           atom_id?: string;
           target_id?: string;
           render_weight?: RenderWeight;
+          strategy_source?: StrategySource;
           custom_phrasing?: Json | null;
           exclusive_group?: string | null;
           created_at?: string | null;

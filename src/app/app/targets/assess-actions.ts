@@ -20,6 +20,7 @@ import { z } from "zod";
 import { callLLM } from "@/lib/llm";
 import { MATCH_SYSTEM, matchUser } from "@/lib/llm/jd-prompts";
 import { createClient } from "@/lib/supabase/server";
+import { initStrategyForTarget } from "./strategy-actions";
 import { fail, ok, type ActionResult } from "@/lib/domain";
 import { findSimilarAtoms } from "@/lib/ingest/embedding";
 import { buildCandidates, loadSkills } from "@/lib/assess/payload";
@@ -212,6 +213,12 @@ async function runMatchAndScore(
     const { error: gapErr } = await supabase.from("gaps").insert(rows);
     if (gapErr) console.error("[assess] 缺口没写进去", gapErr);
   }
+
+  // 评估刚算完，展开程度就该跟着重排一次 —— 这份评估正是排序的依据。
+  // 只写自动分配过的行，用户手工调过的不动。失败不影响这次评估的结果：
+  // 策略是可以随时重算的，评估结果不是。
+  const init = await initStrategyForTarget(jd.target_id);
+  if (!init.ok) console.error("[assess] 展开程度没重排", init.error);
 
   refresh();
   return ok({ assessmentId: assessment.id, matchScore: scored.matchScore });

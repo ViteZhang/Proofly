@@ -71,19 +71,24 @@ export function employmentMeta(
 /**
  * 一个经历块的 meta（标题右边那行时间）该写什么。
  *
- * 优先级：履历表 > 模型写的 > 由这条经历自己的时间兜底。
+ * 挂了履历的块写这条经历自己的起止；没挂履历的用模型写的那句，模型没写
+ * 就退回自己的起止。
  *
- * 履历排第一，是因为模型看到的时间是这条经历自己的，而「在职却没有可写
- * 项目」的那几个月它根本看不见 —— 写出来的日期必然偏窄。
+ * S8 曾经让挂了履历的块整行取自 employments，理由是「在职却没有可写项目」
+ * 的那几个月会被吞掉。那个理由成立，但解法用错了层：吞掉月份的是「一条
+ * 经历一个标题」这个版面，不是 meta 这个字段。P0-2 之后一段任职有了自己
+ * 的标题行，完整起止落在那一行上，项目行就该说项目自己的时间 —— 两行各
+ * 说各的，都不必撒谎。
  *
  * 只在生成时定一次，不在渲染时反复覆盖：meta 是可以手工改的，渲染时
  * 覆盖等于把人改过的东西悄悄扔掉。所以老基线要等下次重新生成才会跟上，
  * 这是有意的。
  */
 export function blockMeta(
-  fromEmployment: string | undefined,
+  hasEmployment: boolean,
   fromModel: string,
-  fallback: string,
+  ownPeriod: string,
 ): string {
-  return fromEmployment ?? (fromModel.trim() || fallback);
+  if (hasEmployment) return ownPeriod || fromModel.trim();
+  return fromModel.trim() || ownPeriod;
 }

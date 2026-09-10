@@ -24,8 +24,16 @@ import { callLLM } from "@/lib/llm";
 import { BASELINE_SYSTEM, baselineUser } from "@/lib/llm/resume-prompts";
 import { createClient } from "@/lib/supabase/server";
 import { fail, ok, type ActionResult } from "@/lib/domain";
-import { loadProfileSections, loadBaselineInput, toSelectable, type ResumeAtom } from "@/lib/queries/resume";
+import {
+  loadProfileSections,
+  loadBaselineInput,
+  toSelectable,
+  type BaselineInput,
+  type ResumeAtom,
+} from "@/lib/queries/resume";
 import { resolveSelection, selectSkills, type Tradeoff } from "@/lib/resume/select";
+import { BULLET_CAP, plannedLines, TOTAL_BULLET_BUDGET } from "@/lib/targets/rank";
+import { initStrategyForTarget } from "@/app/app/targets/strategy-actions";
 import { baselineSchema, type PlannedBlock } from "@/lib/resume/schema";
 import {
   checkAll,
@@ -38,18 +46,10 @@ import { listResumeChecks, replaceResumeChecks } from "@/lib/resume/check-result
 import { blockingBeforeGeneration, runQuickScan } from "@/lib/queries/health";
 import { blockMeta } from "@/lib/resume/profile-sections";
 import { renderMarkdown, type RenderBlock } from "@/lib/resume/markdown";
-import type { Json, RenderWeight } from "@/types/database";
+import type { Json, RenderWeight, StrategySource } from "@/types/database";
 
 const SECTIONS = ["个人项目", "工作经历", "教育背景"] as const;
 type Section = (typeof SECTIONS)[number];
-
-/** 3.1 的 bullet 上限。模型会超，超了就截 —— 权重是用户定的，不是建议。 */
-const BULLET_CAP: Record<RenderWeight, number> = {
-  expand: 5,
-  brief: 2,
-  one_line: 0,
-  omit: 0,
-};
 
 export type GenerateOutcome =
   | { status: "ok"; baselineId: string; blocks: number; warnings: GateResult[] }
@@ -130,11 +130,12 @@ async function runGenerateBaseline(
   if (!z.uuid().safeParse(targetId).success) return fail("这个方向不存在");
 
   const supabase = await createClient();
-  const [input, profile] = await Promise.all([
+  const [loaded, profile] = await Promise.all([
     loadBaselineInput(targetId),
     loadProfileSections(),
   ]);
-  if (!input) return fail("这个方向已经不在了");
+  if (!loaded) return fail("这个方向已经不在了");
+  let input = loaded;
 
   const { data: existing } = await supabase
     .from("resume_baselines")
@@ -162,6 +163,8 @@ async function runGenerateBaseline(
     if (id) await replaceResumeChecks({ kind: "baseline", id }, results);
     return ok({ status: "blocked", baselineId: id, results });
   }
+
+  input = await ensureStrategy(targetId, input);
 
   const { selected, tradeoffs: atomTradeoffs } = resolveSelection(input.atoms.map(toSelectable));
   if (selected.length === 0) {
@@ -254,6 +257,9 @@ async function runGenerateBaseline(
         atomTitle: a.title,
         exclusiveGroup: a.exclusiveGroup,
       })),
+      // 个人定位段跟着一起查。它原来一个字都没过门禁 —— 全篇唯一没有
+      // 来源经历的那段文字，也是全篇唯一不受约束的文字。
+      res.data.headline,
     ),
   ];
 
@@ -295,7 +301,7 @@ async function runGenerateBaseline(
       .map((k) => factValue(input.facts, k))
       .filter((s): s is string => !!s),
     headline: res.data.headline,
-    blocks: blocks.map(toRenderBlock),
+    blocks: blocks.map((b) => toRenderBlock(b, chosen)),
     skills: skills.map((s) => s.label),
     // 教育背景与证书直接来自基本信息，不经过模型 —— 它们没有「怎么讲」
     // 的空间，只有「是不是真的」。
@@ -322,18 +328,41 @@ async function runGenerateBaseline(
   return ok({ status: "ok", baselineId, blocks: blocks.length, warnings: results });
 }
 
+/**
+ * 这个方向一行策略都没配过时，先自动分配一次。
+ *
+ * 空表不是「用户选择了默认值」，是产品从来没替他分配过 —— 十条经历全走
+ * brief、每条硬截 2 行的那份简历，就是这么来的。只在完全空的时候补一次：
+ * 已经有记录的方向由评估那条路去重排，别处不该顺手改配置。
+ *
+ * 分配失败就按原样往下走。少一次分配是一份短一点的简历，拦住生成是一份
+ * 没有的简历。
+ */
+async function ensureStrategy(
+  targetId: string,
+  input: BaselineInput,
+): Promise<BaselineInput> {
+  if (input.hasStrategy) return input;
+  const init = await initStrategyForTarget(targetId);
+  if (!init.ok) return input;
+  return (await loadBaselineInput(targetId)) ?? input;
+}
+
 function factValue(facts: { key: string; value: string | null }[], key: string): string | null {
   const v = facts.find((f) => f.key === key)?.value;
   return v && v.trim() !== "" ? v.trim() : null;
 }
 
-function toRenderBlock(b: GateBlock): RenderBlock {
+function toRenderBlock(b: GateBlock, atoms: ResumeAtom[]): RenderBlock {
+  const atom = atoms.find((a) => a.id === b.atomId);
   return {
     section: b.section,
     title: b.title,
     meta: b.meta,
     summary: b.summary,
     bullets: b.bullets,
+    employment: atom?.employment ?? null,
+    org: atom?.employment?.org ?? atom?.org ?? null,
   };
 }
 
@@ -391,7 +420,7 @@ function normalizeBlocks(
       // 挂了履历的经历，公司与起止时间一律取自 employments，不用模型
       // 写的那句 —— 模型看到的时间是这条经历自己的，而「在职却没有可写
       // 项目」的那几个月它根本看不见，写出来的日期必然偏窄。
-      meta: blockMeta(atom.employmentMeta ?? undefined, p.meta, periodLabel(atom)),
+      meta: blockMeta(atom.employmentMeta !== null, p.meta, periodLabel(atom)),
       summary: p.summary.trim(),
       bullets: [...p.bullets],
       templateUsed: atom.evidenceLevel,
@@ -428,7 +457,8 @@ function normalizeBlocks(
     const clean = b.bullets.map((x) => x.trim()).filter((x) => x !== "");
 
     if (weight === "one_line") {
-      // 一行概述，无 bullet。模型给了 bullet 就并进概述，不能直接扔。
+      // 一行概述。模型给了 bullet 就并进概述，不能直接扔 —— 它是这条经历
+      // 在这一版里仅有的一行，扔掉等于这条经历没出现。
       if (b.summary === "") b.summary = clean.join("；");
       b.bullets = [];
     } else {
@@ -457,10 +487,21 @@ function normalizeBlocks(
 
 export type SelectionPreview = {
   targetName: string;
-  atoms: { id: string; title: string; renderWeight: RenderWeight; evidenceLevel: string }[];
+  atoms: {
+    id: string;
+    title: string;
+    renderWeight: RenderWeight;
+    evidenceLevel: string;
+    strategySource: StrategySource;
+  }[];
   skills: string[];
   tradeoffs: Tradeoff[];
   locked: boolean;
+  /** 展开程度是自动分配的有几条。界面上要说出来，用户才知道有这个开关。 */
+  autoCount: number;
+  /** 预计正文行数，以及预算上限。生成按钮旁边那句用它。 */
+  plannedLines: number;
+  budget: number;
 };
 
 /**
@@ -474,8 +515,15 @@ export async function prepareBaseline(
   targetId: string,
 ): Promise<ActionResult<SelectionPreview>> {
   if (!z.uuid().safeParse(targetId).success) return fail("这个方向不存在");
-  const input = await loadBaselineInput(targetId);
+  let input = await loadBaselineInput(targetId);
   if (!input) return fail("这个方向已经不在了");
+
+  // 一行策略都没有时先分配一次，跟生成走的是同一条路。
+  //
+  // 放在预览里而不是只放在生成里，是为了让界面上那句「预计 N 行」说的是
+  // 真话：不先分配，预览算的是「全部按默认 brief」，而按下生成之后拿到的
+  // 是分配过的结果，两个数对不上。
+  input = await ensureStrategy(targetId, input);
 
   const supabase = await createClient();
   const { data: existing } = await supabase
@@ -486,17 +534,23 @@ export async function prepareBaseline(
 
   const { selected, tradeoffs } = resolveSelection(input.atoms.map(toSelectable));
   const { kept, tradeoffs: skillTradeoffs } = selectSkills(input.skills, input.rawPhrases);
+  const byId = new Map(input.atoms.map((a) => [a.id, a]));
+  const chosen = selected.map((s) => byId.get(s.id)!).filter(Boolean);
 
   return ok({
     targetName: input.target.name,
-    atoms: selected.map((a) => ({
+    atoms: chosen.map((a) => ({
       id: a.id,
       title: a.title,
       renderWeight: a.renderWeight,
       evidenceLevel: a.evidenceLevel,
+      strategySource: a.strategySource,
     })),
     skills: kept.map((s) => s.label),
     tradeoffs: [...tradeoffs, ...skillTradeoffs],
     locked: !!existing?.locked_at,
+    autoCount: chosen.filter((a) => a.strategySource === "auto").length,
+    plannedLines: plannedLines(chosen.map((a) => a.renderWeight)),
+    budget: TOTAL_BULLET_BUDGET,
   });
 }

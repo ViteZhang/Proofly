@@ -13,12 +13,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  checkAll,
   checkBlock,
+  checkHeadline,
   checkResume,
+  cnNumeralsToArabic,
+  hasAnyNumber,
   hasBlocking,
   violatesTemplate,
   type GateAtom,
   type GateBlock,
+  type GateFact,
 } from "./gate";
 import type { EvidenceLevel } from "@/types/database";
 
@@ -295,4 +300,145 @@ test("G3｜「10 到 12」不会被当成 0 到 1 切开", () => {
   );
   const g3 = r.find((x) => x.code === "G3");
   assert.ok(g3 && g3.message.includes("10") && g3.message.includes("12"));
+});
+
+// ---- P0-5 个人定位段 ----
+
+const HEAD_ATOM = atom({
+  id: "h1",
+  evidenceLevel: "measured",
+  actions: ["主导 App 从学习工具向成长平台的定位重构"],
+  metrics: [
+    {
+      name: "DAU/MAU 粘性比",
+      kind: "outcome",
+      fromValue: "21.4%",
+      toValue: "32.2%",
+      delta: null,
+      method: null,
+      evidenceLevel: "measured",
+    },
+    {
+      name: "累计服务用户数",
+      kind: "outcome",
+      fromValue: null,
+      toValue: "5,595 名",
+      delta: null,
+      method: null,
+      evidenceLevel: "measured",
+    },
+  ],
+  neverSay: ["创业"],
+});
+
+const YEARS: GateFact[] = [
+  { key: "years_of_experience", value: "10年", status: "RESOLVED" },
+];
+
+function headCodes(text: string | null, facts: GateFact[] = YEARS): string[] {
+  return checkHeadline(text, [HEAD_ATOM], facts).map((r) => `${r.code}:${r.level}`);
+}
+
+test("定位段 · 引用选中经历的指标，放行", () => {
+  const text =
+    "十年产品经验，近三年专注 AI 对话产品。主导 App 定位重构，DAU/MAU 粘性比由 21.4% 提升至 32.2%，累计服务 5,595 名用户，验证了成长平台这条路走得通。";
+  const results = checkHeadline(text, [HEAD_ATOM], YEARS);
+  assert.equal(hasBlocking(results), false, JSON.stringify(results));
+});
+
+test("定位段 · 编出来的数字被拦下", () => {
+  const results = checkHeadline("十年产品经验，带过 120 人团队。", [HEAD_ATOM], YEARS);
+  const blocking = results.filter((r) => r.level === "blocking");
+  assert.equal(blocking.length, 1);
+  assert.match(blocking[0].message, /120/);
+});
+
+test("定位段 · 年份不算业绩数字，不误判", () => {
+  const results = checkHeadline(
+    "2026 年起独立开发两款 AI 产品，2015.06 入行。此前十年在教育与测评行业做产品，累计服务 5,595 名用户，做过从 0 到 1 的完整周期，也做过存量产品的定位重构工作。",
+    [HEAD_ATOM],
+    YEARS,
+  );
+  assert.equal(hasBlocking(results), false, JSON.stringify(results));
+});
+
+test("定位段 · 基本信息里的年限算有出处", () => {
+  const results = checkHeadline("10 年产品经验。", [HEAD_ATOM], YEARS);
+  assert.equal(hasBlocking(results), false, JSON.stringify(results));
+});
+
+test("定位段 · 年限对不上基本信息就是编的", () => {
+  const results = checkHeadline("15 年产品经验。", [HEAD_ATOM], YEARS);
+  assert.ok(results.some((r) => r.level === "blocking" && r.message.includes("15")));
+});
+
+test("定位段 · 中文数字的年限对得上就放行", () => {
+  const results = checkHeadline("十年产品经验。", [HEAD_ATOM], YEARS);
+  assert.equal(hasBlocking(results), false, JSON.stringify(results));
+});
+
+test("定位段 · 中文数字的年限对不上，一样是编的", () => {
+  const results = checkHeadline("十五年产品经验。", [HEAD_ATOM], YEARS);
+  assert.ok(results.some((r) => r.level === "blocking" && r.message.includes("15")));
+});
+
+test("定位段 · 中文数字里只有年限要核对，其余按修辞放过", () => {
+  // 「近三年」「从零到一」查不到出处是正常的 —— 拦下来会让每一份诚实的
+  // 定位段都过不了门禁。
+  const results = checkHeadline("十年产品经验，近三年专注 AI，做过从零到一。", [HEAD_ATOM], YEARS);
+  assert.equal(hasBlocking(results), false, JSON.stringify(results));
+});
+
+test("定位段 · 护栏禁词照样拦，取所有选中经历的并集", () => {
+  const results = checkHeadline("连续创业者，十年产品经验。", [HEAD_ATOM], YEARS);
+  assert.ok(results.some((r) => r.code === "G2" && r.level === "blocking"));
+});
+
+test("定位段 · 空着只发提示，不崩", () => {
+  assert.deepEqual(headCodes(""), ["G3:warning"]);
+  assert.deepEqual(headCodes(null), ["G3:warning"]);
+});
+
+test("定位段 · 偏短与没有数值各报一条 warning，都不阻断", () => {
+  // 生产库里那段 79 字的定位段，一个数字都没有。
+  const real =
+    "10年互联网产品经验，聚焦C端AI教育与学习产品，擅长从用户需求、产品定义、AI系统设计到商业化和交付落地，将大模型能力转化为用户真正会使用的学习与成长功能。";
+  const results = checkHeadline(real, [HEAD_ATOM], YEARS);
+  assert.equal(hasBlocking(results), false);
+  assert.ok(results.some((r) => r.message.includes("偏短")), JSON.stringify(results));
+});
+
+test("定位段 · 全是形容词时提示「没有用到任何实测数据」", () => {
+  const text = "资深产品人，擅长从零到一，长于跨部门协作，重视用户价值与商业价值的统一，习惯用结构化的方式拆解复杂问题并推动落地，是团队里可靠的那一个。";
+  const results = checkHeadline(text, [HEAD_ATOM], YEARS);
+  assert.ok(results.some((r) => r.message.includes("没有用到任何实测数据")));
+});
+
+test("定位段 · 「从 0 到 1」是行话，不是编造的数字", () => {
+  const results = checkHeadline("十年产品经验，做过从 0 到 1，也做过存量优化。", [HEAD_ATOM], YEARS);
+  assert.equal(hasBlocking(results), false, JSON.stringify(results));
+});
+
+test("定位段 · 同一段文字连问两次「有没有数字」，答案一样", () => {
+  // NUMBER_TOKEN 带 g 标志，用 test 会带着 lastIndex 跑。
+  assert.equal(hasAnyNumber("10 年经验"), hasAnyNumber("10 年经验"));
+  assert.equal(hasAnyNumber("累计服务 5,595 名用户"), true);
+  // 年份、行话、中文数字都不算「实测数据」。
+  assert.equal(hasAnyNumber("2026 年入行"), false);
+  assert.equal(hasAnyNumber("做过从 0 到 1"), false);
+  assert.equal(hasAnyNumber("十年经验"), false);
+  assert.equal(hasAnyNumber("资深产品人"), false);
+});
+
+test("定位段 · checkAll 不传 headline 时完全不查它", () => {
+  const results = checkAll([], [HEAD_ATOM], YEARS, []);
+  assert.equal(results.filter((r) => r.message.includes("定位段")).length, 0);
+});
+
+test("中文数字 · 常见写法都能换成阿拉伯数字", () => {
+  assert.equal(cnNumeralsToArabic("十年"), "10年");
+  assert.equal(cnNumeralsToArabic("三十五"), "35");
+  assert.equal(cnNumeralsToArabic("两百"), "200");
+  // 认不出来的原样留着，不会被当成数字误判。
+  assert.equal(cnNumeralsToArabic("产品经理"), "产品经理");
 });

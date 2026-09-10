@@ -11,18 +11,25 @@
 // 不 import Next、不连库。
 // =============================================================
 
+import {
+  curateSkills,
+  flattenSkills,
+  mergeSkillLabel,
+  type SkillGroup,
+} from "@/lib/skills/taxonomy";
 import type { EvidenceLevel, EvidenceStrength, RenderWeight } from "@/types/database";
 
 /** 3.1 展开权重的处理方式。文案直接进「本版取舍」。 */
 export const WEIGHT_RULE: Record<RenderWeight, string> = {
-  expand: "完整展开，3–5 条 bullet",
-  brief: "压缩，1–2 条 bullet",
+  lead: "主打，5 条 bullet",
+  expand: "完整展开，4 条 bullet",
+  brief: "压缩，2 条 bullet",
   one_line: "一行概述，无 bullet",
   omit: "不出现",
 };
 
 // 3.2 互斥消解的三级排序。顺序即优先级，越靠前越优先。
-const WEIGHT_RANK: RenderWeight[] = ["expand", "brief", "one_line", "omit"];
+const WEIGHT_RANK: RenderWeight[] = ["lead", "expand", "brief", "one_line", "omit"];
 const EVIDENCE_RANK: EvidenceLevel[] = ["measured", "estimated", "designed_only", "absent"];
 
 export type SelectableAtom = {
@@ -165,15 +172,24 @@ export function matchesPhrase(label: string, phrases: string[]): boolean {
 }
 
 /**
+ * 技能栏选材：过滤 → 排序 → 归并 → 分类 → 限量。
+ *
  * 只输出 evidence_strength 不为 none 的技能。
  * 被过滤掉的写进「本版取舍」—— 悄悄少一个标签，用户会以为是自己记错了。
+ *
+ * 后三步是 P0-4 加的。原来这个函数只做第一步，于是 82 条技能有 66 条原样
+ * 进了简历，里面躺着七个「产品 X 设计」。一份什么都会的技能栏等于没有
+ * 技能栏 —— 上限不是排版偏好，是这一栏有没有信息量的分界线。
+ *
+ * 超出上限的不进「本版取舍」：那个面板是用来解释「你的经历为什么没出现」
+ * 的，把二十几个技能标签灌进去只会把真正重要的两三条淹掉。
  */
 export function selectSkills(
   skills: SelectableSkill[],
   rawPhrases: string[],
-): { kept: SelectableSkill[]; tradeoffs: Tradeoff[] } {
+): { kept: SelectableSkill[]; groups: SkillGroup[]; tradeoffs: Tradeoff[] } {
   const tradeoffs: Tradeoff[] = [];
-  const kept: SelectableSkill[] = [];
+  const alive: SelectableSkill[] = [];
 
   for (const s of skills) {
     if (s.strength === "none") {
@@ -185,19 +201,49 @@ export function selectSkills(
       });
       continue;
     }
-    kept.push(s);
+    alive.push(s);
   }
 
   // 与 JD 原词有匹配的优先，其余按 evidence_strength 排。
-  return {
-    kept: kept.sort((a, b) => {
-      const am = matchesPhrase(a.label, rawPhrases) ? 0 : 1;
-      const bm = matchesPhrase(b.label, rawPhrases) ? 0 : 1;
-      if (am !== bm) return am - bm;
-      const s = STRENGTH_RANK.indexOf(a.strength) - STRENGTH_RANK.indexOf(b.strength);
-      if (s !== 0) return s;
-      return a.label.localeCompare(b.label, "zh");
-    }),
-    tradeoffs,
-  };
+  const ordered = alive.sort((a, b) => {
+    const am = matchesPhrase(a.label, rawPhrases) ? 0 : 1;
+    const bm = matchesPhrase(b.label, rawPhrases) ? 0 : 1;
+    if (am !== bm) return am - bm;
+    const s = STRENGTH_RANK.indexOf(a.strength) - STRENGTH_RANK.indexOf(b.strength);
+    if (s !== 0) return s;
+    return a.label.localeCompare(b.label, "zh");
+  });
+
+  // 归并后代表词的强度取被并进来那几条里最强的一条。取最弱会把一条有实证的
+  // 技能降级，而「不许把 weak 抬成 strong」说的是全弱时不能凭空变强 ——
+  // 取最大值永远不会造出一个没有来源的 strong。
+  const strengthOf = new Map<string, EvidenceStrength>();
+  const idOf = new Map<string, string>();
+  const overrides = new Map<string, string | null>();
+  for (const s of ordered) {
+    const canonical = mergeSkillLabel(s.label);
+    overrides.set(s.label, s.category);
+    const prev = strengthOf.get(canonical);
+    if (
+      prev === undefined ||
+      STRENGTH_RANK.indexOf(s.strength) < STRENGTH_RANK.indexOf(prev)
+    ) {
+      strengthOf.set(canonical, s.strength);
+      idOf.set(canonical, s.id);
+    }
+  }
+
+  const groups = curateSkills(
+    ordered.map((s) => s.label),
+    { overrides },
+  );
+
+  const kept: SelectableSkill[] = flattenSkills(groups).map((label) => ({
+    id: idOf.get(label) ?? label,
+    label,
+    strength: strengthOf.get(label) ?? "weak",
+    category: groups.find((g) => g.items.includes(label))?.category ?? null,
+  }));
+
+  return { kept, groups, tradeoffs };
 }

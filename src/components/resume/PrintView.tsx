@@ -12,7 +12,8 @@
 // =============================================================
 
 import { useEffect, useRef } from "react";
-import { groupBySection } from "@/lib/resume/markdown";
+import { employmentHeading, layoutFlat } from "@/lib/resume/layout";
+import { groupSkills } from "@/lib/skills/taxonomy";
 import type { PrintDoc } from "@/lib/queries/resume";
 
 const CSS = `
@@ -58,6 +59,10 @@ const CSS = `
   border-bottom: 1px solid #c9cfd8;
 }
 .print-root h3 { font-size: 10.5pt; font-weight: 700; margin: 3.5mm 0 1mm; }
+/* 项目子标题比雇主标题低一级：不缩进（ATS 认文字不认缩进），靠字号与
+   颜色拉开层次，同时给雇主行留出更大的上间距。 */
+.print-root h3.employer { margin-top: 5mm; }
+.print-root p.project { font-size: 10pt; margin: 2mm 0 0.5mm; color: #23262e; }
 .print-root h3 .meta, .print-root li .meta { font-weight: 400; color: #4b5260; }
 .print-root ul { margin: 0 0 0 5mm; padding: 0; list-style: disc outside; }
 .print-root li { margin: 0 0 1mm; }
@@ -106,13 +111,10 @@ export function PrintView({ doc }: { doc: PrintDoc }) {
     return () => clearTimeout(t);
   }, []);
 
-  // section 标题在渲染前先算好。渲染过程里改外部变量在 React 19 里
-  // 是明确禁止的，而且它本来就是一个纯派生。
-  const ordered = groupBySection(doc.blocks);
-  const rows = ordered.map((b, i) => ({
-    block: b,
-    head: i === 0 || ordered[i - 1].section !== b.section,
-  }));
+  // 版面在渲染前先算好。渲染过程里改外部变量在 React 19 里是明确禁止的，
+  // 而且它本来就是一个纯派生 —— 走的是跟导出同一个 layoutFlat。
+  const rows = layoutFlat(doc.blocks);
+  const skillGroups = groupSkills(doc.skills);
 
   return (
     <div className="print-root">
@@ -129,14 +131,22 @@ export function PrintView({ doc }: { doc: PrintDoc }) {
         {doc.contact.length > 0 && <p className="contact">{doc.contact.join(" · ")}</p>}
         {doc.headline && <p className="headline">{doc.headline}</p>}
 
-        {rows.map(({ block: b, head }) => {
+        {rows.map((row) => {
+          const b = row.source;
           return (
             <section key={b.id}>
-              {head && <h2>{b.section}</h2>}
-              <h3>
-                {b.title}
-                {b.meta && <span className="meta">　{b.meta}</span>}
-              </h3>
+              {row.newSection && <h2>{row.section}</h2>}
+              {row.employmentHead && (
+                <h3 className="employer">{employmentHeading(row.employmentHead)}</h3>
+              )}
+              {row.heading !== "" &&
+                (row.employment ? (
+                  <p className="project">
+                    <strong>{row.heading}</strong>
+                  </p>
+                ) : (
+                  <h3>{row.heading}</h3>
+                ))}
               {b.summary && <p>{b.summary}</p>}
               {b.bullets.length > 0 && (
                 <ul>
@@ -153,10 +163,16 @@ export function PrintView({ doc }: { doc: PrintDoc }) {
             两处不一致的话，屏幕上看到的和导出的就是两份东西。 */}
         <Lines title="教育背景" lines={doc.educations} />
 
-        {doc.skills.length > 0 && (
+        {skillGroups.length > 0 && (
           <section>
             <h2>技能</h2>
-            <p>{doc.skills.join("、")}</p>
+            <ul>
+              {skillGroups.map((g) => (
+                <li key={g.category}>
+                  <strong>{g.category}</strong>：{g.items.join(" · ")}
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 

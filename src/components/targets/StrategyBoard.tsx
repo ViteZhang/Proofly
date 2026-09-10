@@ -72,6 +72,8 @@ export function StrategyBoard({ board }: { board: Board }) {
         renderWeight: e?.renderWeight ?? r.renderWeight,
         exclusiveGroup: e ? normalizeGroup(e.exclusiveGroup) : r.exclusiveGroup,
         configured: true,
+        // 界面上的这一份只用来算互斥撞车，来源是谁不影响判定。
+        source: "manual" as const,
       };
     });
     return findConflicts(live);

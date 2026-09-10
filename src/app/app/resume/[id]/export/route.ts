@@ -43,6 +43,8 @@ export async function GET(
       meta: b.meta,
       summary: b.summary,
       bullets: b.bullets,
+      employment: b.employment,
+      org: b.org,
     })),
     skills: doc.skills,
     educations: doc.educations,

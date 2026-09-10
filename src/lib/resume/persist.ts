@@ -10,6 +10,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { parseStringList } from "@/lib/domain";
 import { renderMarkdown } from "./markdown";
+import { period } from "@/lib/profile/labels";
+import type { LayoutEmployment } from "./layout";
 import { checkAll, type GateAtom, type GateBlock, type GateResult } from "./gate";
 import { replaceResumeChecks } from "./check-results";
 import { loadBaselineInput, loadProfileSections } from "@/lib/queries/resume";
@@ -50,6 +52,37 @@ async function loadBlocks(baselineId: string): Promise<BlockRow[]> {
   return (data ?? []) as BlockRow[];
 }
 
+/** 每个块挂在哪一段任职下、来源经历自己的 org 是什么。渲染分组要这两样。 */
+export async function employmentByAtom(
+  atomIds: string[],
+): Promise<Map<string, { employment: LayoutEmployment | null; org: string | null }>> {
+  const out = new Map<string, { employment: LayoutEmployment | null; org: string | null }>();
+  if (atomIds.length === 0) return out;
+  const supabase = await createClient();
+  const [{ data: atoms }, { data: emps }] = await Promise.all([
+    supabase.from("atoms").select("id,org,employment_id").in("id", atomIds),
+    supabase.from("employments").select("id,org,title,period_start,period_end"),
+  ]);
+  const byId = new Map(
+    (emps ?? []).map((e) => [
+      e.id,
+      {
+        id: e.id,
+        org: e.org ?? "",
+        role: e.title ?? "",
+        period: period(e.period_start, e.period_end),
+      },
+    ]),
+  );
+  for (const a of atoms ?? []) {
+    out.set(a.id, {
+      employment: a.employment_id ? byId.get(a.employment_id) ?? null : null,
+      org: a.org,
+    });
+  }
+  return out;
+}
+
 /** 整份重跑门禁并落进 check_results。返回结果供调用方判断要不要拦。 */
 export async function rerunGate(
   baselineId: string,
@@ -57,6 +90,12 @@ export async function rerunGate(
 ): Promise<GateResult[]> {
   const input = await loadBaselineInput(targetId);
   if (!input) return [];
+  const supabase = await createClient();
+  const { data: baseline } = await supabase
+    .from("resume_baselines")
+    .select("headline")
+    .eq("id", baselineId)
+    .maybeSingle();
   const rows = await loadBlocks(baselineId);
   const blocks = rows.map(toGateBlock);
   const used = new Set(blocks.map((b) => b.atomId).filter((x): x is string => !!x));
@@ -74,6 +113,9 @@ export async function rerunGate(
       atomTitle: a.title,
       exclusiveGroup: a.exclusiveGroup,
     })),
+    // 定位段一起重查。这里是整份替换 check_results，漏掉它等于每改一次块
+    // 就把定位段的问题悄悄清一次。
+    baseline?.headline ?? "",
   );
   await replaceResumeChecks({ kind: "baseline", id: baselineId }, results);
   return results;
@@ -99,19 +141,28 @@ export async function refreshRenderedMd(baselineId: string): Promise<void> {
     return v && v.trim() !== "" ? v.trim() : null;
   };
 
+  // 渲染要按任职分组，所以得知道每个块挂在哪一段履历下。
+  const atomIds = rows.map((r) => r.atom_id).filter((x): x is string => !!x);
+  const employmentOf = await employmentByAtom(atomIds);
+
   const md = renderMarkdown({
     name: value("name") ?? "",
     contact: ["email", "phone", "location"]
       .map(value)
       .filter((s): s is string => !!s),
     headline: baseline?.headline ?? "",
-    blocks: rows.map((r) => ({
-      section: r.section ?? "",
-      title: r.title ?? "",
-      meta: r.meta ?? "",
-      summary: r.summary ?? "",
-      bullets: parseStringList(r.bullets as never),
-    })),
+    blocks: rows.map((r) => {
+      const e = r.atom_id ? employmentOf.get(r.atom_id) ?? null : null;
+      return {
+        section: r.section ?? "",
+        title: r.title ?? "",
+        meta: r.meta ?? "",
+        summary: r.summary ?? "",
+        bullets: parseStringList(r.bullets as never),
+        employment: e?.employment ?? null,
+        org: e?.employment?.org ?? e?.org ?? null,
+      };
+    }),
     skills: parseStringList((baseline?.skills ?? []) as never),
     // 手工改过一个块之后重渲，这两段也得跟着重来 —— 它们直接来自基本
     // 信息，中间不经过模型，漏掉的话导出的那份会缺教育背景。

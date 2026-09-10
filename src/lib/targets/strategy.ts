@@ -9,15 +9,22 @@
 // 两条都放这里，好让探针直接喂数据验证。
 // =============================================================
 
-import type { RenderWeight } from "@/types/database";
+import type { RenderWeight, StrategySource } from "@/types/database";
 
 // 默认值的唯一来源。数据库列上也有 default 'brief'，但读取时走的是
 // LEFT JOIN 的缺失分支，根本碰不到那个 default，所以这里必须自己定死。
 export const DEFAULT_RENDER_WEIGHT: RenderWeight = "brief";
 
-export const RENDER_WEIGHT_ORDER: RenderWeight[] = ["expand", "brief", "one_line", "omit"];
+export const RENDER_WEIGHT_ORDER: RenderWeight[] = [
+  "lead",
+  "expand",
+  "brief",
+  "one_line",
+  "omit",
+];
 
 export const RENDER_WEIGHT_LABEL: Record<RenderWeight, string> = {
+  lead: "主打",
   expand: "展开",
   brief: "简写",
   one_line: "一行",
@@ -31,6 +38,8 @@ export type Strategy = {
   renderWeight: RenderWeight;
   exclusiveGroup: string | null;
   configured: boolean;
+  /** 这一行是自动算的还是人改的。没有记录时按 auto 算 —— 它确实不是人定的。 */
+  source: StrategySource;
 };
 
 /** 库里真实存在的记录形状（读出来是什么就是什么）。 */
@@ -39,6 +48,7 @@ export type StrategyRow = {
   target_id: string;
   render_weight: RenderWeight;
   exclusive_group: string | null;
+  strategy_source?: StrategySource;
 };
 
 function key(atomId: string, targetId: string): string {
@@ -74,6 +84,7 @@ export function mergeStrategies(
         // 空串等于没分组。用户清空输入框时不该留下一个叫 "" 的组。
         exclusiveGroup: normalizeGroup(row?.exclusive_group ?? null),
         configured: row !== undefined,
+        source: row?.strategy_source ?? "auto",
       });
     }
   }
