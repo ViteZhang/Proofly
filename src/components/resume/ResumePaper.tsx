@@ -11,7 +11,10 @@
 import { useState } from "react";
 import { ProofDot } from "@/components/library/ProofDot";
 import { ProofBar } from "./ProofBar";
-import { groupBySection, type ProfileLine } from "@/lib/resume/markdown";
+import { type ProfileLine } from "@/lib/resume/markdown";
+import { employmentHeading, layoutFlat } from "@/lib/resume/layout";
+import { groupSkills } from "@/lib/skills/taxonomy";
+import type { LayoutEmployment } from "@/lib/resume/layout";
 import type { BaselineBlockView } from "@/lib/queries/resume";
 
 export function ResumePaper({
@@ -44,9 +47,12 @@ export function ResumePaper({
   /** 被差异改动过的块 id，详情页用它标出「这一版动过哪几块」。 */
   highlight?: Set<string>;
 }) {
-  // 同 section 的块渲染时排在一起，免得「工作经历」这个标题出现两次。
-  const ordered = groupBySection(blocks);
-  const shown = reveal === undefined ? ordered.length : reveal;
+  // 排版与导出走同一个 layoutFlat：同 section 的块排在一起，同一段任职的
+  // 块收拢到一个雇主标题下。摊平而不是分组，是因为每一块仍然要能单独
+  // 选中和拖拽。
+  const rows = layoutFlat(blocks);
+  const shown = reveal === undefined ? rows.length : reveal;
+  const skillGroups = groupSkills(skills);
 
   return (
     <article
@@ -61,22 +67,25 @@ export function ResumePaper({
       }}
     >
       <ProofBar
-        blocks={ordered.map((b) => ({
-          evidenceLevel: b.evidenceLevel,
-          weight: 1 + b.bullets.length + (b.summary ? 1 : 0),
+        blocks={rows.map((r) => ({
+          evidenceLevel: r.source.evidenceLevel,
+          weight: 1 + r.source.bullets.length + (r.source.summary ? 1 : 0),
         }))}
       />
 
       {headline && <p className="mt-5 text-[13.5px] leading-relaxed">{headline}</p>}
 
-      {ordered.slice(0, shown).map((b, i) => (
+      {rows.slice(0, shown).map((row, i) => (
         <BlockRow
-          key={b.id}
-          block={b}
+          key={row.source.id}
+          block={row.source}
+          title={row.title}
+          meta={row.meta}
+          employmentHead={row.employmentHead}
           first={i === 0}
-          newSection={i === 0 || ordered[i - 1].section !== b.section}
-          selected={b.id === selectedId}
-          changed={highlight?.has(b.id) ?? false}
+          newSection={row.newSection}
+          selected={row.source.id === selectedId}
+          changed={highlight?.has(row.source.id) ?? false}
           draggable={draggable}
           onSelect={onSelect}
           onMenu={onMenu}
@@ -86,16 +95,24 @@ export function ResumePaper({
 
       {/* 顺序与导出一致：教育背景 → 技能 → 证书。屏幕上和导出的必须是
           同一份东西，不然用户会在两个界面之间做换算。 */}
-      {shown >= ordered.length && <Lines title="教育背景" lines={educations} />}
+      {shown >= rows.length && <Lines title="教育背景" lines={educations} />}
 
-      {skills.length > 0 && shown >= ordered.length && (
+      {skillGroups.length > 0 && shown >= rows.length && (
         <section className="mt-7">
           <SectionTitle>技能</SectionTitle>
-          <p className="text-[13px] leading-relaxed">{skills.join("、")}</p>
+          <ul className="space-y-1">
+            {skillGroups.map((g) => (
+              <li key={g.category} className="text-[13px] leading-relaxed">
+                <span style={{ color: "var(--mute)" }}>{g.category}</span>
+                <span style={{ color: "var(--ghost)" }}>　</span>
+                {g.items.join(" · ")}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
-      {shown >= ordered.length && <Lines title="证书与语言" lines={credentials} />}
+      {shown >= rows.length && <Lines title="证书与语言" lines={credentials} />}
     </article>
   );
 }
@@ -138,6 +155,9 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 function BlockRow({
   block,
+  title,
+  meta,
+  employmentHead,
   first,
   newSection,
   selected,
@@ -148,6 +168,12 @@ function BlockRow({
   onDrop,
 }: {
   block: BaselineBlockView;
+  /** 剥掉重复公司名之后的标题。空串表示它已经并进雇主行。 */
+  title: string;
+  /** 挂了履历的块不在这里印时间 —— 雇主行上已经有了。 */
+  meta: string;
+  /** 非 null 表示这一块前面要先印一行雇主标题。 */
+  employmentHead: LayoutEmployment | null;
   first: boolean;
   newSection: boolean;
   selected: boolean;
@@ -171,6 +197,11 @@ function BlockRow({
       {newSection && (
         <div className={first ? "mt-5" : "mt-7"}>
           <SectionTitle>{block.section}</SectionTitle>
+        </div>
+      )}
+      {employmentHead && (
+        <div className={newSection ? "mt-1" : "mt-6"}>
+          <p className="text-[14px] font-medium">{employmentHeading(employmentHead)}</p>
         </div>
       )}
       <div
@@ -206,12 +237,20 @@ function BlockRow({
         aria-label={`简历块 ${block.title}`}
         // 体检页跳过来时要能滚到这一块
         data-block-id={block.id}
-        className={`${newSection ? "" : "mt-5"} cursor-pointer border-l-[3px] pl-3 transition-colors`}
+        className={`${newSection || employmentHead ? "mt-2" : "mt-5"} cursor-pointer border-l-[3px] pl-3 transition-colors`}
         style={{ borderColor: border, marginLeft: -15 }}
       >
+        {/* 标题与时间那一行。单项目雇主的标题已经并进雇主行，两边都空时
+            整行不占位 —— 只剩一个孤零零的证明度圆点，看着像渲染坏了。
+            那种情况下圆点挪到第一条 bullet 前面，信息一点没少。 */}
+        {(title !== "" || meta !== "" || block.edited || changed) && (
         <div className="flex items-baseline gap-2">
           <ProofDot level={block.evidenceLevel} size={9} className="translate-y-[1px]" />
-          <span className="text-[14px] font-medium">{block.title}</span>
+          {title !== "" && (
+            <span className={employmentHead || meta === "" ? "text-[13.5px] font-medium" : "text-[14px] font-medium"}>
+              {title}
+            </span>
+          )}
           {block.edited && (
             <span className="text-[11px]" style={{ color: "var(--ai)" }}>
               手工改过
@@ -223,9 +262,10 @@ function BlockRow({
             </span>
           )}
           <span className="ml-auto text-[12px]" style={{ color: "var(--mute)" }}>
-            {block.meta}
+            {meta}
           </span>
         </div>
+        )}
         {block.summary && (
           <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--slate)" }}>
             {block.summary}
@@ -234,8 +274,12 @@ function BlockRow({
         {block.bullets.length > 0 && (
           <ul className="mt-1.5 space-y-1">
             {block.bullets.map((line, j) => (
-              <li key={j} className="flex gap-2 text-[13px] leading-relaxed">
-                <span style={{ color: "var(--ghost)" }}>·</span>
+              <li key={j} className="flex items-baseline gap-2 text-[13px] leading-relaxed">
+                {j === 0 && title === "" && meta === "" ? (
+                  <ProofDot level={block.evidenceLevel} size={9} className="translate-y-[1px]" />
+                ) : (
+                  <span style={{ color: "var(--ghost)" }}>·</span>
+                )}
                 <span>{line}</span>
               </li>
             ))}

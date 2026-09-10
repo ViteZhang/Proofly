@@ -22,6 +22,8 @@ import { listResumeChecks, type CheckRow } from "@/lib/resume/check-results";
 import { applyDeltas, parseDeltas, type DeltaType } from "@/lib/resume/delta";
 import { locateRef } from "@/lib/resume/unused";
 import { detectSignals, WINDOW, type Signal } from "@/lib/resume/evolution";
+import { period } from "@/lib/profile/labels";
+import type { LayoutEmployment } from "@/lib/resume/layout";
 import type { GateAtom, GateFact } from "@/lib/resume/gate";
 import type { SelectableAtom, SelectableSkill, Tradeoff } from "@/lib/resume/select";
 import type {
@@ -31,6 +33,7 @@ import type {
   EvidenceLevel,
   Json,
   RenderWeight,
+  StrategySource,
 } from "@/types/database";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -42,11 +45,15 @@ export type ResumeAtom = GateAtom & {
   status: AtomStatus;
   parentId: string | null;
   renderWeight: RenderWeight;
+  /** 这一档是自动算的还是人改的。界面上要说清楚，用户才知道能不能动。 */
+  strategySource: StrategySource;
   exclusiveGroup: string | null;
   sortOrder: number;
   skills: string[];
   /** 挂在哪段任职履历下。简历里这一块的公司与起止时间取自那段，不取自本条。 */
   employmentId: string | null;
+  /** 渲染分组要的那段任职。没挂履历就是 null。 */
+  employment: LayoutEmployment | null;
 };
 
 export type BaselineInput = {
@@ -57,6 +64,8 @@ export type BaselineInput = {
   facts: GateFact[];
   /** 这个方向下所有 JD 的要求原文，用于关键词对齐与技能排序。 */
   rawPhrases: string[];
+  /** 这个方向下有没有任何一行策略记录。全空表示产品还没替他分配过。 */
+  hasStrategy: boolean;
 };
 
 export function toSelectable(a: ResumeAtom): SelectableAtom {
@@ -94,7 +103,7 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
         .order("created_at", { ascending: true }),
       supabase
         .from("atom_target_strategy")
-        .select("atom_id,target_id,render_weight,exclusive_group")
+        .select("atom_id,target_id,render_weight,exclusive_group,strategy_source")
         .eq("target_id", targetId),
       supabase
         .from("metrics")
@@ -146,6 +155,20 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
     ]),
   );
 
+  // 分组渲染要的是拆开的三段，不是拼好的那一行 —— 雇主标题、职位、起止
+  // 在版面上各占各的位置。
+  const employmentById = new Map<string, LayoutEmployment>(
+    (empRes.data ?? []).map((e) => [
+      e.id,
+      {
+        id: e.id,
+        org: e.org ?? "",
+        role: e.title ?? "",
+        period: period(e.period_start, e.period_end),
+      },
+    ]),
+  );
+
   const skillsByAtom = new Map<string, string[]>();
   for (const l of linkRes.data ?? []) {
     const label = (l.skills as { label: string } | null)?.label;
@@ -188,6 +211,7 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
       periodStart: a.period_start,
       periodEnd: a.period_end,
       employmentMeta: a.employment_id ? employmentLineById.get(a.employment_id) ?? null : null,
+      employment: a.employment_id ? employmentById.get(a.employment_id) ?? null : null,
       mustSay: parseStringList(g?.must_say),
       neverSay: parseStringList(g?.never_say),
       roleFraming: g?.role_framing ?? null,
@@ -196,6 +220,7 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
       status: a.status,
       parentId: a.parent_id,
       renderWeight: s?.renderWeight ?? "brief",
+      strategySource: s?.source ?? "auto",
       exclusiveGroup: s?.exclusiveGroup ?? null,
       sortOrder: a.sort_order ?? 0,
       skills: skillsByAtom.get(a.id) ?? [],
@@ -240,10 +265,35 @@ export async function loadBaselineInput(targetId: string): Promise<BaselineInput
       status: f.status,
     })),
     rawPhrases,
+    hasStrategy: (strategyRes.data ?? []).length > 0,
   };
 }
 
 // ---- 基线读取 ----
+
+/**
+ * 任职履历,按 id 索引。
+ *
+ * 渲染分组要它,门禁的数字白名单也要它。读一次共用,避免同一份数据在一次
+ * 请求里被两处各查一遍 —— 两次查询之间履历被改了,分组和白名单就会对不上。
+ */
+async function loadEmploymentMap(): Promise<Map<string, LayoutEmployment>> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("employments")
+    .select("id,org,title,period_start,period_end");
+  return new Map(
+    (data ?? []).map((e) => [
+      e.id,
+      {
+        id: e.id,
+        org: e.org ?? "",
+        role: e.title ?? "",
+        period: period(e.period_start, e.period_end),
+      },
+    ]),
+  );
+}
 
 
 export type BaselineBlockView = {
@@ -261,6 +311,10 @@ export type BaselineBlockView = {
   mustSayCovered: string[];
   edited: boolean;
   orderIndex: number;
+  /** 渲染时按它分组。个人项目是 null。 */
+  employment: LayoutEmployment | null;
+  /** 剥离标题里重复公司名用的。 */
+  org: string | null;
 };
 
 export type BaselineView = {
@@ -392,22 +446,30 @@ export async function getBaseline(targetId: string): Promise<BaselineView | null
     .maybeSingle();
   if (!baseline) return null;
 
-  const [{ data: rows }, { data: versions }, checks, why, profileSections] = await Promise.all([
+  const [{ data: rows }, { data: versions }, checks, why, profileSections, employments] =
+    await Promise.all([
     supabase
       .from("resume_blocks")
       .select(
-        "id,atom_id,section,title,meta,summary,bullets,template_used,must_say_covered,edited,order_index,atoms(title,evidence_level)",
+        "id,atom_id,section,title,meta,summary,bullets,template_used,must_say_covered,edited,order_index,atoms(title,evidence_level,org,employment_id)",
       )
       .eq("baseline_id", baseline.id)
       .order("order_index", { ascending: true }),
     supabase.from("resume_versions").select("id,submitted_at").eq("baseline_id", baseline.id),
     listResumeChecks({ kind: "baseline", id: baseline.id }),
-    whySelected(targetId),
-    loadProfileSections(),
-  ]);
+      whySelected(targetId),
+      loadProfileSections(),
+      loadEmploymentMap(),
+    ]);
 
   const blocks: BaselineBlockView[] = (rows ?? []).map((r) => {
-    const atom = r.atoms as { title: string; evidence_level: EvidenceLevel } | null;
+    const atom = r.atoms as {
+      title: string;
+      evidence_level: EvidenceLevel;
+      org: string | null;
+      employment_id: string | null;
+    } | null;
+    const employment = atom?.employment_id ? employments.get(atom.employment_id) ?? null : null;
     const template = (r.template_used ?? "absent") as EvidenceLevel;
     return {
       id: r.id,
@@ -423,6 +485,8 @@ export async function getBaseline(targetId: string): Promise<BaselineView | null
       mustSayCovered: parseStringList(r.must_say_covered),
       edited: r.edited,
       orderIndex: r.order_index ?? 0,
+      employment,
+      org: employment?.org ?? atom?.org ?? null,
     };
   });
 
@@ -724,14 +788,23 @@ export async function getVersion(versionId: string): Promise<VersionDetail | nul
     const { data: frozen } = await supabase
       .from("resume_blocks")
       .select(
-        "id,atom_id,section,title,meta,summary,bullets,template_used,edited,order_index,atoms(title,evidence_level)",
+        "id,atom_id,section,title,meta,summary,bullets,template_used,edited,order_index,atoms(title,evidence_level,org,employment_id)",
       )
       .eq("resume_version_id", v.id)
       .order("order_index", { ascending: true });
     if (frozen && frozen.length > 0) {
+      const employments = await loadEmploymentMap();
       headline = v.headline ?? applied.headline;
       blocks = frozen.map((r) => {
-        const atom = r.atoms as { title: string; evidence_level: EvidenceLevel } | null;
+        const atom = r.atoms as {
+          title: string;
+          evidence_level: EvidenceLevel;
+          org: string | null;
+          employment_id: string | null;
+        } | null;
+        const employment = atom?.employment_id
+          ? employments.get(atom.employment_id) ?? null
+          : null;
         const template = (r.template_used ?? "absent") as EvidenceLevel;
         return {
           id: r.id,
@@ -747,6 +820,8 @@ export async function getVersion(versionId: string): Promise<VersionDetail | nul
           mustSayCovered: [],
           edited: r.edited,
           orderIndex: r.order_index ?? 0,
+          employment,
+          org: employment?.org ?? atom?.org ?? null,
         };
       });
     }

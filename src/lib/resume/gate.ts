@@ -380,18 +380,216 @@ export function checkResume(
   return out;
 }
 
-/** 一次跑完：逐块 + 整份。 */
+// ---- 个人定位段 ----
+
+/**
+ * 定位段字数区间。低于下限说明它没说什么，高于上限说明它在讲故事。
+ * 与提示词里写的一致；提示词管「请这么写」，这里管「没这么写会被看见」。
+ */
+export const HEADLINE_MIN = 80;
+export const HEADLINE_MAX = 140;
+
+/** 年份与日期。定位段里的 2026 是时间，不是业绩。 */
+const YEAR_LIKE =
+  /(19|20)\d{2}\s*[年./\-–—]\s*(\d{1,2}\s*[月./\-–—]?\s*(\d{1,2}\s*日?)?)?|(19|20)\d{2}(?=\s*[年）)])/g;
+
+const CN_DIGIT: Record<string, number> = {
+  零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5,
+  六: 6, 七: 7, 八: 8, 九: 9,
+};
+const CN_UNIT: Record<string, number> = { 十: 10, 百: 100, 千: 1000 };
+
+/**
+ * 「十年」「三十五」这类写法换成数字。
+ *
+ * 只处理万以下的常见写法 —— 定位段里出现的中文数字基本只有年限和倍数。
+ * 认不出来的原样留着，它会被当成普通文字，不会被误判成编造的数字。
+ */
+export function cnNumeralsToArabic(text: string): string {
+  return text.replace(/[零一二两三四五六七八九十百千]+/g, (run) => {
+    let total = 0;
+    let section = 0;
+    let seen = false;
+    for (const ch of run) {
+      if (ch in CN_DIGIT) {
+        section = CN_DIGIT[ch];
+        seen = true;
+      } else if (ch in CN_UNIT) {
+        // 「十年」的十前面没有数字，按 1 算。
+        total += (section === 0 ? 1 : section) * CN_UNIT[ch];
+        section = 0;
+        seen = true;
+      }
+    }
+    total += section;
+    return seen ? String(total) : run;
+  });
+}
+
+/**
+ * 定位段里有没有出现任何实测数值。
+ *
+ * 只认阿拉伯数字，而且要先把年份、日期和「从 0 到 1」剔掉 —— 它们是时间
+ * 与行话，不是业绩。中文数字同样不算：写「十年经验」的人是在说资历，
+ * 写「32.2%」的人才是在给证据。这一条警告问的正是后一件事。
+ *
+ * 自己起一个不带 g 的正则：NUMBER_TOKEN 是全局的，用 test 会带着 lastIndex
+ * 跑，同一段文字连问两次能得到两个答案。
+ */
+export function hasAnyNumber(headline: string): boolean {
+  return /\d/.test(stripNonEvidenceNumbers(headline));
+}
+
+/** 把年份、日期、千分位和「从 0 到 1」剔掉，剩下的数字才是要核对的。 */
+function stripNonEvidenceNumbers(text: string): string {
+  return text.replace(/,/g, "").replace(YEAR_LIKE, " ").replace(ZERO_TO_ONE, " ");
+}
+
+/**
+ * 定位段里「<中文数字>年」的年限写法。「十年产品经验」要核对，
+ *「近三年专注 AI」不核对 —— 那说的是一个相对区间，不是从业年限。
+ * 前面那组字就是相对区间的标记词。
+ */
+const CN_YEARS = /(?<![近最过未这前第头])([零一二两三四五六七八九十百]+)\s*年/g;
+
+/**
+ * 个人定位段的检查。
+ *
+ * 它原来一个字都没被查过 —— checkAll 只遍历 blocks，而定位段不在 blocks 里。
+ * 全篇唯一没有来源经历的那段文字，也是全篇唯一不受任何约束的文字，而它是
+ * 对面第一眼看的那一段。
+ *
+ * 白名单是「这一版选中的所有经历 + 基本信息」的并集：定位段本来就是跨经历
+ * 概括的，按单条经历查它必然全是误报。
+ */
+export function checkHeadline(
+  headline: string | null,
+  atoms: GateAtom[],
+  facts: GateFact[],
+): GateResult[] {
+  const out: GateResult[] = [];
+  const text = (headline ?? "").trim();
+
+  if (text === "") {
+    out.push({
+      code: "G3",
+      level: "warning",
+      message: "个人定位段是空的",
+      detail: "对面第一眼看的就是这一段。空着等于把开场白让出去。",
+    });
+    return out;
+  }
+
+  // G2 —— 护栏禁词是逐条经历定的，但定位段跨经历，所以取并集。
+  for (const a of atoms) {
+    for (const word of a.neverSay) {
+      const w = word.trim();
+      if (w === "" || !text.includes(w)) continue;
+      out.push({
+        code: "G2",
+        level: "blocking",
+        message: `个人定位段触发护栏禁词「${w}」`,
+        detail: `经历「${a.title}」的 never_say 里有「${w}」。`,
+      });
+    }
+  }
+
+  // G4 —— 事实层有冲突时，定位段里那句「10 年经验」不知道该信哪一个。
+  for (const f of facts) {
+    if (f.status !== "BLOCKING") continue;
+    out.push({
+      code: "G4",
+      level: "warning",
+      message: `个人定位段可能用到了还没定下来的「${isFactKey(f.key) ? FACT_LABEL[f.key] : f.key}」`,
+      detail: "这一项被标成冲突。定位段是对面第一眼看的，先去基本信息把它定死。",
+    });
+  }
+
+  // G3 —— 每个数值都要有出处。出处可以是任何一条选中的经历，也可以是基本信息。
+  //
+  // 只查阿拉伯数字。中文数字在这一段里几乎全是修辞 ——「近三年」「从零到一」
+  // 「十年产品经验」，它们查不到出处是正常的，拦下来只会让每一份诚实的
+  // 定位段都过不了门禁。真要编一个业绩数字的人写的是「32.2%」，不是
+  //「百分之三十二点二」。
+  const known = knownNumbers(
+    [
+      ...atoms.map(atomText),
+      ...facts.map((f) => f.value ?? ""),
+    ].join("\n"),
+  );
+  const scanned = stripNonEvidenceNumbers(text);
+  const unknown: string[] = [];
+  for (const raw of scanned.matchAll(NUMBER_TOKEN)) {
+    if (!hasSource(raw[0], known)) unknown.push(raw[0]);
+  }
+
+  // 中文数字唯一要查的一处：年限。「十五年经验」而档案里写着 10 年，
+  // 这不是修辞，是简历上最容易被当场核算的那一项。
+  const years = facts.find((f) => f.key === "years_of_experience")?.value ?? "";
+  const statedYears = knownNumbers(years);
+  if (statedYears.size > 0) {
+    for (const m of text.matchAll(CN_YEARS)) {
+      const n = cnNumeralsToArabic(m[1]);
+      if (/^\d+$/.test(n) && !statedYears.has(String(Number(n)))) unknown.push(n);
+    }
+  }
+
+  const missing = [...new Set(unknown)];
+  if (missing.length > 0) {
+    out.push({
+      code: "G3",
+      level: "blocking",
+      message: `个人定位段出现了查不到出处的数字：${missing.join("、")}`,
+      detail:
+        "这一段可以引用任何一条选中经历的指标，也可以引用基本信息里的年限。这几个数两边都找不到。",
+    });
+  }
+
+  // 强度侧的两条，都只发提示。定位段短、没数字，都不是错，是弱。
+  if (text.length < HEADLINE_MIN) {
+    out.push({
+      code: "G1",
+      level: "warning",
+      message: `个人定位段偏短（${text.length} 字）`,
+      detail: `${HEADLINE_MIN}–${HEADLINE_MAX} 字是能把「做什么的、凭什么、要去哪」讲完的长度。现在少了${HEADLINE_MIN - text.length}字。`,
+    });
+  } else if (text.length > HEADLINE_MAX) {
+    out.push({
+      code: "G1",
+      level: "warning",
+      message: `个人定位段偏长（${text.length} 字）`,
+      detail: `超过 ${HEADLINE_MAX} 字之后，对面在读的就不是定位而是故事了。`,
+    });
+  }
+
+  if (!hasAnyNumber(text)) {
+    out.push({
+      code: "G3",
+      level: "warning",
+      message: "个人定位段没有用到任何实测数据",
+      detail:
+        "库里的指标都是你自己记下来的，定位段是它们最该出现的地方。一段全是形容词的开场白，对面读完不知道你证明过什么。",
+    });
+  }
+
+  return out;
+}
+
+/** 一次跑完：逐块 + 整份 + 个人定位段。 */
 export function checkAll(
   blocks: GateBlock[],
   atoms: GateAtom[],
   facts: GateFact[],
   skills: GateSkill[],
   groups: GateGroupRef[] = [],
+  headline: string | null = null,
 ): GateResult[] {
   const byId = new Map(atoms.map((a) => [a.id, a]));
   const out: GateResult[] = [];
   for (const b of blocks) out.push(...checkBlock(b, b.atomId ? byId.get(b.atomId) ?? null : null));
   out.push(...checkResume(blocks, facts, skills, groups));
+  // headline 传 null 表示这次调用不管定位段（例如只重查某几个块）。
+  if (headline !== null) out.push(...checkHeadline(headline, atoms, facts));
   return out;
 }
 

@@ -49,7 +49,7 @@ function s(
   renderWeight: Strategy["renderWeight"],
   exclusiveGroup: string | null,
 ): Strategy {
-  return { atomId, targetId, renderWeight, exclusiveGroup, configured: true };
+  return { atomId, targetId, renderWeight, exclusiveGroup, configured: true, source: "manual" };
 }
 
 console.log("\n验收 7、8 · 懒加载与默认值");

@@ -35,6 +35,7 @@ import {
   reorderBlocks,
   unlockBaseline,
 } from "@/app/app/resume/block-actions";
+import { initStrategyForTarget } from "@/app/app/targets/strategy-actions";
 import type { GateResult } from "@/lib/resume/gate";
 import type { BaselineView } from "@/lib/queries/resume";
 
@@ -68,6 +69,8 @@ export function BaselineWorkbench({
   const [selectedId, setSelectedId] = useState<string | null>(wanted);
   const [menu, setMenu] = useState<{ blockId: string; x: number; y: number } | null>(null);
   const [confirm, setConfirm] = useState<"lock" | "unlock" | null>(null);
+  const [plan, setPlan] = useState<SelectionPreview | null>(null);
+  const [recomputing, setRecomputing] = useState(false);
   const [, start] = useTransition();
 
   const blocks = baseline?.blocks ?? [];
@@ -125,6 +128,31 @@ export function BaselineWorkbench({
       alive = false;
     };
   }, [targetId, phase]);
+
+  // 选材预览不调模型，是瞬时的，所以进页面就先取一次：用户得在按下生成
+  // 之前就知道这一版会有多长、展开程度是谁定的。
+  useEffect(() => {
+    let alive = true;
+    prepareBaseline(targetId).then((r) => {
+      if (alive && r.ok) setPlan(r.data);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [targetId, baseline?.generatedAt]);
+
+  async function recompute() {
+    setRecomputing(true);
+    const r = await initStrategyForTarget(targetId);
+    setRecomputing(false);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    const p = await prepareBaseline(targetId);
+    if (p.ok) setPlan(p.data);
+    router.refresh();
+  }
 
   function run() {
     setError(null);
@@ -345,6 +373,15 @@ export function BaselineWorkbench({
         </div>
       )}
 
+      {plan && !locked && (
+        <StrategyBanner
+          plan={plan}
+          targetId={targetId}
+          busy={recomputing || busy}
+          onRecompute={recompute}
+        />
+      )}
+
       {busy && <Progress phase={phase} preview={preview} />}
 
       {phase === "blocked" && <Blocked results={blocked} onRetry={run} />}
@@ -421,6 +458,65 @@ export function BaselineWorkbench({
           onConfirm={toggleLock}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * 展开程度是谁定的、这一版会有多长。
+ *
+ * 原来这件事只有一个「简写」小标签，没有任何一处说明「这个方向下十条经历
+ * 全是自动分配的」。用户因此不知道有这个开关，也就永远不会去动它 ——
+ * 而它正是那份「每条只有两行」的简历的成因。
+ */
+function StrategyBanner({
+  plan,
+  targetId,
+  busy,
+  onRecompute,
+}: {
+  plan: SelectionPreview;
+  targetId: string;
+  busy: boolean;
+  onRecompute: () => void;
+}) {
+  if (plan.atoms.length === 0) return null;
+  const auto = plan.autoCount;
+  const over = plan.plannedLines > plan.budget;
+
+  return (
+    <div
+      className="mt-3 flex max-w-[720px] flex-wrap items-center gap-x-3 gap-y-2 rounded-card px-4 py-3 text-[12.5px]"
+      style={{ background: "var(--card)", border: "1px solid var(--line)" }}
+    >
+      <span style={{ color: "var(--slate)" }}>
+        {auto === 0 ? (
+          <>这个方向的 {plan.atoms.length} 条经历，展开程度都是你自己定的。</>
+        ) : (
+          <>
+            这个方向的 {plan.atoms.length} 条经历里，{auto} 条用的是
+            <b className="font-semibold">自动分配</b>的展开程度
+            {auto < plan.atoms.length ? <>，其余 {plan.atoms.length - auto} 条是你改过的</> : null}。
+          </>
+        )}
+      </span>
+      <span style={{ color: "var(--mute)" }}>
+        预计 {plan.plannedLines} 行正文{over ? `（预算 ${plan.budget} 行）` : " · 约两页"}
+      </span>
+      <span className="ml-auto flex items-center gap-3">
+        <Link href={`/app/targets/strategy?target=${targetId}`} className="underline underline-offset-2">
+          去配策略
+        </Link>
+        <button
+          type="button"
+          onClick={onRecompute}
+          disabled={busy}
+          className="underline underline-offset-2 disabled:opacity-50"
+          style={{ color: "var(--slate)" }}
+        >
+          {busy ? "重算中…" : "按最新评估重算"}
+        </button>
+      </span>
     </div>
   );
 }

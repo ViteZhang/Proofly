@@ -44,6 +44,7 @@ import { refExists, unusedContent, containment, type SourceAtom } from "@/lib/re
 import { checkBlock, hasBlocking, type GateAtom, type GateBlock } from "@/lib/resume/gate";
 import { parseResults } from "@/lib/scoring/parse";
 import { renderMarkdown } from "@/lib/resume/markdown";
+import { employmentByAtom } from "@/lib/resume/persist";
 import type { EvidenceLevel, Json } from "@/types/database";
 
 function refresh() {
@@ -588,11 +589,24 @@ export async function submitVersion(versionId: string): Promise<ActionResult<nul
     return s && s.trim() !== "" ? s.trim() : null;
   };
 
+  // 冻结这一份时也按任职分组，跟屏幕上看到的一致。
+  const employmentOf = await employmentByAtom(
+    (rows ?? []).map((r) => r.atom_id).filter((x): x is string => !!x),
+  );
+
   const md = renderMarkdown({
     name: value("name") ?? "",
     contact: ["email", "phone", "location"].map(value).filter((s): s is string => !!s),
     headline: applied.headline,
-    blocks: applied.blocks,
+    blocks: applied.blocks.map((b) => {
+      const atomId = byId.get(b.id)?.atom_id ?? null;
+      const e = atomId ? employmentOf.get(atomId) ?? null : null;
+      return {
+        ...b,
+        employment: e?.employment ?? null,
+        org: e?.employment?.org ?? e?.org ?? null,
+      };
+    }),
     skills: parseStringList(baseline.skills),
     educations: profile.educations,
     credentials: profile.credentials,
